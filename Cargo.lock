@@ -10466,8 +10466,10 @@ name = "markdown_editor"
 version = "0.1.0"
 dependencies = [
  "assets",
+ "editor",
  "gpui",
  "gpui_platform",
+ "language",
  "settings",
  "theme",
  "theme_settings",

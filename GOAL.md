@@ -87,6 +87,26 @@
 
 后续方向：在这个新入口上逐步接入 Zed 的 editor、tabs、文件打开保存、Command Palette 和 Markdown preview。
 
+### 阶段 2 - 可编辑 Markdown 文档区域
+
+目标：把 Markdown-only 窗口从静态骨架推进到可输入的 Markdown 文档编辑界面。
+
+范围：
+
+- 在 `crates/markdown_editor` 中接入 Zed 的 `editor` / `language` / `multi_buffer` 等必要 crate。
+- 启动后创建一个空的 Markdown 文档 buffer，并在窗口中渲染可输入的编辑器。
+- 优先复用 Zed editor 的现有行为、主题和输入处理。
+- 暂不做多 tab、打开文件、保存文件、Command Palette 或 Markdown preview。
+- 不引入 Project Panel、Agent、Terminal、Git、Debugger 等 IDE 型入口。
+
+验收标准：
+
+- `cargo check -p markdown_editor` 通过。
+- 用户可以运行当前入口，并在窗口中看到可聚焦、可输入的 Markdown 编辑区域。
+- 新入口仍然不暴露当前阶段不需要的 IDE 功能。
+
+后续方向：在可编辑文档区域稳定后，再接入打开/保存文件、多 tab、Command Palette 和 Markdown preview。
+
 ## 运行方式
 
 当前 Markdown-only 入口位于 `crates/markdown_editor`。
@@ -115,6 +135,13 @@ cargo run -p markdown_editor --bin markdown-editor
 - 完成情况：已新增 `crates/markdown_editor`，并接入 `gpui`、`assets`、`settings`、`theme` 和 `ui` 的最小初始化链路。
 - 验收结果：`cargo check -p markdown_editor` 通过；用户已本地运行 `cargo run -p markdown_editor --bin markdown-editor` 并成功打开 Markdown-only 窗口骨架。
 - 对后续目标的影响：阶段 1 已完成。下一阶段可以在这个入口上接入 Zed 的 editor，使窗口从静态骨架变成可编辑的 Markdown 文档界面。
+
+### 2026-05-20 - 阶段 2：可编辑 Markdown 文档区域
+
+- 对应目标：把 Markdown-only 窗口从静态骨架推进到可输入的 Markdown 文档编辑界面。
+- 完成情况：已在 `crates/markdown_editor` 中接入 `editor`，并将窗口内容切换为可聚焦的编辑器实体；随后根据用户反馈改为允许默认 keymap 部分加载，以便在新入口里仍然复用 Zed 的 editor 快捷键，而不会因为缺少 workspace/git/agent 等无关 action 而整包失败。
+- 验收结果：`cargo check -p markdown_editor` 通过；用户已本地运行验证，可以输入并使用 `Enter` 正常换行。
+- 对后续目标的影响：阶段 2 已完成。下一阶段可以继续接入打开/保存文件、多 tab、Command Palette 和 Markdown preview。
 
 记录格式：
 
