@@ -156,6 +156,40 @@
 
 后续方向：单文档外壳稳定后，再接入多 tab、Command Palette 和 Markdown preview。
 
+### 阶段 5 - Markdown 工作台成型
+
+目标：把当前单文档编辑器推进成一个可以日常使用的 Markdown 工作台，用户可以完全通过界面完成打开、切换、编辑、保存、预览和常用命令操作，而不是只靠命令行和单窗口编辑。
+
+范围：
+
+- 提供 GUI 打开文件入口，用户可以从应用内选择 `.md` / `.markdown` 文件。
+- 支持 `Ctrl+O` 打开 Markdown 文件。
+- 支持从 GUI 新建空 Markdown 文档。
+- 支持同时打开多个 Markdown 文档，并以标签页形式显示。
+- 支持点击标签页切换当前活动文档。
+- 支持关闭标签页，关闭当前活动文档后切换到相邻文档。
+- 标签页显示文件名，并用保存状态区分已保存和未保存文档。
+- 当前文档栏、保存状态和 `Ctrl+S` 必须跟随活动标签页切换。
+- 提供 Markdown preview，允许在编辑与预览之间切换，并让预览跟随当前活动文档实时更新。
+- 保留 Command Palette，并把打开文件、新建文档、保存、切换预览、切换标签页、打开设置文件等常用动作放进去。
+- 保留常见文档编辑能力的入口，包括撤销、重做、查找、复制、粘贴、另存为。
+- 优先复用或仿照 Zed 已有的打开文件、tab、pane/item、preview、command palette、dirty-state 和 UI 逻辑；如果当前阶段不能直接引入 workspace/pane，需要在实现记录里说明原因，并尽量保持结构可迁移。
+- 不暴露 Project Panel、文件树、workspace 文件夹打开、Git、Terminal、Agent、Debugger、扩展管理等 IDE 型入口。
+
+验收标准：
+
+- `cargo check -p markdown_editor` 通过。
+- 用户可以启动应用后，通过 GUI 选择并打开 Markdown 文件。
+- 用户可以打开至少两个 Markdown 文件，并通过标签页切换。
+- 用户可以新建空 Markdown 文档。
+- 用户可以关闭标签页。
+- 用户可以打开和关闭 Markdown preview，并且预览会跟随当前活动文档更新。
+- 用户可以通过 Command Palette 执行常用文档命令。
+- 编辑任意标签后，该标签和文档栏能反映未保存状态；保存后恢复已保存状态。
+- 新入口仍然不暴露当前阶段不需要的 IDE 功能。
+
+后续方向：工作台成型后，再考虑把内部实现进一步收敛到更接近 Zed 的文档/标签/面板模型，或者做更深的底层瘦身。
+
 ## 运行方式
 
 当前 Markdown-only 入口位于 `crates/markdown_editor`。
