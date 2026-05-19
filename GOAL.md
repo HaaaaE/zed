@@ -66,16 +66,63 @@
 
 等这个入口跑通后，再看底层是否需要进一步瘦身。裁剪不是起点，而是后面基于新入口再做的收敛动作。
 
+## 阶段计划
+
+### 阶段 1 - Markdown-only 入口骨架
+
+目标：建立新的 Markdown-only crate 和入口骨架，得到一个可以独立编译、独立启动的最小应用入口。
+
+范围：
+
+- 新增 `crates/markdown_editor`，作为 Markdown 编辑器的新产品入口。
+- 入口优先复用 Zed 的 GPUI、assets、settings、theme、ui 等基础设施。
+- 第一版先打开一个 Markdown-only 窗口骨架，不急于接入完整 workspace/editor/preview。
+- 不调用现有 `zed::initialize_workspace`，因为它会自动挂 Agent、Project Panel、Git、终端、状态栏等 IDE 型入口。
+
+验收标准：
+
+- `markdown_editor` crate 可以独立 `cargo check`。
+- 用户可以运行当前入口并看到 Markdown-only 窗口骨架。
+- 入口代码不暴露当前阶段不需要的 IDE 功能。
+
+后续方向：在这个新入口上逐步接入 Zed 的 editor、tabs、文件打开保存、Command Palette 和 Markdown preview。
+
+## 运行方式
+
+当前 Markdown-only 入口位于 `crates/markdown_editor`。
+
+验证编译：
+
+```powershell
+cargo check -p markdown_editor
+```
+
+启动当前入口：
+
+```powershell
+cargo run -p markdown_editor --bin markdown-editor
+```
+
+当前 crate 显式声明了 binary 名称为 `markdown-editor`，所以运行时需要带 `--bin markdown-editor`。如果后续删除 `crates/markdown_editor/Cargo.toml` 里的 `[[bin]]` 显式声明，启动命令可以简化为 `cargo run -p markdown_editor`。
+
 ## 进展记录
 
-每完成一个阶段性任务，都在这里追加记录做了什么。记录不需要很长，但要能说明这个阶段完成了什么、改变了什么，以及是否影响后续目标。
+每完成一个阶段性任务，都在这里追加记录。记录应对应上面的 `阶段计划`，并说明完成了哪个阶段目标、是否达到验收标准，以及对后续目标有什么影响。
+
+### 2026-05-20 - 阶段 1：Markdown-only 入口骨架
+
+- 对应目标：建立新的 `crates/markdown_editor` crate 和可独立启动的 Markdown-only 入口骨架。
+- 完成情况：已新增 `crates/markdown_editor`，并接入 `gpui`、`assets`、`settings`、`theme` 和 `ui` 的最小初始化链路。
+- 验收结果：`cargo check -p markdown_editor` 通过；用户已本地运行 `cargo run -p markdown_editor --bin markdown-editor` 并成功打开 Markdown-only 窗口骨架。
+- 对后续目标的影响：阶段 1 已完成。下一阶段可以在这个入口上接入 Zed 的 editor，使窗口从静态骨架变成可编辑的 Markdown 文档界面。
 
 记录格式：
 
 ```md
-### YYYY-MM-DD - 阶段名称
+### YYYY-MM-DD - 阶段 N：阶段名称
 
-- 做了什么：
-- 当前结果：
+- 对应目标：
+- 完成情况：
+- 验收结果：
 - 对后续目标的影响：
 ```

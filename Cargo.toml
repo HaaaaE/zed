@@ -128,6 +128,7 @@ members = [
     "crates/lmstudio",
     "crates/lsp",
     "crates/markdown",
+    "crates/markdown_editor",
     "crates/markdown_preview",
     "crates/media",
     "crates/menu",
