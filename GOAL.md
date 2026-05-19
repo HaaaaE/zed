@@ -246,6 +246,13 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
 - 验收结果：`cargo check -p markdown_editor` 通过；仍需要用户本地运行验证标题栏显示、编辑后状态变为 `Unsaved`、`Ctrl+S` 后恢复为 `Saved`。
 - 对后续目标的影响：阶段 4 已完成最小实现。后续多 tab 可以沿用这个文档身份和 dirty 状态显示，Markdown preview 也可以从当前活动文档 shell 获取上下文。
 
+### 2026-05-20 - 阶段 5：Markdown 工作台成型
+
+- 对应目标：把当前单文档编辑器推进成可以通过界面打开、切换、编辑、保存、预览和执行常用命令的 Markdown 工作台。
+- 完成情况：已将 `MarkdownEditorShell` 改为多文档工作台；支持 GUI 打开 Markdown 文件、`Ctrl+O`、新建文档、多个标签页、点击切换标签、关闭标签、当前文档栏跟随活动标签、`Ctrl+S` 保存当前标签、`Save As`、Markdown preview 开关、预览跟随活动文档更新，以及一个最小命令入口。实现中继续复用 Zed 的 `Editor`、`Buffer` dirty/saved 语义、GPUI 系统文件选择器、Zed `Tab` / `TabBar` UI 组件和 `markdown` crate 的 `Markdown` / `MarkdownElement` 渲染。
+- 验收结果：`cargo check -p markdown_editor` 通过；仍需要用户本地运行验证 GUI 打开文件、多标签切换/关闭、另存为、预览和命令入口的实际交互。
+- 对后续目标的影响：阶段 5 已完成工作台骨架的大块实现。当前没有直接接入 `workspace::Workspace` / `Pane`，原因是它们会连带引入 Project Panel、workspace 文件夹、Git、terminal、agent 等当前产品边界禁止暴露的 IDE 型入口；后续如果要继续靠近 Zed pane/item 模型，应做 Markdown-only 包装层或拆出更小的可复用 tab/item 子结构。
+
 记录格式：
 
 ```md

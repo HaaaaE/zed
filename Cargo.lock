@@ -10471,6 +10471,7 @@ dependencies = [
  "gpui",
  "gpui_platform",
  "language",
+ "markdown",
  "settings",
  "theme",
  "theme_settings",
