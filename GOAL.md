@@ -58,6 +58,8 @@
 
 写代码时遵守复用优先的原则：需要实现一个功能时，先评估 Zed 现有 crate 能不能直接复用；如果不能直接复用，就参考 Zed 现有实现和代码风格做包装或改造；如果仍然不合适，再自己实现。
 
+复用不是只复用 crate 名称，而是尽量复用 Zed 已有的代码、逻辑、初始化顺序、数据结构、交互模式和架构边界。每次新增能力前，都要先读 Zed 对应功能的实现，经过判断后再决定是直接引入、包装复用、局部改造，还是最后才自己实现。
+
 架构上也优先沿用 Zed 的组织方式、交互方式和抽象方式，能抄就先抄，先保证产品一致性，再谈简化。
 
 新入口可以做成新的 crate，但它不是为了脱离 Zed 生态或重写一个轻量编辑器，而是为了建立清晰的 Markdown 产品入口。这个入口应尽量调用和组合 Zed 现有 crate，包括那些短期内还比较臃肿的 crate。
@@ -107,6 +109,51 @@
 
 后续方向：在可编辑文档区域稳定后，再接入打开/保存文件、多 tab、Command Palette 和 Markdown preview。
 
+### 阶段 3 - 文件打开与保存
+
+目标：让 Markdown-only 入口从临时空 buffer 变成可以打开和保存 Markdown 文件的文档编辑器。
+
+范围：
+
+- 支持从命令行传入 `.md` / `.markdown` 文件路径并打开内容。
+- 未传入文件时继续打开空文档。
+- 支持保存当前文档内容回原路径。
+- 优先复用 Zed 已有的文件、buffer、project 或 workspace 相关逻辑；开始实现前必须先阅读 Zed 的打开文件和保存文件链路。
+- 不为了阶段 3 自己发明独立文档模型，除非确认 Zed 现有路径不适合当前入口。
+- 暂不做多 tab、Command Palette、Markdown preview 或 Project Panel。
+
+验收标准：
+
+- `cargo check -p markdown_editor` 通过。
+- `cargo run -p markdown_editor --bin markdown-editor path/to/file.md` 可以打开指定 Markdown 文件。
+- 用户可以编辑内容并保存回磁盘。
+- 新入口仍然不暴露当前阶段不需要的 IDE 功能。
+
+后续方向：文件 I/O 跑通后，再接入多 tab、Command Palette 和 Markdown preview。
+
+### 阶段 4 - 文档外壳与保存状态
+
+目标：让单文档 Markdown 编辑器显示当前文档身份和保存状态，避免用户只能看到裸编辑区。
+
+范围：
+
+- 在编辑器上方显示当前文件名。
+- 显示当前文件路径，未保存文档显示为未保存 Markdown 文档。
+- 显示保存状态，并在编辑后切换为未保存状态。
+- 保存成功后恢复为已保存状态。
+- 优先复用 Zed `EditorEvent` / `Buffer` 的 dirty 和 saved 语义，不另建独立文档状态模型。
+- 暂不做多 tab、Command Palette、Markdown preview、Save As 或文件选择器。
+
+验收标准：
+
+- `cargo check -p markdown_editor` 通过。
+- 打开 Markdown 文件时，窗口顶部显示文件名和路径。
+- 编辑后状态显示为未保存。
+- `Ctrl+S` 保存成功后状态显示为已保存。
+- 新入口仍然不暴露当前阶段不需要的 IDE 功能。
+
+后续方向：单文档外壳稳定后，再接入多 tab、Command Palette 和 Markdown preview。
+
 ## 运行方式
 
 当前 Markdown-only 入口位于 `crates/markdown_editor`。
@@ -121,6 +168,12 @@ cargo check -p markdown_editor
 
 ```powershell
 cargo run -p markdown_editor --bin markdown-editor
+```
+
+打开指定 Markdown 文件：
+
+```powershell
+cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
 ```
 
 当前 crate 显式声明了 binary 名称为 `markdown-editor`，所以运行时需要带 `--bin markdown-editor`。如果后续删除 `crates/markdown_editor/Cargo.toml` 里的 `[[bin]]` 显式声明，启动命令可以简化为 `cargo run -p markdown_editor`。
@@ -142,6 +195,20 @@ cargo run -p markdown_editor --bin markdown-editor
 - 完成情况：已在 `crates/markdown_editor` 中接入 `editor`，并将窗口内容切换为可聚焦的编辑器实体；随后根据用户反馈改为允许默认 keymap 部分加载，以便在新入口里仍然复用 Zed 的 editor 快捷键，而不会因为缺少 workspace/git/agent 等无关 action 而整包失败。
 - 验收结果：`cargo check -p markdown_editor` 通过；用户已本地运行验证，可以输入并使用 `Enter` 正常换行。
 - 对后续目标的影响：阶段 2 已完成。下一阶段可以继续接入打开/保存文件、多 tab、Command Palette 和 Markdown preview。
+
+### 2026-05-20 - 阶段 3：文件打开与保存
+
+- 对应目标：让 Markdown-only 入口从临时空 buffer 变成可以打开和保存 Markdown 文件的文档编辑器。
+- 完成情况：已支持从命令行传入 `.md` / `.markdown` 文件路径，并用 Zed 的 `Buffer` + `Editor::for_buffer` 创建文档编辑器；已新增入口层 `Save` action，并绑定 `Ctrl+S` 保存当前编辑内容回原路径。
+- 验收结果：`cargo check -p markdown_editor` 通过；用户已本地运行验证，可以通过命令行打开 `.md` 文件，编辑内容，并用 `Ctrl+S` 保存回原文件。
+- 对后续目标的影响：阶段 3 已完成最小闭环。当前文件路径和磁盘写入还是入口层薄适配，后续接入 workspace/project/tabs 时应优先升级为 Zed 的 `Project::open_local_buffer` / `save_buffer` 链路。
+
+### 2026-05-20 - 阶段 4：文档外壳与保存状态
+
+- 对应目标：让当前单文档 Markdown 编辑器显示文档身份和保存状态，为后续多 tab、预览和命令入口提供基础 UI 外壳。
+- 完成情况：已在 `MarkdownEditorShell` 中新增顶部文档栏，显示文件名、路径和保存状态；已订阅 Zed `EditorEvent::DirtyChanged` / `EditorEvent::Saved`，并在保存成功后调用 `Buffer::did_save` 复用 Zed 的 dirty/saved 语义。
+- 验收结果：`cargo check -p markdown_editor` 通过；仍需要用户本地运行验证标题栏显示、编辑后状态变为 `Unsaved`、`Ctrl+S` 后恢复为 `Saved`。
+- 对后续目标的影响：阶段 4 已完成最小实现。后续多 tab 可以沿用这个文档身份和 dirty 状态显示，Markdown preview 也可以从当前活动文档 shell 获取上下文。
 
 记录格式：
 

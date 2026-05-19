@@ -10465,6 +10465,7 @@ dependencies = [
 name = "markdown_editor"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "assets",
  "editor",
  "gpui",

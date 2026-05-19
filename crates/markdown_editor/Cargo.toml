@@ -13,6 +13,7 @@ name = "markdown-editor"
 path = "src/main.rs"
 
 [dependencies]
+anyhow.workspace = true
 assets.workspace = true
 editor.workspace = true
 gpui.workspace = true
