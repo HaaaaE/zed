@@ -124,7 +124,7 @@ markdown_preview
 | `language_onboarding` | LLM API Key 配置引导 |
 | `language_extension` | 语言扩展的 Agent 集成 |
 | `language_tools` | 语言工具（LSP 按钮、日志等） |
-| `html_to_markdown` | HTML 转 Markdown 格式（Agent 网页抓取用） |
+| `html_to_markdown` | HTML 转 Markdown 格式（Agent 网页抓取 + repl HTML 输出转换） |
 | `shell_command_parser` | Shell 命令解析器 |
 | `streaming_diff` | 流式 Diff 渲染（AI 代码修改预览） |
 | `opencode` | OpenCode 集成 |
@@ -214,13 +214,14 @@ markdown_preview
 | `debugger_tools` | 调试器辅助工具（变量查看、断点管理） |
 | `debugger_ui` | 调试器完整 UI（断点/变量/调用栈/控制台） |
 
-### 5.10 预览/查看器 — 全删
+### 5.10 预览/查看器/REPL — 全删
 
 | crate | 说明 |
 |---|---|
 | `image_viewer` | 图片文件查看器 |
 | `svg_preview` | SVG 文件预览面板 |
 | `csv_preview` | CSV/表格数据预览面板 |
+| `repl` | Jupyter Notebook 支持（依赖 terminal/remote/html_to_markdown） |
 
 ### 5.11 Git 扩展 — 全删
 
@@ -247,17 +248,26 @@ markdown_preview
 | `recent_projects` | 最近项目面板 | 依赖 dev_container/extension_host |
 | `project_panel` | 文件树侧边栏 | 依赖 git_ui |
 | `component_preview` | UI 组件开发预览 | 开发工具，非用户功能 |
+| `keymap_editor` | 快捷键编辑 UI | 依赖 json_schema_store→dap/extension，改用直接编辑 JSON 文件 |
+| `json_schema_store` | JSON Schema 管理 | 依赖 dap + extension（均已删除） |
+| `notifications` | 协作频道通知 | 依赖 channel，仅用于协作场景的“频道新消息”提示，与 workspace 内部的 Toast 通知无关 |
+| `channel` | 频道/协作通信 | 被 notifications 和 file_finder 使用；file_finder 需先重构移除此依赖后才能删 |
+
+> **注意**：`command_palette` **不能删**，它是 Ctrl+Shift+P 命令面板，是编辑器核心交互功能。其依赖完全干净（client/picker/settings/theme/ui/workspace），应保留。
 
 ### 5.14 其他 UI — 全删
 
 | crate | 说明 |
 |---|---|
 | `language_selector` | 语言模式手动选择器 |
+| `sidebar` | 多工作区切换 + Agent 对话侧边栏（完全绑定 Agent） |
 
 ### 5.15 杂项 — 全删
 
 | crate | 说明 |
 |---|---|
+| `terminal_view` | 终端 UI 面板 |
+| `tasks_ui` | 任务运行器（依赖终端执行命令） |
 | `dev_container` | Dev Container 支持 |
 | `journal` | 日记/笔记功能 |
 | `onboarding` | 首次启动引导流程 |
@@ -272,8 +282,9 @@ markdown_preview
 | crate | 说明 |
 |---|---|
 | `theme_importer` | 从其他编辑器导入主题 |
-| `scheduler` | 任务调度器（定时/延迟任务执行） |
 | `time_format` | 时间格式化工具（相对时间显示如“3分钟前”） |
+
+> **注意**：`scheduler` **不能删**，`gpui` 直接依赖它。
 
 ### 5.17 基准测试
 
@@ -298,39 +309,43 @@ markdown_preview
 
 ---
 
-## 六、需重构/额外依赖的保留 crate
+## 六、需重构的保留 crate
 
 ### 6.1 需重构
 
-| crate | 理由 | 重构内容 |
-|---|---|---|
-| `sidebar` | 侧边栏容器 | workspace 只有 trait 接口，需重写不依赖 agent 的最小实现（宽度拖拽、开关状态、空白面板容器） |
-| `file_finder` | 文件查找 | 移除 `project_panel` 依赖 |
+| crate | 理由 | 重构内容 | 难度 |
+|---|---|---|---|
+| `file_finder` | 文件查找 | 移除 `project_panel` 和 `channel` 依赖 | 低 |
+| `workspace` (multi_workspace.rs) | 清理 Agent 引用 | 移除 `AgentSettings`/`DisableAiSettings` 引用，`multi_workspace_enabled()` 始终返回 false 或删除 sidebar 相关逻辑 | 低 |
 
-### 6.2 需拉入额外依赖
+### 6.2 关于 Sidebar 的决策
 
-| crate | 理由 | 额外依赖 |
-|---|---|---|
-| `notifications` | 用户通知 | `channel`（已在保留列表） |
-| `keymap_editor` | 快捷键编辑 | `json_schema_store`、`command_palette`（见下方） |
+**方案：完全废弃 sidebar，只使用 Dock 系统。**
 
-### 6.3 需拉入的新 crate
+Zed 实际有两套面板系统：
+1. **Dock 系统**（`workspace/src/dock.rs`）— 传统的左/右/底部面板容器，`Workspace` 结构体直接拥有 `left_dock`/`right_dock`/`bottom_dock`。完全在 workspace crate 内部，不依赖任何 agent 代码。
+2. **Sidebar 系统**（`workspace/src/multi_workspace.rs`）— 多工作区切换 + Agent 对话侧边栏，`MultiWorkspace` 持有 `Option<Box<dyn SidebarHandle>>`。完全绑定 Agent（`multi_workspace_enabled()` 检查 `AgentSettings::enabled`）。
 
-| crate | 被谁需要 | 自身依赖是否干净 |
-|---|---|---|
-| `json_schema_store` | `keymap_editor` | 干净（依赖均已在闭包） |
-| `command_palette` | `keymap_editor` | 干净（依赖均已在闭包） |
-| `channel` | `notifications`、`file_finder` | 干净（依赖均已在闭包） |
+纯 Markdown 编辑器只需 Dock 系统：
+- `markdown_preview` 注册为 Dock panel
+- `MultiWorkspace` 的 `sidebar` 字段本身是 `Option`，不注册即可
+- 不需要重写任何东西，只需清理 `multi_workspace.rs` 中的 agent_settings 引用
+- `sidebar` crate 整体删除
+
+### 6.3 关于快捷键配置的决策
+
+**方案：不保留 `keymap_editor`，用户直接编辑 JSON 文件配置快捷键。**
+
+原因：`keymap_editor` → `json_schema_store` → `dap` + `extension`，保留它会把调试器和扩展系统拉回来。
 
 ### 6.4 依赖链总结
 
 ```
-keymap_editor → command_palette → (workspace, client, picker 等，均已在闭包)
-keymap_editor → notifications → channel → (client, rpc，均已在闭包)
-keymap_editor → json_schema_store → (dap, extension, language，均已在闭包)
-file_finder → channel (同上)
-file_finder → project_panel → git_ui (需重构移除)
-sidebar → agent/agent_ui (需重写移除)
+file_finder → project_panel → git_ui (需重构移除 project_panel 依赖)
+file_finder → channel (需重构移除，channel 用于协作模式文件搜索)
+notifications → channel (notifications 删除后 channel 也可删)
+workspace/multi_workspace.rs → agent_settings (需清理引用)
+sidebar crate → agent/agent_ui (整体删除)
 ```
 
 ---
@@ -339,11 +354,10 @@ sidebar → agent/agent_ui (需重写移除)
 
 | 重构 | 目的 | 难度 |
 |---|---|---|
-| **重写 `sidebar` 最小实现** | workspace 只定义了 `Sidebar` trait，具体实现在 sidebar crate 中。需重写一个不依赖 agent 的极简 sidebar（宽度拖拽、开关状态、空白面板容器） | **中** |
-| `file_finder` 移除 `project_panel` 依赖 | 使 file_finder 独立于 git_ui | 低 |
-| `keymap_editor` 移除 `notifications` 依赖（可选） | 减少耦合 | 低 |
+| 清理 `multi_workspace.rs` 中的 agent 引用 | 移除 `AgentSettings`/`DisableAiSettings` 依赖，使 workspace 不再强制引入 agent_settings | **低** |
+| `file_finder` 移除 `project_panel` 和 `channel` 依赖 | 使 file_finder 独立于 git_ui 和协作系统 | 低 |
 | `zed/src/main.rs` 移除所有已删 crate 引用 | 编译通过 | 中 |
-| 重构 `workspace` 去除 `agent_settings` 依赖（可选） | 彻底剥离 AI | 高 |
+| 重构 `workspace` Cargo.toml 去除 `agent_settings` 依赖 | 彻底剥离 AI 基础设施传递链 | 中 |
 | 重构 `project` 去除 `dap`/`extension` 依赖（可选） | 彻底剥离调试/扩展 | 高 |
 
 ---
@@ -360,6 +374,12 @@ sidebar → agent/agent_ui (需重写移除)
 
 5. **`edit_prediction_types` 不能删**：虽然名字像编辑预测，但它定义了 editor 使用的基础类型，在 editor 传递闭包中。
 
+6. **无文件树**：`project_panel` 被删后，用户只能通过 Ctrl+P（file_finder）打开文件，没有侧边文件树。如果这不可接受，需要重构 project_panel 移除 git_ui 依赖（中等难度），或写一个极简的文件列表面板。
+
+7. **`notifications` 与 `workspace::notifications` 的区别**：`notifications` crate 是协作频道通知，删除它不影响 workspace 内部的 Toast 弹窗机制（那是 workspace 自己的子模块）。删除后只需从 main.rs 移除 `notifications::init(...)` 调用。
+
+8. **`channel` 删除的前置条件**：必须先重构 `file_finder` 移除对 channel 的依赖（协作模式下的频道文件搜索功能），否则 file_finder 编译报错。
+
 ---
 
 ## 九、改造后能否正常运行
@@ -374,7 +394,7 @@ sidebar → agent/agent_ui (需重写移除)
 
 1. `crates/zed/src/main.rs` 中的初始化代码必须正确清理——删掉 agent/copilot/debugger 等的 `init()` 调用，但保留 editor/workspace/markdown_preview/settings/theme 的初始化
 2. `crates/zed/src/zed.rs` 中的 action 注册、菜单构建、快捷键绑定必须保留核心部分
-3. 重写后的 `sidebar` 最小实现必须能正常工作
+3. `multi_workspace.rs` 中的 agent_settings 引用必须清理干净（不注册 sidebar 即可，字段本身是 Option）
 
 ### 最大风险点
 
@@ -385,8 +405,17 @@ sidebar → agent/agent_ui (需重写移除)
 每删一类 crate 后立即 `cargo build`，逐个验证编译通过，而不是一次性全删再修。这样定位问题更容易。
 
 建议顺序：
+0. **Step 0**：先从根 `Cargo.toml` 的 workspace members 中注释掉目标 crate（不删源码），快速验证编译错误范围，再逐个修复
 1. 先删最独立的：LLM 提供商 → Copilot → 协作 → 远程 → 自动更新
-2. 再删有 UI 依赖的：Agent 系统 → 调试器 → 扩展系统
-3. 再删编辑器周边：Vim → Git 扩展 → 预览/查看器
-4. 最后处理过重 UI 组件：sidebar 重写 → file_finder 重构 → main.rs 清理
+2. 再删有 UI 依赖的：Agent 系统 → sidebar crate → 调试器 → 扩展系统
+3. 再删编辑器周边：Vim → Git 扩展 → 预览/查看器 → REPL
+4. 最后处理重构：multi_workspace.rs 清理 → file_finder 重构 → main.rs 清理
 5. 每步都 `cargo build` 验证
+
+---
+
+## 十、平台支持
+
+- 主要开发和测试平台：**Windows**
+- 保留跨平台编译能力（macOS/Linux），但不作为主要验证目标
+- Windows 平台特定 crate（如 `windows` 系统依赖）保持不变
