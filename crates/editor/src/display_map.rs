@@ -1873,7 +1873,11 @@ impl DisplaySnapshot {
                 style,
                 is_tab: chunk.is_tab,
                 is_inlay: chunk.is_inlay,
-                replacement: chunk.renderer.map(ChunkReplacement::Renderer),
+                replacement: if style.is_some_and(|style| style.hide_text) {
+                    Some(ChunkReplacement::Str(SharedString::default()))
+                } else {
+                    chunk.renderer.map(ChunkReplacement::Renderer)
+                },
             }
             .highlight_invisibles(editor_style)
         })

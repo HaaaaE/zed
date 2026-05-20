@@ -29,6 +29,7 @@ actions!(
         Save,
         SaveAs,
         TogglePreview,
+        ToggleMode,
         ToggleCommandPalette
     ]
 );
@@ -37,6 +38,7 @@ struct MarkdownEditorShell {
     document: Document,
     show_preview: bool,
     show_command_palette: bool,
+    mode: MarkdownEditMode,
     preview: Entity<Markdown>,
     wysiwyg: MarkdownWysiwygController,
 }
@@ -47,6 +49,28 @@ struct Document {
     title: Option<String>,
     status: DocumentStatus,
     _editor_subscription: Subscription,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MarkdownEditMode {
+    Source,
+    Rendered,
+}
+
+impl MarkdownEditMode {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Source => "Source",
+            Self::Rendered => "Rendered",
+        }
+    }
+
+    fn toggle(self) -> Self {
+        match self {
+            Self::Source => Self::Rendered,
+            Self::Rendered => Self::Source,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -78,6 +102,7 @@ impl MarkdownEditorShell {
             document,
             show_preview: false,
             show_command_palette: false,
+            mode: MarkdownEditMode::Source,
             preview,
             wysiwyg: MarkdownWysiwygController::default(),
         };
@@ -112,6 +137,15 @@ impl MarkdownEditorShell {
                 this.refresh_status(cx);
                 this.refresh_preview(cx);
                 this.sync_wysiwyg(cx);
+            }
+            EditorEvent::SelectionsChanged { .. } => {
+                let selection = this
+                    .document
+                    .editor
+                    .update(cx, |editor, cx| editor.newest_selection_point_range(cx));
+                if selection.start == selection.end {
+                    this.sync_wysiwyg(cx);
+                }
             }
             _ => {}
         });
@@ -232,6 +266,12 @@ impl MarkdownEditorShell {
         cx.notify();
     }
 
+    fn toggle_mode(&mut self, _: &ToggleMode, _window: &mut Window, cx: &mut Context<Self>) {
+        self.mode = self.mode.toggle();
+        self.sync_wysiwyg(cx);
+        cx.notify();
+    }
+
     fn toggle_command_palette(
         &mut self,
         _: &ToggleCommandPalette,
@@ -258,7 +298,7 @@ impl MarkdownEditorShell {
     }
 
     fn sync_wysiwyg(&mut self, cx: &mut Context<Self>) {
-        self.wysiwyg.sync(&self.document.editor, cx);
+        self.wysiwyg.sync(&self.document.editor, self.mode, cx);
     }
 
     fn focus_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -319,6 +359,7 @@ impl MarkdownEditorShell {
                     .child(action_button("new-document", "New", NewDocument))
                     .child(action_button("open-document", "Open", OpenDocument))
                     .child(action_button("save-document", "Save", Save))
+                    .child(action_button("toggle-mode", self.mode.label(), ToggleMode))
                     .child(action_button("toggle-preview", "Preview", TogglePreview))
                     .child(action_button(
                         "toggle-command-palette",
@@ -367,6 +408,7 @@ impl MarkdownEditorShell {
             .child(command_row("Open Markdown File...", OpenDocument))
             .child(command_row("Save", Save))
             .child(command_row("Save As...", SaveAs))
+            .child(command_row("Toggle Source/Rendered Mode", ToggleMode))
             .child(command_row("Toggle Markdown Preview", TogglePreview))
     }
 }
@@ -375,6 +417,7 @@ impl MarkdownWysiwygController {
     fn sync(
         &mut self,
         editor: &Entity<Editor>,
+        mode: MarkdownEditMode,
         cx: &mut Context<MarkdownEditorShell>,
     ) {
         let Some(buffer) = singleton_buffer(editor, cx) else {
@@ -393,7 +436,7 @@ impl MarkdownWysiwygController {
 
         let highlights = markdown_highlight_ranges(editor, parse_tree, cx);
         editor.update(cx, |editor, cx| {
-            apply_markdown_highlights(editor, highlights, cx);
+            apply_markdown_highlights(editor, highlights, mode, cx);
         });
     }
 }
@@ -473,41 +516,42 @@ fn push_byte_range(
 fn apply_markdown_highlights(
     editor: &mut Editor,
     ranges: MarkdownHighlightRanges,
+    mode: MarkdownEditMode,
     cx: &mut Context<Editor>,
 ) {
     set_markdown_highlight(
         editor,
         markdown_marker_highlight_key(),
         ranges.marker,
-        markdown_marker_highlight_style(cx),
+        markdown_marker_highlight_style(mode, cx),
         cx,
     );
     set_markdown_highlight(
         editor,
         markdown_heading_1_highlight_key(),
         ranges.heading_1,
-        markdown_heading_highlight_style(1, cx),
+        markdown_heading_highlight_style(1, mode, cx),
         cx,
     );
     set_markdown_highlight(
         editor,
         markdown_heading_2_highlight_key(),
         ranges.heading_2,
-        markdown_heading_highlight_style(2, cx),
+        markdown_heading_highlight_style(2, mode, cx),
         cx,
     );
     set_markdown_highlight(
         editor,
         markdown_heading_3_highlight_key(),
         ranges.heading_3,
-        markdown_heading_highlight_style(3, cx),
+        markdown_heading_highlight_style(3, mode, cx),
         cx,
     );
     set_markdown_highlight(
         editor,
         markdown_heading_other_highlight_key(),
         ranges.heading_other,
-        markdown_heading_highlight_style(4, cx),
+        markdown_heading_highlight_style(4, mode, cx),
         cx,
     );
     set_markdown_highlight(
@@ -601,15 +645,25 @@ fn markdown_strikethrough_highlight_key() -> HighlightKey {
     HighlightKey::SyntaxTreeView(usize::MAX - 9)
 }
 
-fn markdown_marker_highlight_style(cx: &App) -> HighlightStyle {
-    HighlightStyle {
-        color: Some(cx.theme().colors().text_muted.opacity(0.18)),
-        fade_out: Some(0.85),
-        ..Default::default()
+fn markdown_marker_highlight_style(mode: MarkdownEditMode, cx: &App) -> HighlightStyle {
+    match mode {
+        MarkdownEditMode::Source => HighlightStyle {
+            color: Some(cx.theme().colors().text_muted.opacity(0.18)),
+            fade_out: Some(0.85),
+            ..Default::default()
+        },
+        MarkdownEditMode::Rendered => HighlightStyle {
+            hide_text: true,
+            ..Default::default()
+        },
     }
 }
 
-fn markdown_heading_highlight_style(level: u8, cx: &App) -> HighlightStyle {
+fn markdown_heading_highlight_style(
+    level: u8,
+    mode: MarkdownEditMode,
+    cx: &App,
+) -> HighlightStyle {
     let colors = cx.theme().colors();
     HighlightStyle {
         color: Some(match level {
@@ -624,6 +678,15 @@ fn markdown_heading_highlight_style(level: u8, cx: &App) -> HighlightStyle {
             3 => FontWeight::BOLD,
             _ => FontWeight::SEMIBOLD,
         }),
+        font_size: match mode {
+            MarkdownEditMode::Source => None,
+            MarkdownEditMode::Rendered => Some(match level {
+                1 => px(28.).into(),
+                2 => px(22.).into(),
+                3 => px(18.).into(),
+                _ => px(16.).into(),
+            }),
+        },
         ..Default::default()
     }
 }
@@ -702,6 +765,7 @@ impl Render for MarkdownEditorShell {
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::save_as))
             .on_action(cx.listener(Self::toggle_preview))
+            .on_action(cx.listener(Self::toggle_mode))
             .on_action(cx.listener(Self::toggle_command_palette))
             .child(self.render_title_bar(window, cx))
             .child(
@@ -749,6 +813,7 @@ fn main() {
                 KeyBinding::new("ctrl-o", OpenDocument, Some("Editor")),
                 KeyBinding::new("ctrl-s", Save, Some("Editor")),
                 KeyBinding::new("ctrl-shift-s", SaveAs, Some("Editor")),
+                KeyBinding::new("ctrl-shift-m", ToggleMode, Some("Editor")),
                 KeyBinding::new("ctrl-shift-p", ToggleCommandPalette, None),
                 KeyBinding::new("ctrl-shift-v", TogglePreview, Some("Editor")),
             ]);

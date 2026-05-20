@@ -41,14 +41,13 @@ use git::{Oid, blame::BlameEntry, commit::ParsedCommitMessage, status::FileStatu
 use gpui::{
     Action, Along, AnyElement, App, AppContext, AvailableSpace, Axis as ScrollbarAxis, BorderStyle,
     Bounds, ClickEvent, ClipboardItem, ContentMask, Context, Corners, CursorStyle, DispatchPhase,
-    Edges, Element, ElementInputHandler, Entity, Focusable as _, Font, FontId, FontWeight,
-    GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, IsZero, Length,
-    Modifiers, ModifiersChangedEvent, MouseButton, MouseClickEvent, MouseDownEvent, MouseMoveEvent,
-    MousePressureEvent, MouseUpEvent, PaintQuad, ParentElement, Pixels, PressureStage, ScrollDelta,
-    ScrollHandle, ScrollWheelEvent, ShapedLine, SharedString, Size, StatefulInteractiveElement,
-    Style, Styled, StyledText, TaskExt, TextAlign, TextRun, TextStyleRefinement, WeakEntity,
-    Window, anchored, deferred, div, fill, linear_color_stop, linear_gradient, outline,
-    pattern_slash, point, px, quad, relative, size, solid_background, transparent_black,
+    Edges, Element, ElementInputHandler, Entity, Focusable as _, Font, FontId, FontWeight, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InteractiveElement,
+    IntoElement, IsZero, Length, Modifiers, ModifiersChangedEvent, MouseButton, MouseClickEvent,
+    MouseDownEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent, PaintQuad, ParentElement, Pixels, PressureStage, ScrollDelta, ScrollHandle,
+    ScrollWheelEvent, ShapedLine, SharedString, Size, StatefulInteractiveElement, Style, Styled,
+    StyledText, TaskExt, TextAlign, TextRun, TextStyleRefinement, WeakEntity, Window, anchored,
+    deferred, div, fill, linear_color_stop, linear_gradient, outline, pattern_slash, point, px,
+    quad, relative, size, solid_background, transparent_black,
 };
 use itertools::Itertools;
 use language::{
@@ -8988,8 +8987,8 @@ impl LineWithInvisibles {
         let mut row = 0;
         let mut line_exceeded_max_len = false;
         let font_size = text_style.font_size.to_pixels(window.rem_size());
+        let mut line_font_size = font_size;
         let min_contrast = EditorSettings::get_global(cx).minimum_contrast_for_highlights;
-
         let ellipsis = SharedString::from("⋯");
 
         for highlighted_chunk in chunks.chain([HighlightedChunk {
@@ -9009,7 +9008,7 @@ impl LineWithInvisibles {
                     };
                     let shaped_line = window.text_system().shape_line(
                         line.clone().into(),
-                        font_size,
+                        line_font_size,
                         text_runs,
                         None,
                     );
@@ -9030,7 +9029,7 @@ impl LineWithInvisibles {
                             };
                             let shaped_line = window.text_system().shape_line(
                                 chunk,
-                                font_size,
+                                line_font_size,
                                 &[text_style.to_run(highlighted_chunk.text.len())],
                                 None,
                             );
@@ -9063,6 +9062,10 @@ impl LineWithInvisibles {
                     }
                     ChunkReplacement::Str(x) => {
                         let text_style = if let Some(style) = highlighted_chunk.style {
+                            if let Some(font_size) = style.font_size {
+                                line_font_size = line_font_size
+                                    .max(font_size.to_pixels(window.rem_size()));
+                            }
                             Cow::Owned(text_style.clone().highlight(style))
                         } else {
                             Cow::Borrowed(text_style)
@@ -9078,7 +9081,7 @@ impl LineWithInvisibles {
                         };
                         let line_layout = window
                             .text_system()
-                            .shape_line(x, font_size, &[run], None)
+                            .shape_line(x, line_font_size, &[run], None)
                             .with_len(highlighted_chunk.text.len());
 
                         width += line_layout.width;
@@ -9098,7 +9101,7 @@ impl LineWithInvisibles {
                         };
                         let shaped_line = window.text_system().shape_line(
                             line.clone().into(),
-                            font_size,
+                            line_font_size,
                             text_runs,
                             None,
                         );
@@ -9110,12 +9113,13 @@ impl LineWithInvisibles {
                             len: mem::take(&mut len),
                             fragments: mem::take(&mut fragments),
                             invisibles: std::mem::take(&mut invisibles),
-                            font_size,
+                            font_size: line_font_size,
                         });
 
                         line.clear();
                         line_byte_offset = 0;
                         styles.clear();
+                        line_font_size = font_size;
                         row += 1;
                         line_exceeded_max_len = false;
                         non_whitespace_added = false;
@@ -9126,6 +9130,10 @@ impl LineWithInvisibles {
 
                     if !line_chunk.is_empty() && !line_exceeded_max_len {
                         let text_style = if let Some(style) = highlighted_chunk.style {
+                            if let Some(font_size) = style.font_size {
+                                line_font_size = line_font_size
+                                    .max(font_size.to_pixels(window.rem_size()));
+                            }
                             Cow::Owned(text_style.clone().highlight(style))
                         } else {
                             Cow::Borrowed(text_style)

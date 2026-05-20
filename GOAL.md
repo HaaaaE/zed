@@ -275,6 +275,15 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
 - 验收结果：`cargo test -p markdown_wysiwyg` 和 `cargo check -p markdown_editor` 通过；未运行 `cargo run`。
 - 对后续目标的影响：当前视觉增强已经覆盖 heading 和常见 inline 语义，但仍不改变字号/行高，也不真正隐藏 marker。heading 字号/行高和 rendered selection 需要继续设计并实现通用 editor projection/layout 扩展，不能用普通 fold 或半成品 per-run font-size hack 代替。
 
+### 2026-05-20 - Typora WYSIWYG 阶段 1：Source/Rendered 模式切换
+
+- 对应目标：把当前 Markdown-aware source editing 固化为 Source Mode，同时引入 Rendered Mode 作为后续 Typora-like projection 的入口。
+- 完成情况：`markdown_editor` 新增 `MarkdownEditMode::{Source, Rendered}`，标题栏新增模式按钮，命令面板新增 `Toggle Source/Rendered Mode`，快捷键为 `Ctrl+Shift+M`。两个模式共享同一个 `Editor` 和 `Buffer`，切换只改变 display/highlight policy，不改变文档模型。
+- Source Mode 策略：保留 Markdown marker 原文，marker 仅弱化显示；heading/strong/emphasis/code/link/strikethrough 继续走语义高亮，但不改变 heading 字号或行高。
+- Rendered Mode 策略：新增 `gpui::HighlightStyle::{font_size, hide_text}`；heading 通过普通 editor 文本 shaping 使用更大字号；marker 通过 `HighlightedChunk` 的 `ChunkReplacement::Str("")` 零宽替换隐藏，source range len 保留用于映射，不使用 fold/block replacement。
+- 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过；未运行 `cargo run`。
+- 对后续目标的影响：Rendered Mode 已有模式边界和 marker hiding 入口，但当前 Zed editor 不支持真实单行变高：`position_map.line_height` 是全局单值，row->y、scroll、selection bounds 和 hit-test 均按统一行高计算。已撤回视觉 line-height 方案；后续若要 heading 真正占据更高行，需要先扩展 editor position map 的可变行高模型。
+
 记录格式：
 
 ```md

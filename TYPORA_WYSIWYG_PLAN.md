@@ -640,3 +640,12 @@
 - range 映射改用 `MultiBufferOffset` 到 `Anchor`，不再手算 point column。
 - 已通过 `cargo test -p markdown_wysiwyg` 和 `cargo check -p markdown_editor`。
 - 本阶段没有实现 heading 字号/行高，也没有重新引入 fold hiding。字号/行高需要后续通用 editor projection/layout 扩展，必须与 selection、hit-test、soft wrap 和 long-document scroll 模型一起设计。
+
+### 2026-05-20 - 阶段 1 Source/Rendered 模式切换
+
+- 当前 Markdown-aware source editing 固化为 Source Mode：保留 Markdown marker 原文，marker 仅弱化显示，语义高亮仍走普通 Zed editor 文本路径。
+- 新增 Rendered Mode：`markdown_editor` 增加 `MarkdownEditMode::{Source, Rendered}`，标题栏按钮、命令面板和 `Ctrl+Shift+M` 均可切换。两个模式共享同一个 `Editor` 和 `Buffer`，切换只改变 display/highlight policy。
+- `gpui::HighlightStyle` 新增 `font_size` 和 `hide_text`。`editor::LineWithInvisibles` 在 shaping 行时使用 highlight 字号；Source Mode 不应用 heading 字号，保持 source-only editing。
+- Rendered Mode 的 marker hiding 通过 `HighlightedChunk` 生成 `ChunkReplacement::Str("")` 完成，保留 source len 映射；不使用 `fold_map`，不使用 `BlockPlacement::Replace`。
+- 已通过 `cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg`。
+- 当前 Zed editor 不支持真实单行变高：`position_map.line_height` 是全局单值，row->y、scroll、selection bounds 和 hit-test 都按统一行高计算。已撤回视觉 line-height 方案；后续要让 heading 真正占据更高行，需要先扩展 editor position map 的可变行高模型。
