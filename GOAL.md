@@ -254,6 +254,13 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
 - 验收结果：`cargo check -p markdown_editor` 通过；仍需要用户本地运行验证 GUI 打开文件、另存为、预览和命令入口的实际交互。
 - 对后续目标的影响：阶段 5 回到单文件产品边界。当前不做 tab，也不再保留 tab 相关代码；后续如果重新引入多标签，需要重新评估是否仍符合产品目标。
 
+### 2026-05-20 - Typora WYSIWYG 阶段 0：性能优先核心层启动
+
+- 对应目标：开始执行 `TYPORA_WYSIWYG_PLAN.md` 的阶段 0，建立未来完整 Typora 语义所需的高性能核心基础，而不是继续扩展 `markdown` crate preview 路径。
+- 完成情况：新增 `crates/markdown_wysiwyg` 低层 crate，并加入 workspace；该 crate 不依赖 `markdown`、GPUI 或 UI 层，当前只保存源 range、block 元数据、可见 source range 和 hidden marker range。第一版实现了 `MarkdownSyntaxTree`、`MarkdownProjectionMap`、ATX heading / paragraph / blank / fenced code block 的基础语义索引，以及 focused-block reveal 所需的可见区投影 API。
+- 验收结果：`cargo test -p markdown_wysiwyg` 通过。当前尚未接入 `markdown_editor` UI，也尚未替换旧 preview；这是刻意选择，避免从一开始绑定到全量 Markdown preview 渲染模型。
+- 对后续目标的影响：后续 WYSIWYG 路径必须继续走 `markdown_wysiwyg` / editor display map，而不是直接使用 `markdown` crate。下一步应把该核心层升级为增量解析或接入 Zed/tree-sitter Markdown 语法树，并将 projection 接入 `Editor` 的 fold/block/highlight/display-map 扩展点。
+
 记录格式：
 
 ```md

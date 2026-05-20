@@ -130,6 +130,7 @@ members = [
     "crates/markdown",
     "crates/markdown_editor",
     "crates/markdown_preview",
+    "crates/markdown_wysiwyg",
     "crates/media",
     "crates/menu",
     "crates/migrator",
@@ -387,6 +388,7 @@ lmstudio = { path = "crates/lmstudio" }
 lsp = { path = "crates/lsp" }
 markdown = { path = "crates/markdown" }
 markdown_preview = { path = "crates/markdown_preview" }
+markdown_wysiwyg = { path = "crates/markdown_wysiwyg" }
 svg_preview = { path = "crates/svg_preview" }
 media = { path = "crates/media" }
 menu = { path = "crates/menu" }

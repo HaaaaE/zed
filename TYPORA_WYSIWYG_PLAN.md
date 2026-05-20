@@ -603,3 +603,14 @@
 - 同时建立 mapping tests，防止后续所有编辑语义建立在不稳定 offset 映射上。
 
 如果阶段 1 的 offset mapping 无法稳定，必须暂停新增语义，先修正 projection 架构。完整 Typora 语义的成败取决于这个映射层，而不是取决于渲染多少 Markdown 节点。
+
+## 实施记录
+
+### 2026-05-20 - 阶段 0 启动
+
+- 新增 `crates/markdown_wysiwyg` 作为 Typora/WYSIWYG 的低层核心 crate。
+- 该 crate 当前不依赖 `markdown` crate，也不依赖 GPUI/UI 层；这是长期边界，不是临时限制。
+- 第一版只实现源 range 语义索引和可见区投影：`MarkdownSyntaxTree`、`MarkdownProjectionMap`、block 元数据、hidden marker ranges、focused-block reveal。
+- 当前覆盖 ATX heading、paragraph、blank、fenced code block 的基础 block 识别，目的是先验证 source/display mapping 数据结构，而不是追求完整 Markdown 语义。
+- 已通过 `cargo test -p markdown_wysiwyg`。
+- 下一步优先级：把解析层升级为增量或 tree-sitter-backed 语义树，再接入 `Editor` display map；不应把 `markdown` crate 引入 WYSIWYG 渲染路径。
