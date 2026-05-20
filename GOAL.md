@@ -264,9 +264,9 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
 ### 2026-05-20 - Typora WYSIWYG 阶段 1：接入 Editor display map
 
 - 对应目标：验证 tree-sitter-backed `markdown_wysiwyg` 能驱动真实 Zed `Editor` display pipeline，为 focused-block WYSIWYG 建立长期接入链路。
-- 完成情况：`markdown_editor` 新增 `MarkdownWysiwygController`，读取当前单文件 `Buffer` 的文本版本并在版本变化时解析 `MarkdownSyntaxTree`；selection 变化只复用已解析语义树重算 marker folds，避免光标移动触发 tree-sitter parse。控制器当前把非活动 ATX heading 的 marker range 转成带独立 `MarkdownMarkerFold` type tag 的 `Editor` folds，通过 display map 隐藏 `# ` marker；当前活动 heading 保持源码 marker reveal。为支持安全刷新，还在 `editor` crate 增加了通用的 `newest_selection_point_range` helper 和 `replace_folds_with_type` API，按 type tag 原子替换 WYSIWYG marker folds，避免与用户手动 fold 或其他系统 fold 混用。
+- 完成情况：`markdown_editor` 新增 `MarkdownWysiwygController`，读取当前单文件 `Buffer` 的文本版本并在版本变化时解析 `MarkdownSyntaxTree`。曾尝试把非活动 ATX heading 的 marker range 转成 `Editor` folds 来隐藏 `# ` marker，但拖拽选择时 fold replacement 会改变 display/source 几何，在 CJK/UTF-8 文本中触发 hit-test 越界和非 char-boundary panic。因此当前安全实现改为用 `Editor` text highlights 弱化 ATX heading 的 `# ` marker，不改变文本几何、selection 或 hit-test 坐标。交互规则也更新为：只有 collapsed caret 位于语义元素内时才 reveal 原型；非空 selection 不触发 raw reveal；拖拽开始后冻结拖拽开始前的 projection 状态。
 - 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过。
-- 对后续目标的影响：已形成第一条真实接入链路：tree-sitter Markdown semantic tree -> `markdown_wysiwyg` projection -> Zed `Editor` display map folds。下一步应继续把 bold、italic、inline code、link、list、blockquote 等语义扩展到同一条链路，并逐步减少旧 `markdown` preview 依赖。
+- 对后续目标的影响：已形成第一条真实接入链路：tree-sitter Markdown semantic tree -> `markdown_wysiwyg` projection -> Zed `Editor` display map styling。普通 `fold_map` 不再作为 inline marker hiding 的长期方案；后续 marker 真隐藏、heading 字号/行高变化和 selection-safe rendered editing 需要真正的 Markdown projection transform。下一步应先用 `custom_highlights` 增加 heading 内容加粗、inline strong/emphasis/inline-code/link 等不改变文本几何的视觉变化，同时设计长期 projection 扩展。
 
 记录格式：
 

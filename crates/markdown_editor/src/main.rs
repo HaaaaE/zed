@@ -1,14 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{any::TypeId, env, fs, ops::Range, path::PathBuf, sync::Arc};
+use std::{env, fs, ops::Range, path::PathBuf};
 
 use anyhow::{Context as _, Result};
 use assets::Assets;
 use clock::Global;
-use editor::{Anchor, Editor, EditorEvent, FoldPlaceholder, display_map::Crease};
+use editor::{Anchor, Editor, EditorEvent, display_map::HighlightKey};
 use gpui::{
-    App, Context, Entity, Focusable as _, KeyBinding, MouseButton, PathPromptOptions, SharedString,
-    Subscription, Window, WindowOptions, actions, div,
+    App, Context, Entity, Focusable as _, HighlightStyle, KeyBinding, MouseButton,
+    PathPromptOptions, SharedString, Subscription, Window, WindowOptions, actions, div,
 };
 use language::{Buffer, Point};
 use markdown::{Markdown, MarkdownElement, MarkdownFont, MarkdownStyle};
@@ -51,10 +51,7 @@ struct Document {
 struct MarkdownWysiwygController {
     parse_tree: Option<MarkdownSyntaxTree>,
     parsed_version: Option<Global>,
-    folded_marker_ranges: Vec<Range<Anchor>>,
 }
-
-struct MarkdownMarkerFold;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DocumentStatus {
@@ -112,9 +109,6 @@ impl MarkdownEditorShell {
             EditorEvent::DirtyChanged | EditorEvent::Saved | EditorEvent::BufferEdited => {
                 this.refresh_status(cx);
                 this.refresh_preview(cx);
-                this.sync_wysiwyg(cx);
-            }
-            EditorEvent::SelectionsChanged { .. } => {
                 this.sync_wysiwyg(cx);
             }
             _ => {}
@@ -395,33 +389,25 @@ impl MarkdownWysiwygController {
             return;
         };
 
-        let active_range = editor.update(cx, |editor, cx| editor.newest_selection_point_range(cx));
-        let folded_marker_ranges = marker_fold_ranges(editor, parse_tree, active_range, cx);
-        let marker_type = TypeId::of::<MarkdownMarkerFold>();
-        let marker_placeholder = markdown_marker_fold_placeholder();
-        let marker_creases = folded_marker_ranges
-            .iter()
-            .cloned()
-            .map(|range| Crease::simple(range, marker_placeholder.clone()))
-            .collect::<Vec<_>>();
-
+        let marker_ranges = marker_highlight_ranges(editor, parse_tree, cx);
         editor.update(cx, |editor, cx| {
-            editor.replace_folds_with_type(
-                &self.folded_marker_ranges,
-                marker_type,
-                marker_creases,
-                cx,
-            );
+            if marker_ranges.is_empty() {
+                editor.clear_highlights(markdown_marker_highlight_key(), cx);
+            } else {
+                editor.highlight_text(
+                    markdown_marker_highlight_key(),
+                    marker_ranges,
+                    markdown_marker_highlight_style(cx),
+                    cx,
+                );
+            }
         });
-
-        self.folded_marker_ranges = folded_marker_ranges;
     }
 }
 
-fn marker_fold_ranges(
+fn marker_highlight_ranges(
     editor: &Entity<Editor>,
     tree: &MarkdownSyntaxTree,
-    active_range: Range<Point>,
     cx: &mut App,
 ) -> Vec<Range<Anchor>> {
     let snapshot = editor.read(cx).buffer().read(cx).snapshot(cx);
@@ -429,9 +415,6 @@ fn marker_fold_ranges(
 
     for block in tree.blocks() {
         if !matches!(block.kind, MarkdownBlockKind::AtxHeading { .. }) {
-            continue;
-        }
-        if point_ranges_overlap(block.row_range.start as u32..block.row_range.end as u32, active_range.start.row..active_range.end.row + 1) {
             continue;
         }
 
@@ -451,17 +434,15 @@ fn marker_fold_ranges(
     ranges
 }
 
-fn point_ranges_overlap(left: Range<u32>, right: Range<u32>) -> bool {
-    left.start < right.end && right.start < left.end
+fn markdown_marker_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX)
 }
 
-fn markdown_marker_fold_placeholder() -> FoldPlaceholder {
-    FoldPlaceholder {
-        render: Arc::new(|_, _, _| div().into_any()),
-        constrain_width: false,
-        merge_adjacent: false,
-        type_tag: Some(TypeId::of::<MarkdownMarkerFold>()),
-        collapsed_text: None,
+fn markdown_marker_highlight_style(cx: &App) -> HighlightStyle {
+    HighlightStyle {
+        color: Some(cx.theme().colors().text_muted.opacity(0.18)),
+        fade_out: Some(0.85),
+        ..Default::default()
     }
 }
 

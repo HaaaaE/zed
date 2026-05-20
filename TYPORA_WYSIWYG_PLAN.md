@@ -176,7 +176,11 @@
 - 左右移动跨过隐藏 marker 时不产生视觉卡顿或跳进不可见字符。
 - Shift selection 跨越隐藏 marker 时范围稳定。
 - 多光标如果保留，必须不破坏 Markdown 结构；如果阶段内暂不支持，需要显式禁用或降级。
-- 当前 block 的 marker reveal 不应改变用户正在操作的 logical selection。
+- 只有 collapsed caret 位于 Markdown 语义元素内部时，才 reveal 该元素的 Markdown 原型。
+- 非空 selection 不触发新的 raw reveal。
+- 拖拽选择开始后冻结拖拽开始前的 projection 状态：如果拖拽开始时该元素已 reveal，则拖拽期间保持 reveal；如果拖拽开始时是 rendered，则拖拽期间保持 rendered。
+- 拖拽过程中不能因为 selection range 变化、鼠标移动到其他元素或 hover 状态改变而重排 layout。
+- mouse up 后再根据最终状态重新计算 projection：非空 selection 保持 selection projection；collapsed selection 根据 caret 所在语义元素 reveal。
 
 ### 输入
 
@@ -241,7 +245,9 @@
 规则：
 
 - 非活动 block 显示富文本结果。
-- 活动 block 根据光标位置显示必要 Markdown marker。
+- 活动 block 只有在 selection collapsed 且 caret 位于该 block 的 Markdown 语义元素内部时，才显示必要 Markdown marker。
+- selection 不是 reveal 触发器；非空 selection 必须选择当前 rendered/frozen projection，而不是强制切回 raw。
+- 拖拽开始后冻结当前 projection，直到 mouse up 后再重新计算 reveal 状态。
 - 用户编辑的 inline 结构可以局部 reveal marker，例如 link destination、image source、code fence info string。
 - 当某个结构无法安全富文本编辑时，临时 reveal 该结构源码，而不是猜测用户意图。
 - 提供全局 `Toggle Source Mode` 作为逃生口，但它不是主体验。
@@ -619,9 +625,10 @@
 ### 2026-05-20 - 阶段 1 display-map 接入启动
 
 - `markdown_editor` 新增 `MarkdownWysiwygController`，作为产品入口和 WYSIWYG 核心层之间的接入点。
-- 控制器从当前 singleton `Buffer` 读取文本版本；只有文本版本变化时才解析 `MarkdownSyntaxTree`，selection 变化只复用已有语义树刷新投影 folds。
-- 当前接入范围是 ATX heading marker hiding：非活动 heading 的 `# ` marker 被转换为 `Editor` display-map folds，当前活动 heading 保持 marker reveal。
-- Markdown marker folds 使用独立 `MarkdownMarkerFold` type tag，并通过 `Editor::replace_folds_with_type` 原子刷新，避免与用户手动 folds 或其他系统 folds 混合。
-- `editor` crate 新增两个通用 API：`newest_selection_point_range` 用于读取主 selection 的 buffer point range；`replace_folds_with_type` 用于按 type tag 刷新一组 folds。
+- 控制器从当前 singleton `Buffer` 读取文本版本；只有文本版本变化时才解析 `MarkdownSyntaxTree`。selection 变化不能作为 raw reveal 的直接触发器。
+- 曾尝试用 `Editor` display-map folds 做 ATX heading marker hiding，但拖拽选择时 fold replacement 会改变 display/source 几何，在 CJK/UTF-8 文本中触发 hit-test 越界和非 char-boundary panic。因此普通 `fold_map` 不再作为 inline marker hiding 的长期方案。
+- 当前安全接入范围改为 ATX heading marker weakening：`# ` marker 通过 `Editor` text highlights 淡化显示，不改变文本几何、hit-test 或 source/display 坐标。
+- marker 真隐藏、heading 字号/行高变化和 Typora 级 inline replacement 需要后续新增真正的 Markdown projection transform，不能再用普通 fold 代替。
+- `editor` crate 已新增两个通用 API：`newest_selection_point_range` 和 `replace_folds_with_type`；其中 fold 刷新 API 可继续服务块级/显式折叠场景，但不用于 inline marker hiding。
 - 已通过 `cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg`。
-- 下一步优先级：把 inline strong/emphasis/inline-code/link 和 list/blockquote 的 marker hiding、styling、focused reveal 全部接到同一条 `markdown_wysiwyg` -> `Editor` display pipeline，不再新增 preview/旁路渲染路径。
+- 下一步优先级：先用不改变文本几何的 `custom_highlights` 增加 heading content 加粗、inline strong/emphasis/inline-code/link 等视觉变化；同时设计真正的 projection transform 来支持隐藏 marker、heading 字号和 selection-safe rendered editing。
