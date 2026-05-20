@@ -1,33 +1,33 @@
 # 目标
 
-当前仓库原本是 Zed 的 fork。我们的目标不是长期维护一个完整的 Zed 分支，而是在大规模复用 Zed 现有 crate、编辑器能力、UI 架构和实现经验的基础上，做出一个专注 Markdown 的文档编辑器。
+当前仓库原本是 Zed 的 fork。我们的目标不是长期维护一个完整的 Zed 分支，而是在大规模复用 Zed 现有 crate、编辑器能力、UI 架构和实现经验的基础上，做出一个专注 Markdown 的单文件文档编辑器。
 
 当前阶段先做一个新的 Markdown-only 入口，把产品形态独立出来。成品也会继续保留大量 Zed crate；其中有些 crate 可能暂时比较臃肿，或者仍包含当前产品用不到的能力。只要这些能力不进入 Markdown 编辑器的用户界面，就可以先保留。等新入口和核心体验跑通后，再逐步删掉或瘦身对这个 Markdown 编辑器不必要的功能、入口和依赖。
 
 ## 期望的用户体验
 
-- 用户打开的是 Markdown 文件，而不是项目或工作区。
-- 可以同时打开多个 Markdown 文件，并以标签页形式切换。
-- 每个标签页代表一个文档。
+- 用户打开的是一个 Markdown 文件，而不是项目、工作区或文件夹。
+- 当前应用始终围绕一个活动 Markdown 文档工作。
+- 打开新 Markdown 文件时，替换当前文档，而不是创建标签页或多文档工作区。
 - Markdown 预览是核心功能，不是附加功能。
 - 预览应该容易打开、关闭，并且跟随当前文档保持同步。
-- 应用应支持常见文档操作：新建文件、打开文件、保存、另存为、关闭标签页、撤销、重做、查找、复制、粘贴。
-- 编辑器应保留 Zed 中适合写作的部分：快速编辑、语法高亮、清爽的标签页、主题，以及必要的键盘操作。
-- 需要保留 Command Palette，作为查找和执行常用命令的键盘驱动入口，也可以承载换主题、打开设置文件、打开 keymap 文件等常用操作。
+- 应用应支持常见单文档操作：新建文件、打开文件、保存、另存为、撤销、重做、查找、复制、粘贴。
+- 编辑器应保留 Zed 中适合写作的部分：快速编辑、语法高亮、主题，以及必要的键盘操作。
+- 需要保留 Command Palette 或等价的命令入口，作为查找和执行常用命令的键盘驱动入口，也可以承载换主题、打开设置文件、打开 keymap 文件等常用操作。
 
 ## 产品边界
 
 - 用户体验上不暴露 workspace / project 概念；内部是否临时复用相关 crate，不影响这个目标。
-- 当前阶段面向 Markdown 文档，默认关注 `.md` / `.markdown` 文件。
-- 可以有多个文档标签页，但不以文件夹、项目或工作区作为主要组织方式。
-- Markdown 预览应跟随当前活动文档，而不是作为项目级功能出现。
+- 当前阶段面向单个 Markdown 文档，默认关注 `.md` / `.markdown` 文件。
+- 当前阶段不做多文档标签页，不做文件夹、项目或工作区组织方式。
+- Markdown 预览应跟随当前文档，而不是作为项目级功能出现。
 - 不提供项目型入口，例如文件夹树、项目搜索、远程工作区、协作空间或开发环境。
 
 ## 配置和快捷键
 
 - 当前阶段不做设置 UI，但可以保留 settings 文件和必要的默认设置。
 - 当前阶段不做 Keymap 编辑器，但可以保留默认快捷键和 keymap JSON 配置能力。
-- 常用配置项优先通过 Command Palette 暴露。
+- 常用配置项优先通过 Command Palette 或等价命令入口暴露。
 
 ## 开发规则
 
@@ -36,6 +36,7 @@
 
 ## 当前阶段不做
 
+- 多文档标签页
 - AI Agent 功能
 - 终端
 - 调试器
@@ -50,17 +51,17 @@
 
 ## 期望结果
 
-最终效果应该是一个专注 Markdown 的文档编辑器，具备 Zed 质量的编辑体验和 Markdown 预览。它不需要在第一阶段成为依赖最少的轻量项目；相反，应该优先复用 Zed 现有 crate 来保证体验和实现速度。后续再逐步删除或瘦身对这个目标不必要的 Zed 功能、入口和依赖。
+最终效果应该是一个专注 Markdown 的单文件文档编辑器，具备 Zed 质量的编辑体验和 Markdown 预览。它不需要在第一阶段成为依赖最少的轻量项目；相反，应该优先复用 Zed 现有 crate、代码和实现方式来保证体验和实现速度。后续再逐步删除或瘦身对这个目标不必要的 Zed 功能、入口和依赖。
 
 ## 实现指引
 
-起点不是裁剪现有 Zed，而是先做新的 Markdown-only 入口，让它成为一个明确的 Markdown 文档编辑器。
+起点不是裁剪现有 Zed，而是先做新的 Markdown-only 入口，让它成为一个明确的单文件 Markdown 文档编辑器。
 
 写代码时遵守复用优先的原则：需要实现一个功能时，先评估 Zed 现有 crate 能不能直接复用；如果不能直接复用，就参考 Zed 现有实现和代码风格做包装或改造；如果仍然不合适，再自己实现。
 
 复用不是只复用 crate 名称，而是尽量复用 Zed 已有的代码、逻辑、初始化顺序、数据结构、交互模式和架构边界。每次新增能力前，都要先读 Zed 对应功能的实现，经过判断后再决定是直接引入、包装复用、局部改造，还是最后才自己实现。
 
-硬约束：凡是 Zed 已经有的功能，Markdown 编辑器对应的界面和逻辑必须优先从 Zed 抄、搬、包或直接调用。只有确认 Zed 现有实现不适合 Markdown-only 产品边界，或者会强制暴露当前阶段不允许的 IDE 功能时，才允许做局部改造或自定义实现，并且要在阶段记录里说明原因。
+硬约束：凡是 Zed 已经有的功能，Markdown 编辑器对应的界面和逻辑必须优先从 Zed 抄、搬、包或直接调用。只有确认 Zed 现有实现不适合 Markdown-only 单文件产品边界，或者会强制暴露当前阶段不允许的 IDE 功能时，才允许做局部改造或自定义实现，并且要在阶段记录里说明原因。
 
 架构上也优先沿用 Zed 的组织方式、交互方式和抽象方式，能抄就先抄，先保证产品一致性，再谈简化。
 
@@ -89,7 +90,7 @@
 - 用户可以运行当前入口并看到 Markdown-only 窗口骨架。
 - 入口代码不暴露当前阶段不需要的 IDE 功能。
 
-后续方向：在这个新入口上逐步接入 Zed 的 editor、tabs、文件打开保存、Command Palette 和 Markdown preview。
+后续方向：在这个新入口上逐步接入 Zed 的 editor、单文件打开保存、命令入口和 Markdown preview。
 
 ### 阶段 2 - 可编辑 Markdown 文档区域
 
@@ -100,7 +101,8 @@
 - 在 `crates/markdown_editor` 中接入 Zed 的 `editor` / `language` / `multi_buffer` 等必要 crate。
 - 启动后创建一个空的 Markdown 文档 buffer，并在窗口中渲染可输入的编辑器。
 - 优先复用 Zed editor 的现有行为、主题和输入处理。
-- 暂不做多 tab、打开文件、保存文件、Command Palette 或 Markdown preview。
+- 暂不做打开文件、保存文件、Command Palette 或 Markdown preview。
+- 不做多文档标签页。
 - 不引入 Project Panel、Agent、Terminal、Git、Debugger 等 IDE 型入口。
 
 验收标准：
@@ -109,11 +111,11 @@
 - 用户可以运行当前入口，并在窗口中看到可聚焦、可输入的 Markdown 编辑区域。
 - 新入口仍然不暴露当前阶段不需要的 IDE 功能。
 
-后续方向：在可编辑文档区域稳定后，再接入打开/保存文件、多 tab、Command Palette 和 Markdown preview。
+后续方向：在可编辑文档区域稳定后，再接入单文件打开/保存、命令入口和 Markdown preview。
 
 ### 阶段 3 - 文件打开与保存
 
-目标：让 Markdown-only 入口从临时空 buffer 变成可以打开和保存 Markdown 文件的文档编辑器。
+目标：让 Markdown-only 入口从临时空 buffer 变成可以打开和保存单个 Markdown 文件的文档编辑器。
 
 范围：
 
@@ -122,7 +124,8 @@
 - 支持保存当前文档内容回原路径。
 - 优先复用 Zed 已有的文件、buffer、project 或 workspace 相关逻辑；开始实现前必须先阅读 Zed 的打开文件和保存文件链路。
 - 不为了阶段 3 自己发明独立文档模型，除非确认 Zed 现有路径不适合当前入口。
-- 暂不做多 tab、Command Palette、Markdown preview 或 Project Panel。
+- 暂不做命令入口、Markdown preview 或 Project Panel。
+- 不做多文档标签页。
 
 验收标准：
 
@@ -131,11 +134,11 @@
 - 用户可以编辑内容并保存回磁盘。
 - 新入口仍然不暴露当前阶段不需要的 IDE 功能。
 
-后续方向：文件 I/O 跑通后，再接入多 tab、Command Palette 和 Markdown preview。
+后续方向：文件 I/O 跑通后，再接入命令入口和 Markdown preview。
 
 ### 阶段 4 - 文档外壳与保存状态
 
-目标：让单文档 Markdown 编辑器显示当前文档身份和保存状态，避免用户只能看到裸编辑区。
+目标：让单文件 Markdown 编辑器显示当前文档身份和保存状态，避免用户只能看到裸编辑区。
 
 范围：
 
@@ -144,7 +147,8 @@
 - 显示保存状态，并在编辑后切换为未保存状态。
 - 保存成功后恢复为已保存状态。
 - 优先复用 Zed `EditorEvent` / `Buffer` 的 dirty 和 saved 语义，不另建独立文档状态模型。
-- 暂不做多 tab、Command Palette、Markdown preview、Save As 或文件选择器。
+- 暂不做 Command Palette、Markdown preview、Save As 或文件选择器。
+- 不做多文档标签页。
 
 验收标准：
 
@@ -154,41 +158,38 @@
 - `Ctrl+S` 保存成功后状态显示为已保存。
 - 新入口仍然不暴露当前阶段不需要的 IDE 功能。
 
-后续方向：单文档外壳稳定后，再接入多 tab、Command Palette 和 Markdown preview。
+后续方向：单文件文档外壳稳定后，再接入命令入口、GUI 打开/另存为和 Markdown preview。
 
-### 阶段 5 - Markdown 工作台成型
+### 阶段 5 - 单文件 Markdown 工作台成型
 
-目标：把当前单文档编辑器推进成一个可以日常使用的 Markdown 工作台，用户可以完全通过界面完成打开、切换、编辑、保存、预览和常用命令操作，而不是只靠命令行和单窗口编辑。
+目标：把当前单文件编辑器推进成一个可以日常使用的单文件 Markdown 工作台，用户可以通过界面完成打开、编辑、保存、预览和常用命令操作，而不是只靠命令行。
 
 范围：
 
-- 提供 GUI 打开文件入口，用户可以从应用内选择 `.md` / `.markdown` 文件。
+- 提供 GUI 打开文件入口，用户可以从应用内选择一个 `.md` / `.markdown` 文件。
 - 支持 `Ctrl+O` 打开 Markdown 文件。
 - 支持从 GUI 新建空 Markdown 文档。
-- 支持同时打开多个 Markdown 文档，并以标签页形式显示。
-- 支持点击标签页切换当前活动文档。
-- 支持关闭标签页，关闭当前活动文档后切换到相邻文档。
-- 标签页显示文件名，并用保存状态区分已保存和未保存文档。
-- 当前文档栏、保存状态和 `Ctrl+S` 必须跟随活动标签页切换。
-- 提供 Markdown preview，允许在编辑与预览之间切换，并让预览跟随当前活动文档实时更新。
-- 保留 Command Palette，并把打开文件、新建文档、保存、切换预览、切换标签页、打开设置文件等常用动作放进去。
+- 打开新文件时替换当前文档。
+- 提供轻量 Zed 风格标题栏，显示当前文件路径、文件名、保存状态和常用操作。
+- 提供 Markdown preview，允许在编辑与预览之间切换，并让预览跟随当前文档实时更新。
+- 保留一个最小命令入口，并把打开文件、新建文档、保存、另存为、切换预览等常用动作放进去。
 - 保留常见文档编辑能力的入口，包括撤销、重做、查找、复制、粘贴、另存为。
-- 优先复用或仿照 Zed 已有的打开文件、tab、pane/item、preview、command palette、dirty-state 和 UI 逻辑；如果当前阶段不能直接引入 workspace/pane，需要在实现记录里说明原因，并尽量保持结构可迁移。
+- 优先学习并复现 Zed 已有的标题栏、打开文件、preview、command palette、dirty-state 和 UI 逻辑；不直接引入会暴露 Project Panel、workspace 文件夹、Git、Terminal、Agent、Debugger、扩展管理等 IDE 型入口的 crate。
 - 不暴露 Project Panel、文件树、workspace 文件夹打开、Git、Terminal、Agent、Debugger、扩展管理等 IDE 型入口。
+- 不做多文档标签页。
 
 验收标准：
 
 - `cargo check -p markdown_editor` 通过。
-- 用户可以启动应用后，通过 GUI 选择并打开 Markdown 文件。
-- 用户可以打开至少两个 Markdown 文件，并通过标签页切换。
+- 用户可以启动应用后，通过 GUI 选择并打开一个 Markdown 文件。
 - 用户可以新建空 Markdown 文档。
-- 用户可以关闭标签页。
-- 用户可以打开和关闭 Markdown preview，并且预览会跟随当前活动文档更新。
-- 用户可以通过 Command Palette 执行常用文档命令。
-- 编辑任意标签后，该标签和文档栏能反映未保存状态；保存后恢复已保存状态。
+- 用户可以打开和关闭 Markdown preview，并且预览会跟随当前文档更新。
+- 用户可以通过最小命令入口执行常用文档命令。
+- 编辑后标题栏能反映未保存状态；保存后恢复已保存状态。
 - 新入口仍然不暴露当前阶段不需要的 IDE 功能。
+- 入口中没有 tab / tabs / TabBar / 多文档切换相关代码。
 
-后续方向：工作台成型后，再考虑把内部实现进一步收敛到更接近 Zed 的文档/标签/面板模型，或者做更深的底层瘦身。
+后续方向：单文件工作台稳定后继续完善单文件编辑体验。多标签页不是当前产品目标。
 
 ## 运行方式
 
@@ -223,35 +224,35 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
 - 对应目标：建立新的 `crates/markdown_editor` crate 和可独立启动的 Markdown-only 入口骨架。
 - 完成情况：已新增 `crates/markdown_editor`，并接入 `gpui`、`assets`、`settings`、`theme` 和 `ui` 的最小初始化链路。
 - 验收结果：`cargo check -p markdown_editor` 通过；用户已本地运行 `cargo run -p markdown_editor --bin markdown-editor` 并成功打开 Markdown-only 窗口骨架。
-- 对后续目标的影响：阶段 1 已完成。下一阶段可以在这个入口上接入 Zed 的 editor，使窗口从静态骨架变成可编辑的 Markdown 文档界面。
+- 对后续目标的影响：阶段 1 已完成。下一阶段可以在这个入口上接入 Zed 的 editor，使窗口从静态骨架变成可编辑的单文件 Markdown 文档界面。
 
 ### 2026-05-20 - 阶段 2：可编辑 Markdown 文档区域
 
 - 对应目标：把 Markdown-only 窗口从静态骨架推进到可输入的 Markdown 文档编辑界面。
 - 完成情况：已在 `crates/markdown_editor` 中接入 `editor`，并将窗口内容切换为可聚焦的编辑器实体；随后根据用户反馈改为允许默认 keymap 部分加载，以便在新入口里仍然复用 Zed 的 editor 快捷键，而不会因为缺少 workspace/git/agent 等无关 action 而整包失败。
 - 验收结果：`cargo check -p markdown_editor` 通过；用户已本地运行验证，可以输入并使用 `Enter` 正常换行。
-- 对后续目标的影响：阶段 2 已完成。下一阶段可以继续接入打开/保存文件、多 tab、Command Palette 和 Markdown preview。
+- 对后续目标的影响：阶段 2 已完成。下一阶段可以继续接入单文件打开/保存、命令入口和 Markdown preview。
 
 ### 2026-05-20 - 阶段 3：文件打开与保存
 
-- 对应目标：让 Markdown-only 入口从临时空 buffer 变成可以打开和保存 Markdown 文件的文档编辑器。
+- 对应目标：让 Markdown-only 入口从临时空 buffer 变成可以打开和保存单个 Markdown 文件的文档编辑器。
 - 完成情况：已支持从命令行传入 `.md` / `.markdown` 文件路径，并用 Zed 的 `Buffer` + `Editor::for_buffer` 创建文档编辑器；已新增入口层 `Save` action，并绑定 `Ctrl+S` 保存当前编辑内容回原路径。
 - 验收结果：`cargo check -p markdown_editor` 通过；用户已本地运行验证，可以通过命令行打开 `.md` 文件，编辑内容，并用 `Ctrl+S` 保存回原文件。
-- 对后续目标的影响：阶段 3 已完成最小闭环。当前文件路径和磁盘写入还是入口层薄适配，后续接入 workspace/project/tabs 时应优先升级为 Zed 的 `Project::open_local_buffer` / `save_buffer` 链路。
+- 对后续目标的影响：阶段 3 已完成最小闭环。当前文件路径和磁盘写入还是入口层薄适配，后续如要升级文件模型，应优先研究 Zed 的 `Project::open_local_buffer` / `save_buffer` 链路，但不能引入 project/workspace 用户心智。
 
 ### 2026-05-20 - 阶段 4：文档外壳与保存状态
 
-- 对应目标：让当前单文档 Markdown 编辑器显示文档身份和保存状态，为后续多 tab、预览和命令入口提供基础 UI 外壳。
+- 对应目标：让当前单文件 Markdown 编辑器显示文档身份和保存状态。
 - 完成情况：已在 `MarkdownEditorShell` 中新增顶部文档栏，显示文件名、路径和保存状态；已订阅 Zed `EditorEvent::DirtyChanged` / `EditorEvent::Saved`，并在保存成功后调用 `Buffer::did_save` 复用 Zed 的 dirty/saved 语义。
 - 验收结果：`cargo check -p markdown_editor` 通过；仍需要用户本地运行验证标题栏显示、编辑后状态变为 `Unsaved`、`Ctrl+S` 后恢复为 `Saved`。
-- 对后续目标的影响：阶段 4 已完成最小实现。后续多 tab 可以沿用这个文档身份和 dirty 状态显示，Markdown preview 也可以从当前活动文档 shell 获取上下文。
+- 对后续目标的影响：阶段 4 已完成最小实现。后续命令入口和 Markdown preview 可以从当前单文件 document shell 获取上下文。
 
-### 2026-05-20 - 阶段 5：Markdown 工作台成型
+### 2026-05-20 - 阶段 5：单文件 Markdown 工作台成型
 
-- 对应目标：把当前单文档编辑器推进成可以通过界面打开、切换、编辑、保存、预览和执行常用命令的 Markdown 工作台。
-- 完成情况：已将 `MarkdownEditorShell` 改为多文档工作台；支持 GUI 打开 Markdown 文件、`Ctrl+O`、新建文档、多个标签页、点击切换标签、关闭标签、当前文档栏跟随活动标签、`Ctrl+S` 保存当前标签、`Save As`、Markdown preview 开关、预览跟随活动文档更新，以及一个最小命令入口。实现中继续复用 Zed 的 `Editor`、`Buffer` dirty/saved 语义、GPUI 系统文件选择器、Zed `Tab` / `TabBar` UI 组件和 `markdown` crate 的 `Markdown` / `MarkdownElement` 渲染。
-- 验收结果：`cargo check -p markdown_editor` 通过；仍需要用户本地运行验证 GUI 打开文件、多标签切换/关闭、另存为、预览和命令入口的实际交互。
-- 对后续目标的影响：阶段 5 已完成工作台骨架的大块实现。当前没有直接接入 `workspace::Workspace` / `Pane`，原因是它们会连带引入 Project Panel、workspace 文件夹、Git、terminal、agent 等当前产品边界禁止暴露的 IDE 型入口；后续如果要继续靠近 Zed pane/item 模型，应做 Markdown-only 包装层或拆出更小的可复用 tab/item 子结构。
+- 对应目标：把当前单文件编辑器推进成可以通过界面打开、编辑、保存、预览和执行常用命令的单文件 Markdown 工作台。
+- 完成情况：阶段 5 经历过一次方向变化：最初曾短暂尝试把工作台做成多文档/多标签形态，但随后根据产品边界调整，明确当前目标是单文件 Markdown 编辑器。因此已将阶段 5 收回单文件方向，移除多标签页和多文档切换目标；实现保留 GUI 打开单个 Markdown 文件、新建文档、保存、另存为、Markdown preview 开关、预览跟随当前文档更新、轻量 Zed 风格标题栏，以及一个最小命令入口。实现中继续复用 Zed 的 `Editor`、`Buffer` dirty/saved 语义、GPUI 系统文件选择器、Zed 标题栏视觉结构和 `markdown` crate 的 `Markdown` / `MarkdownElement` 渲染。
+- 验收结果：`cargo check -p markdown_editor` 通过；仍需要用户本地运行验证 GUI 打开文件、另存为、预览和命令入口的实际交互。
+- 对后续目标的影响：阶段 5 回到单文件产品边界。当前不做 tab，也不再保留 tab 相关代码；后续如果重新引入多标签，需要重新评估是否仍符合产品目标。
 
 记录格式：
 

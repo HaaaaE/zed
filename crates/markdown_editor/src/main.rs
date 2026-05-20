@@ -13,7 +13,9 @@ use language::Buffer;
 use markdown::{Markdown, MarkdownElement, MarkdownFont, MarkdownStyle};
 use settings::{DEFAULT_KEYMAP_PATH, KeymapFile};
 use theme::LoadThemes;
-use ui::{prelude::*, Button, ButtonSize, ButtonStyle, Tab, TabBar, TabPosition};
+use ui::{
+    Button, ButtonSize, ButtonStyle, LabelSize, prelude::*, utils::platform_title_bar_height,
+};
 
 actions!(
     markdown_editor,
@@ -22,18 +24,13 @@ actions!(
         OpenDocument,
         Save,
         SaveAs,
-        CloseDocument,
         TogglePreview,
-        ToggleCommandPalette,
-        ActivatePreviousDocument,
-        ActivateNextDocument
+        ToggleCommandPalette
     ]
 );
 
 struct MarkdownEditorShell {
-    documents: Vec<Document>,
-    active_document: usize,
-    next_untitled_id: usize,
+    document: Document,
     show_preview: bool,
     show_command_palette: bool,
     preview: Entity<Markdown>,
@@ -60,84 +57,71 @@ impl DocumentStatus {
             Self::Unsaved => "Unsaved",
         }
     }
-
-    fn marker(self) -> &'static str {
-        match self {
-            Self::Saved => "",
-            Self::Unsaved => "*",
-        }
-    }
 }
 
 impl MarkdownEditorShell {
     fn new(path: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let preview = cx.new(|cx| Markdown::new(SharedString::default(), None, None, cx));
+        let document = Self::build_document(path, None, window, cx);
         let mut this = Self {
-            documents: Vec::new(),
-            active_document: 0,
-            next_untitled_id: 1,
+            document,
             show_preview: false,
             show_command_palette: false,
             preview,
         };
 
-        if let Some(path) = path {
-            this.open_path(path, window, cx);
-        }
-
-        if this.documents.is_empty() {
-            this.new_document(window, cx);
-        }
-
-        this.focus_active_editor(window, cx);
+        this.focus_editor(window, cx);
         this.refresh_preview(cx);
         this
     }
 
-    fn new_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let title = format!("Untitled {}", self.next_untitled_id);
-        self.next_untitled_id += 1;
-        self.add_document(None, String::new(), Some(title), window, cx);
-    }
-
-    fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        match read_markdown_file(&path) {
-            Ok(contents) => self.add_document(Some(path), contents, None, window, cx),
-            Err(error) => eprintln!("failed to open markdown file: {error:#}"),
-        }
-    }
-
-    fn add_document(
-        &mut self,
+    fn build_document(
         path: Option<PathBuf>,
-        contents: String,
         title: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Document {
+        let contents = path
+            .as_ref()
+            .map(read_markdown_file)
+            .transpose()
+            .unwrap_or_else(|error| {
+                eprintln!("failed to open markdown file: {error:#}");
+                None
+            })
+            .unwrap_or_default();
         let editor = cx.new(|cx| {
             let buffer = cx.new(|cx| Buffer::local(contents, cx));
             Editor::for_buffer(buffer, None, window, cx)
         });
-        let editor_subscription = cx.subscribe(&editor, |this, editor, event, cx| match event {
+        let editor_subscription = cx.subscribe(&editor, |this, _editor, event, cx| match event {
             EditorEvent::DirtyChanged | EditorEvent::Saved | EditorEvent::BufferEdited => {
-                this.refresh_document_status(&editor, cx);
+                this.refresh_status(cx);
                 this.refresh_preview(cx);
             }
             _ => {}
         });
 
-        self.documents.push(Document {
+        Document {
             editor,
             path,
             title,
             status: DocumentStatus::Saved,
             _editor_subscription: editor_subscription,
-        });
-        self.active_document = self.documents.len() - 1;
-        self.refresh_active_status(cx);
+        }
+    }
+
+    fn new_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.document = Self::build_document(None, Some("Untitled".to_string()), window, cx);
+        self.focus_editor(window, cx);
         self.refresh_preview(cx);
-        self.focus_active_editor(window, cx);
+        cx.notify();
+    }
+
+    fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.document = Self::build_document(Some(path), None, window, cx);
+        self.focus_editor(window, cx);
+        self.refresh_preview(cx);
         cx.notify();
     }
 
@@ -145,19 +129,20 @@ impl MarkdownEditorShell {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
-            multiple: true,
-            prompt: Some("Open Markdown Files".into()),
+            multiple: false,
+            prompt: Some("Open Markdown File".into()),
         });
 
         cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = paths.await else {
                 return;
             };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
 
             this.update_in(cx, |this, window, cx| {
-                for path in paths {
-                    this.open_path(path, window, cx);
-                }
+                this.open_path(path, window, cx);
             })
             .ok();
         })
@@ -165,22 +150,20 @@ impl MarkdownEditorShell {
     }
 
     fn save(&mut self, _: &Save, window: &mut Window, cx: &mut Context<Self>) {
-        if self.active_document().and_then(|document| document.path.as_ref()).is_none() {
+        if self.document.path.as_ref().is_none() {
             self.save_as(&SaveAs, window, cx);
             return;
         }
 
-        self.save_active_to_current_path(cx);
+        self.save_to_current_path(cx);
     }
 
     fn save_as(&mut self, _: &SaveAs, window: &mut Window, cx: &mut Context<Self>) {
-        let suggested_name = self
-            .active_document()
-            .map(Document::title)
-            .unwrap_or_else(|| "untitled.md".to_string());
+        let suggested_name = self.document.title();
         let directory = self
-            .active_document()
-            .and_then(|document| document.path.as_ref())
+            .document
+            .path
+            .as_ref()
             .and_then(|path| path.parent())
             .map(PathBuf::from)
             .or_else(|| env::current_dir().ok())
@@ -198,53 +181,32 @@ impl MarkdownEditorShell {
                     return;
                 }
 
-                if let Some(document) = this.active_document_mut() {
-                    document.path = Some(path);
-                }
-                this.save_active_to_current_path(cx);
+                this.document.path = Some(path);
+                this.save_to_current_path(cx);
             })
             .ok();
         })
         .detach();
     }
 
-    fn save_active_to_current_path(&mut self, cx: &mut Context<Self>) {
-        let Some(document) = self.active_document() else {
-            return;
-        };
-        let Some(path) = document.path.clone() else {
+    fn save_to_current_path(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.document.path.clone() else {
             return;
         };
 
-        let contents = document.editor.read(cx).text(cx);
+        let contents = self.document.editor.read(cx).text(cx);
         if let Err(error) = fs::write(&path, contents) {
             eprintln!("failed to save markdown file {}: {error:#}", path.display());
             return;
         }
 
-        let editor = document.editor.clone();
+        let editor = self.document.editor.clone();
         if let Some(buffer) = singleton_buffer(&editor, cx) {
             let version = buffer.read(cx).text_snapshot().version().clone();
             buffer.update(cx, |buffer, cx| buffer.did_save(version, None, cx));
         }
-        self.refresh_active_status(cx);
+        self.refresh_status(cx);
         self.refresh_preview(cx);
-    }
-
-    fn close_document(&mut self, _: &CloseDocument, window: &mut Window, cx: &mut Context<Self>) {
-        if self.documents.len() <= 1 {
-            self.documents.clear();
-            self.new_document(window, cx);
-            return;
-        }
-
-        self.documents.remove(self.active_document);
-        if self.active_document >= self.documents.len() {
-            self.active_document = self.documents.len() - 1;
-        }
-        self.focus_active_editor(window, cx);
-        self.refresh_preview(cx);
-        cx.notify();
     }
 
     fn toggle_preview(&mut self, _: &TogglePreview, _window: &mut Window, cx: &mut Context<Self>) {
@@ -263,74 +225,8 @@ impl MarkdownEditorShell {
         cx.notify();
     }
 
-    fn activate_previous_document(
-        &mut self,
-        _: &ActivatePreviousDocument,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.documents.is_empty() {
-            return;
-        }
-        self.active_document = if self.active_document == 0 {
-            self.documents.len() - 1
-        } else {
-            self.active_document - 1
-        };
-        self.focus_active_editor(window, cx);
-        self.refresh_preview(cx);
-        cx.notify();
-    }
-
-    fn activate_next_document(
-        &mut self,
-        _: &ActivateNextDocument,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.documents.is_empty() {
-            return;
-        }
-        self.active_document = (self.active_document + 1) % self.documents.len();
-        self.focus_active_editor(window, cx);
-        self.refresh_preview(cx);
-        cx.notify();
-    }
-
-    fn activate_document(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if index >= self.documents.len() {
-            return;
-        }
-        self.active_document = index;
-        self.focus_active_editor(window, cx);
-        self.refresh_preview(cx);
-        cx.notify();
-    }
-
-    fn close_document_at(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        if index >= self.documents.len() {
-            return;
-        }
-
-        self.active_document = index;
-        self.close_document(&CloseDocument, window, cx);
-    }
-
-    fn refresh_document_status(&mut self, editor: &Entity<Editor>, cx: &mut Context<Self>) {
-        if let Some(document) = self
-            .documents
-            .iter_mut()
-            .find(|document| document.editor == *editor)
-        {
-            document.status = document_status(document, cx);
-        }
-        cx.notify();
-    }
-
-    fn refresh_active_status(&mut self, cx: &mut Context<Self>) {
-        if let Some(document) = self.active_document_mut() {
-            document.status = document_status(document, cx);
-        }
+    fn refresh_status(&mut self, cx: &mut Context<Self>) {
+        self.document.status = document_status(&self.document, cx);
         cx.notify();
     }
 
@@ -338,110 +234,77 @@ impl MarkdownEditorShell {
         if !self.show_preview {
             return;
         }
-        let text = self
-            .active_document()
-            .map(|document| document.editor.read(cx).text(cx))
-            .unwrap_or_default();
+        let text = self.document.editor.read(cx).text(cx);
         self.preview.update(cx, |preview, cx| {
             preview.reset(SharedString::from(text), cx);
         });
     }
 
-    fn focus_active_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(document) = self.active_document() {
-            window.focus(&document.editor.focus_handle(cx), cx);
-        }
+    fn focus_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.document.editor.focus_handle(cx), cx);
     }
 
-    fn active_document(&self) -> Option<&Document> {
-        self.documents.get(self.active_document)
-    }
-
-    fn active_document_mut(&mut self) -> Option<&mut Document> {
-        self.documents.get_mut(self.active_document)
-    }
-
-    fn render_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .h_8()
-            .px_3()
-            .gap_1()
-            .items_center()
-            .border_b_1()
-            .border_color(cx.theme().colors().border_variant)
-            .bg(cx.theme().colors().toolbar_background)
-            .child(action_button("new-document", "New", NewDocument))
-            .child(action_button("open-document", "Open", OpenDocument))
-            .child(action_button("save-document", "Save", Save))
-            .child(action_button("save-as-document", "Save As", SaveAs))
-            .child(action_button("toggle-preview", "Preview", TogglePreview))
-            .child(action_button(
-                "toggle-command-palette",
-                "Commands",
-                ToggleCommandPalette,
-            ))
-    }
-
-    fn render_tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let active = self.active_document;
-        let shell = cx.entity();
-        TabBar::new("markdown-tabs").children(self.documents.iter().enumerate().map(
-            move |(index, document)| {
-                let shell_for_tab = shell.clone();
-                let shell_for_close = shell.clone();
-                Tab::new(format!("markdown-tab-{index}"))
-                    .position(tab_position(index, active, self.documents.len()))
-                    .toggle_state(index == active)
-                    .child(format!("{}{}", document.status.marker(), document.title()))
-                    .end_slot(
-                        Button::new(format!("close-markdown-tab-{index}"), "x")
-                            .size(ButtonSize::Compact)
-                            .style(ButtonStyle::Subtle)
-                            .on_click(move |_event, window, cx| {
-                                cx.stop_propagation();
-                                shell_for_close.update(cx, |shell, cx| {
-                                    shell.close_document_at(index, window, cx)
-                                });
-                            }),
-                    )
-                    .on_click(move |_event, window, cx| {
-                        shell_for_tab.update(cx, |shell, cx| {
-                            shell.activate_document(index, window, cx)
-                        });
-                    })
-            },
-        ))
-    }
-
-    fn render_document_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let title = self
-            .active_document()
-            .map(Document::title)
-            .unwrap_or_else(|| "Untitled".to_string());
+    fn render_title_bar(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let title = self.document.title();
         let path = self
-            .active_document()
-            .map(Document::path_label)
+            .document
+            .path
+            .as_ref()
+            .map(|path| path.display().to_string())
             .unwrap_or_else(|| "Unsaved Markdown document".to_string());
-        let status = self
-            .active_document()
-            .map(|document| document.status.label())
-            .unwrap_or("Saved");
+        let status = self.document.status.label();
 
         h_flex()
-            .h_8()
-            .px_3()
+            .h(platform_title_bar_height(window))
+            .w_full()
+            .px_2()
             .items_center()
             .justify_between()
+            .bg(cx.theme().colors().title_bar_background)
             .border_b_1()
             .border_color(cx.theme().colors().border_variant)
             .child(
                 h_flex()
-                    .items_baseline()
-                    .gap_2()
-                    .child(div().text_sm().child(title))
-                    .child(div().text_xs().text_color(cx.theme().colors().text_muted).child(path)),
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        Button::new("markdown-editor-title", "Markdown Editor")
+                            .label_size(LabelSize::Small)
+                            .style(ButtonStyle::Subtle),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().colors().text_muted)
+                            .child(path),
+                    ),
             )
-            .child(div().text_xs().text_color(cx.theme().colors().text_muted).child(status))
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().colors().text_muted)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cx.theme().colors().text_muted)
+                            .child(status),
+                    )
+                    .child(action_button("new-document", "New", NewDocument))
+                    .child(action_button("open-document", "Open", OpenDocument))
+                    .child(action_button("save-document", "Save", Save))
+                    .child(action_button("toggle-preview", "Preview", TogglePreview))
+                    .child(action_button(
+                        "toggle-command-palette",
+                        "Commands",
+                        ToggleCommandPalette,
+                    )),
+            )
     }
 
     fn render_preview(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -471,13 +334,19 @@ impl MarkdownEditorShell {
             .border_color(cx.theme().colors().border)
             .bg(cx.theme().colors().elevated_surface_background)
             .shadow_lg()
-            .child(div().px_2().pb_2().text_xs().text_color(cx.theme().colors().text_muted).child("Command Palette"))
+            .child(
+                div()
+                    .px_2()
+                    .pb_2()
+                    .text_xs()
+                    .text_color(cx.theme().colors().text_muted)
+                    .child("Command Palette"),
+            )
             .child(command_row("New Markdown Document", NewDocument))
             .child(command_row("Open Markdown File...", OpenDocument))
             .child(command_row("Save", Save))
             .child(command_row("Save As...", SaveAs))
             .child(command_row("Toggle Markdown Preview", TogglePreview))
-            .child(command_row("Close Document", CloseDocument))
     }
 }
 
@@ -491,13 +360,6 @@ impl Document {
             .or_else(|| self.title.clone())
             .unwrap_or_else(|| "Untitled".to_string())
     }
-
-    fn path_label(&self) -> String {
-        self.path
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "Unsaved Markdown document".to_string())
-    }
 }
 
 impl Render for MarkdownEditorShell {
@@ -508,20 +370,15 @@ impl Render for MarkdownEditorShell {
             .flex()
             .flex_col()
             .bg(cx.theme().colors().editor_background)
-            .on_action(cx.listener(|this, _: &NewDocument, window, cx| {
-                this.new_document(window, cx)
-            }))
+            .on_action(
+                cx.listener(|this, _: &NewDocument, window, cx| this.new_document(window, cx)),
+            )
             .on_action(cx.listener(Self::open_document))
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::save_as))
-            .on_action(cx.listener(Self::close_document))
             .on_action(cx.listener(Self::toggle_preview))
             .on_action(cx.listener(Self::toggle_command_palette))
-            .on_action(cx.listener(Self::activate_previous_document))
-            .on_action(cx.listener(Self::activate_next_document))
-            .child(self.render_tabs(cx))
-            .child(self.render_toolbar(cx))
-            .child(self.render_document_bar(cx))
+            .child(self.render_title_bar(window, cx))
             .child(
                 h_flex()
                     .flex_1()
@@ -530,13 +387,20 @@ impl Render for MarkdownEditorShell {
                         div()
                             .flex_1()
                             .size_full()
-                            .child(self.active_document().unwrap().editor.clone()),
+                            .child(self.document.editor.clone()),
                     )
                     .when(self.show_preview, |this| {
-                        this.child(div().w_1_2().h_full().child(self.render_preview(window, cx)))
+                        this.child(
+                            div()
+                                .w_1_2()
+                                .h_full()
+                                .child(self.render_preview(window, cx)),
+                        )
                     }),
             )
-            .when(self.show_command_palette, |this| this.child(self.render_command_palette(cx)))
+            .when(self.show_command_palette, |this| {
+                this.child(self.render_command_palette(cx))
+            })
     }
 }
 
@@ -560,11 +424,8 @@ fn main() {
                 KeyBinding::new("ctrl-o", OpenDocument, Some("Editor")),
                 KeyBinding::new("ctrl-s", Save, Some("Editor")),
                 KeyBinding::new("ctrl-shift-s", SaveAs, Some("Editor")),
-                KeyBinding::new("ctrl-w", CloseDocument, Some("Editor")),
                 KeyBinding::new("ctrl-shift-p", ToggleCommandPalette, None),
                 KeyBinding::new("ctrl-shift-v", TogglePreview, Some("Editor")),
-                KeyBinding::new("ctrl-pageup", ActivatePreviousDocument, Some("Editor")),
-                KeyBinding::new("ctrl-pagedown", ActivateNextDocument, Some("Editor")),
             ]);
 
             if let Err(error) = Assets.load_fonts(cx) {
@@ -602,16 +463,6 @@ fn command_row(label: &'static str, action: impl gpui::Action) -> impl IntoEleme
         .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
             window.dispatch_action(action.boxed_clone(), cx)
         })
-}
-
-fn tab_position(index: usize, active: usize, len: usize) -> TabPosition {
-    if index == 0 {
-        TabPosition::First
-    } else if index + 1 == len {
-        TabPosition::Last
-    } else {
-        TabPosition::Middle(index.cmp(&active))
-    }
 }
 
 fn document_status(document: &Document, cx: &App) -> DocumentStatus {
