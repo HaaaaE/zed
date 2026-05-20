@@ -268,6 +268,13 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
 - 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过。
 - 对后续目标的影响：已形成第一条真实接入链路：tree-sitter Markdown semantic tree -> `markdown_wysiwyg` projection -> Zed `Editor` display map styling。普通 `fold_map` 不再作为 inline marker hiding 的长期方案；后续 marker 真隐藏、heading 字号/行高变化和 selection-safe rendered editing 需要真正的 Markdown projection transform。下一步应先用 `custom_highlights` 增加 heading 内容加粗、inline strong/emphasis/inline-code/link 等不改变文本几何的视觉变化，同时设计长期 projection 扩展。
 
+### 2026-05-20 - Typora WYSIWYG 阶段 1：安全视觉语义增强
+
+- 对应目标：在不改变文本几何、不破坏 selection/hit-test 的前提下，让 Markdown 编辑区开始呈现明显的富文本视觉差异。
+- 完成情况：`markdown_wysiwyg` 新增 tree-sitter inline span 提取，输出 emphasis、strong、inline code、link、strikethrough 的 source/content/marker ranges；同时继续输出 heading content 和 marker ranges。`markdown_editor` 将这些语义 ranges 映射到 `Editor` text highlights：heading 内容加粗/分级着色，strong 加粗，emphasis 斜体，inline code 使用 accent 文字和弱背景，link 使用链接色和下划线，strikethrough 使用删除线，Markdown marker 继续弱化显示。range 映射改用 `MultiBufferOffset` 到 `Anchor`，避免手算 point column。
+- 验收结果：`cargo test -p markdown_wysiwyg` 和 `cargo check -p markdown_editor` 通过；未运行 `cargo run`。
+- 对后续目标的影响：当前视觉增强已经覆盖 heading 和常见 inline 语义，但仍不改变字号/行高，也不真正隐藏 marker。heading 字号/行高和 rendered selection 需要继续设计并实现通用 editor projection/layout 扩展，不能用普通 fold 或半成品 per-run font-size hack 代替。
+
 记录格式：
 
 ```md

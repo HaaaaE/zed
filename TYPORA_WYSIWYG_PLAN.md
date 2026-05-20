@@ -632,3 +632,11 @@
 - `editor` crate 已新增两个通用 API：`newest_selection_point_range` 和 `replace_folds_with_type`；其中 fold 刷新 API 可继续服务块级/显式折叠场景，但不用于 inline marker hiding。
 - 已通过 `cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg`。
 - 下一步优先级：先用不改变文本几何的 `custom_highlights` 增加 heading content 加粗、inline strong/emphasis/inline-code/link 等视觉变化；同时设计真正的 projection transform 来支持隐藏 marker、heading 字号和 selection-safe rendered editing。
+
+### 2026-05-20 - 阶段 1 安全视觉语义增强
+
+- `markdown_wysiwyg` 新增 inline span 提取，基于 tree-sitter inline tree 输出 emphasis、strong、inline code、link、strikethrough 的 source range、content ranges 和 marker ranges。
+- `markdown_editor` 把 heading 和 inline spans 映射到 `Editor` text highlights，提供不改变文本几何的视觉变化：heading 内容加粗/分级着色、strong 加粗、emphasis 斜体、inline code 弱背景、link 颜色/下划线、strikethrough 删除线、marker 弱化。
+- range 映射改用 `MultiBufferOffset` 到 `Anchor`，不再手算 point column。
+- 已通过 `cargo test -p markdown_wysiwyg` 和 `cargo check -p markdown_editor`。
+- 本阶段没有实现 heading 字号/行高，也没有重新引入 fold hiding。字号/行高需要后续通用 editor projection/layout 扩展，必须与 selection、hit-test、soft wrap 和 long-document scroll 模型一起设计。

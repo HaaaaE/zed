@@ -10474,6 +10474,7 @@ dependencies = [
  "language",
  "markdown",
  "markdown_wysiwyg",
+ "multi_buffer",
  "settings",
  "theme",
  "theme_settings",

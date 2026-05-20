@@ -8,6 +8,7 @@ pub struct MarkdownSyntaxTree {
     source_len: usize,
     line_starts: Vec<usize>,
     blocks: Vec<MarkdownBlock>,
+    inline_spans: Vec<MarkdownInlineSpan>,
 }
 
 #[derive(Clone, Debug)]
@@ -30,6 +31,7 @@ impl fmt::Debug for MarkdownSyntaxTree {
             .field("source_len", &self.source_len)
             .field("line_starts", &self.line_starts)
             .field("blocks", &self.blocks)
+            .field("inline_spans", &self.inline_spans)
             .finish_non_exhaustive()
     }
 }
@@ -82,6 +84,23 @@ pub enum MarkdownBlockKind {
     Paragraph,
     AtxHeading { level: u8 },
     FencedCodeBlock,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MarkdownInlineSpan {
+    pub kind: MarkdownInlineKind,
+    pub source_range: Range<usize>,
+    pub content_ranges: Vec<Range<usize>>,
+    pub marker_ranges: Vec<Range<usize>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MarkdownInlineKind {
+    Emphasis,
+    Strong,
+    InlineCode,
+    Link,
+    Strikethrough,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -143,6 +162,10 @@ impl MarkdownSyntaxTree {
         &self.blocks
     }
 
+    pub fn inline_spans(&self) -> &[MarkdownInlineSpan] {
+        &self.inline_spans
+    }
+
     pub fn blocks_in_source_range(
         &self,
         range: Range<usize>,
@@ -202,12 +225,14 @@ impl MarkdownSyntaxTree {
         let tree = parse_markdown(source, old_tree);
         let line_starts = line_starts(source);
         let blocks = collect_blocks(source, &line_starts, tree.block_tree());
+        let inline_spans = collect_inline_spans(&tree);
 
         Self {
             tree,
             source_len: source.len(),
             line_starts,
             blocks,
+            inline_spans,
         }
     }
 
@@ -373,23 +398,25 @@ fn inline_included_ranges(parent_node: Node<'_>) -> Vec<TreeSitterRange> {
     let mut cursor = parent_node.walk();
 
     if cursor.goto_first_child() {
-        while cursor.goto_next_sibling() {
+        loop {
             let child = cursor.node();
-            if !child.is_named() {
-                continue;
+            if child.is_named() {
+                let child_range = child.range();
+                if range.start_byte < child_range.start_byte {
+                    ranges.push(TreeSitterRange {
+                        start_byte: range.start_byte,
+                        start_point: range.start_point,
+                        end_byte: child_range.start_byte,
+                        end_point: child_range.start_point,
+                    });
+                }
+                range.start_byte = child_range.end_byte;
+                range.start_point = child_range.end_point;
             }
 
-            let child_range = child.range();
-            if range.start_byte < child_range.start_byte {
-                ranges.push(TreeSitterRange {
-                    start_byte: range.start_byte,
-                    start_point: range.start_point,
-                    end_byte: child_range.start_byte,
-                    end_point: child_range.start_point,
-                });
+            if !cursor.goto_next_sibling() {
+                break;
             }
-            range.start_byte = child_range.end_byte;
-            range.start_point = child_range.end_point;
         }
     }
 
@@ -406,6 +433,82 @@ fn collect_blocks(source: &str, line_starts: &[usize], tree: &Tree) -> Vec<Markd
     add_blank_blocks(source, line_starts, &mut blocks);
     blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
     blocks
+}
+
+fn collect_inline_spans(parse_tree: &MarkdownParseTree) -> Vec<MarkdownInlineSpan> {
+    let mut spans = Vec::new();
+    for inline_tree in parse_tree.inline_trees() {
+        collect_inline_span_nodes(inline_tree.tree().root_node(), &mut spans);
+    }
+    spans.sort_by_key(|span| (span.source_range.start, span.source_range.end));
+    spans
+}
+
+fn collect_inline_span_nodes(node: Node<'_>, spans: &mut Vec<MarkdownInlineSpan>) {
+    if let Some(span) = inline_span_from_node(node) {
+        spans.push(span);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_inline_span_nodes(child, spans);
+    }
+}
+
+fn inline_span_from_node(node: Node<'_>) -> Option<MarkdownInlineSpan> {
+    let kind = match node.kind() {
+        "emphasis" => MarkdownInlineKind::Emphasis,
+        "strong_emphasis" => MarkdownInlineKind::Strong,
+        "code_span" => MarkdownInlineKind::InlineCode,
+        "inline_link" | "full_reference_link" | "collapsed_reference_link" | "shortcut_link"
+        | "uri_autolink" | "email_autolink" => MarkdownInlineKind::Link,
+        "strikethrough" => MarkdownInlineKind::Strikethrough,
+        _ => return None,
+    };
+
+    let source_range = node.byte_range();
+    let marker_ranges = inline_marker_ranges(node);
+    let content_ranges = inline_content_ranges(source_range.clone(), &marker_ranges);
+
+    Some(MarkdownInlineSpan {
+        kind,
+        source_range,
+        content_ranges,
+        marker_ranges,
+    })
+}
+
+fn inline_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
+    let mut marker_ranges = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "emphasis_delimiter" | "code_span_delimiter" | "link_destination"
+            | "link_label" | "link_title" => marker_ranges.push(child.byte_range()),
+            _ if !child.is_named() => marker_ranges.push(child.byte_range()),
+            _ => {}
+        }
+    }
+    marker_ranges.sort_by_key(|range| (range.start, range.end));
+    marker_ranges
+}
+
+fn inline_content_ranges(
+    source_range: Range<usize>,
+    marker_ranges: &[Range<usize>],
+) -> Vec<Range<usize>> {
+    let mut content_ranges = Vec::new();
+    let mut start = source_range.start;
+    for marker_range in marker_ranges {
+        if start < marker_range.start {
+            content_ranges.push(start..marker_range.start);
+        }
+        start = start.max(marker_range.end);
+    }
+    if start < source_range.end {
+        content_ranges.push(start..source_range.end);
+    }
+    content_ranges
 }
 
 fn collect_block_nodes(source: &str, node: Node<'_>, blocks: &mut Vec<MarkdownBlock>) {
@@ -653,6 +756,9 @@ mod tests {
 
         assert!(inline_kinds.contains(&"strong_emphasis"));
         assert!(inline_kinds.contains(&"inline_link"));
+        assert_eq!(tree.inline_spans().len(), 2);
+        assert_eq!(tree.inline_spans()[0].kind, MarkdownInlineKind::Strong);
+        assert_eq!(tree.inline_spans()[1].kind, MarkdownInlineKind::Link);
     }
 
     #[test]

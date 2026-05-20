@@ -22,6 +22,7 @@ gpui_platform.workspace = true
 language.workspace = true
 markdown.workspace = true
 markdown_wysiwyg.workspace = true
+multi_buffer.workspace = true
 settings.workspace = true
 theme.workspace = true
 theme_settings.workspace = true

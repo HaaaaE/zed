@@ -7,12 +7,14 @@ use assets::Assets;
 use clock::Global;
 use editor::{Anchor, Editor, EditorEvent, display_map::HighlightKey};
 use gpui::{
-    App, Context, Entity, Focusable as _, HighlightStyle, KeyBinding, MouseButton,
-    PathPromptOptions, SharedString, Subscription, Window, WindowOptions, actions, div,
+    App, Context, Entity, Focusable as _, FontStyle, FontWeight, HighlightStyle, KeyBinding,
+    MouseButton, PathPromptOptions, SharedString, StrikethroughStyle, Subscription, UnderlineStyle,
+    Window, WindowOptions, actions, div, px,
 };
-use language::{Buffer, Point};
+use language::Buffer;
 use markdown::{Markdown, MarkdownElement, MarkdownFont, MarkdownStyle};
-use markdown_wysiwyg::{MarkdownBlockKind, MarkdownSyntaxTree};
+use markdown_wysiwyg::{MarkdownBlockKind, MarkdownInlineKind, MarkdownSyntaxTree};
+use multi_buffer::MultiBufferOffset;
 use settings::{DEFAULT_KEYMAP_PATH, KeymapFile};
 use theme::LoadThemes;
 use ui::{
@@ -389,59 +391,286 @@ impl MarkdownWysiwygController {
             return;
         };
 
-        let marker_ranges = marker_highlight_ranges(editor, parse_tree, cx);
+        let highlights = markdown_highlight_ranges(editor, parse_tree, cx);
         editor.update(cx, |editor, cx| {
-            if marker_ranges.is_empty() {
-                editor.clear_highlights(markdown_marker_highlight_key(), cx);
-            } else {
-                editor.highlight_text(
-                    markdown_marker_highlight_key(),
-                    marker_ranges,
-                    markdown_marker_highlight_style(cx),
-                    cx,
-                );
-            }
+            apply_markdown_highlights(editor, highlights, cx);
         });
     }
 }
 
-fn marker_highlight_ranges(
+#[derive(Default)]
+struct MarkdownHighlightRanges {
+    marker: Vec<Range<Anchor>>,
+    heading_1: Vec<Range<Anchor>>,
+    heading_2: Vec<Range<Anchor>>,
+    heading_3: Vec<Range<Anchor>>,
+    heading_other: Vec<Range<Anchor>>,
+    strong: Vec<Range<Anchor>>,
+    emphasis: Vec<Range<Anchor>>,
+    inline_code: Vec<Range<Anchor>>,
+    link: Vec<Range<Anchor>>,
+    strikethrough: Vec<Range<Anchor>>,
+}
+
+fn markdown_highlight_ranges(
     editor: &Entity<Editor>,
     tree: &MarkdownSyntaxTree,
     cx: &mut App,
-) -> Vec<Range<Anchor>> {
+) -> MarkdownHighlightRanges {
     let snapshot = editor.read(cx).buffer().read(cx).snapshot(cx);
-    let mut ranges = Vec::new();
+    let mut ranges = MarkdownHighlightRanges::default();
 
     for block in tree.blocks() {
-        if !matches!(block.kind, MarkdownBlockKind::AtxHeading { .. }) {
-            continue;
+        if let MarkdownBlockKind::AtxHeading { level } = block.kind {
+            for marker_range in &block.marker_ranges {
+                push_byte_range(&snapshot, marker_range.clone(), &mut ranges.marker);
+            }
+            push_byte_range(
+                &snapshot,
+                block.content_range.clone(),
+                match level {
+                    1 => &mut ranges.heading_1,
+                    2 => &mut ranges.heading_2,
+                    3 => &mut ranges.heading_3,
+                    _ => &mut ranges.heading_other,
+                },
+            );
         }
+    }
 
-        for marker_range in &block.marker_ranges {
-            let marker_start = Point::new(
-                block.row_range.start as u32,
-                (marker_range.start - block.source_range.start) as u32,
-            );
-            let marker_end = Point::new(
-                block.row_range.start as u32,
-                (marker_range.end - block.source_range.start) as u32,
-            );
-            ranges.push(snapshot.anchor_before(marker_start)..snapshot.anchor_after(marker_end));
+    for span in tree.inline_spans() {
+        let target = match span.kind {
+            MarkdownInlineKind::Strong => &mut ranges.strong,
+            MarkdownInlineKind::Emphasis => &mut ranges.emphasis,
+            MarkdownInlineKind::InlineCode => &mut ranges.inline_code,
+            MarkdownInlineKind::Link => &mut ranges.link,
+            MarkdownInlineKind::Strikethrough => &mut ranges.strikethrough,
+        };
+        for content_range in &span.content_ranges {
+            push_byte_range(&snapshot, content_range.clone(), target);
+        }
+        for marker_range in &span.marker_ranges {
+            push_byte_range(&snapshot, marker_range.clone(), &mut ranges.marker);
         }
     }
 
     ranges
 }
 
+fn push_byte_range(
+    snapshot: &multi_buffer::MultiBufferSnapshot,
+    range: Range<usize>,
+    target: &mut Vec<Range<Anchor>>,
+) {
+    if range.start < range.end {
+        target.push(
+            snapshot.anchor_before(MultiBufferOffset(range.start))
+                ..snapshot.anchor_after(MultiBufferOffset(range.end)),
+        );
+    }
+}
+
+fn apply_markdown_highlights(
+    editor: &mut Editor,
+    ranges: MarkdownHighlightRanges,
+    cx: &mut Context<Editor>,
+) {
+    set_markdown_highlight(
+        editor,
+        markdown_marker_highlight_key(),
+        ranges.marker,
+        markdown_marker_highlight_style(cx),
+        cx,
+    );
+    set_markdown_highlight(
+        editor,
+        markdown_heading_1_highlight_key(),
+        ranges.heading_1,
+        markdown_heading_highlight_style(1, cx),
+        cx,
+    );
+    set_markdown_highlight(
+        editor,
+        markdown_heading_2_highlight_key(),
+        ranges.heading_2,
+        markdown_heading_highlight_style(2, cx),
+        cx,
+    );
+    set_markdown_highlight(
+        editor,
+        markdown_heading_3_highlight_key(),
+        ranges.heading_3,
+        markdown_heading_highlight_style(3, cx),
+        cx,
+    );
+    set_markdown_highlight(
+        editor,
+        markdown_heading_other_highlight_key(),
+        ranges.heading_other,
+        markdown_heading_highlight_style(4, cx),
+        cx,
+    );
+    set_markdown_highlight(
+        editor,
+        markdown_strong_highlight_key(),
+        ranges.strong,
+        markdown_strong_highlight_style(cx),
+        cx,
+    );
+    set_markdown_highlight(
+        editor,
+        markdown_emphasis_highlight_key(),
+        ranges.emphasis,
+        markdown_emphasis_highlight_style(cx),
+        cx,
+    );
+    set_markdown_highlight(
+        editor,
+        markdown_inline_code_highlight_key(),
+        ranges.inline_code,
+        markdown_inline_code_highlight_style(cx),
+        cx,
+    );
+    set_markdown_highlight(
+        editor,
+        markdown_link_highlight_key(),
+        ranges.link,
+        markdown_link_highlight_style(cx),
+        cx,
+    );
+    set_markdown_highlight(
+        editor,
+        markdown_strikethrough_highlight_key(),
+        ranges.strikethrough,
+        markdown_strikethrough_highlight_style(cx),
+        cx,
+    );
+}
+
+fn set_markdown_highlight(
+    editor: &mut Editor,
+    key: HighlightKey,
+    ranges: Vec<Range<Anchor>>,
+    style: HighlightStyle,
+    cx: &mut Context<Editor>,
+) {
+    if ranges.is_empty() {
+        editor.clear_highlights(key, cx);
+    } else {
+        editor.highlight_text(key, ranges, style, cx);
+    }
+}
+
 fn markdown_marker_highlight_key() -> HighlightKey {
     HighlightKey::SyntaxTreeView(usize::MAX)
+}
+
+fn markdown_heading_1_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX - 1)
+}
+
+fn markdown_heading_2_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX - 2)
+}
+
+fn markdown_heading_3_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX - 3)
+}
+
+fn markdown_heading_other_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX - 4)
+}
+
+fn markdown_strong_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX - 5)
+}
+
+fn markdown_emphasis_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX - 6)
+}
+
+fn markdown_inline_code_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX - 7)
+}
+
+fn markdown_link_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX - 8)
+}
+
+fn markdown_strikethrough_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX - 9)
 }
 
 fn markdown_marker_highlight_style(cx: &App) -> HighlightStyle {
     HighlightStyle {
         color: Some(cx.theme().colors().text_muted.opacity(0.18)),
         fade_out: Some(0.85),
+        ..Default::default()
+    }
+}
+
+fn markdown_heading_highlight_style(level: u8, cx: &App) -> HighlightStyle {
+    let colors = cx.theme().colors();
+    HighlightStyle {
+        color: Some(match level {
+            1 => colors.text,
+            2 => colors.text,
+            3 => colors.text_accent,
+            _ => colors.text_muted,
+        }),
+        font_weight: Some(match level {
+            1 => FontWeight::BLACK,
+            2 => FontWeight::EXTRA_BOLD,
+            3 => FontWeight::BOLD,
+            _ => FontWeight::SEMIBOLD,
+        }),
+        ..Default::default()
+    }
+}
+
+fn markdown_strong_highlight_style(_cx: &App) -> HighlightStyle {
+    HighlightStyle {
+        font_weight: Some(FontWeight::BOLD),
+        ..Default::default()
+    }
+}
+
+fn markdown_emphasis_highlight_style(_cx: &App) -> HighlightStyle {
+    HighlightStyle {
+        font_style: Some(FontStyle::Italic),
+        ..Default::default()
+    }
+}
+
+fn markdown_inline_code_highlight_style(cx: &App) -> HighlightStyle {
+    let colors = cx.theme().colors();
+    HighlightStyle {
+        color: Some(colors.text_accent),
+        background_color: Some(colors.editor_foreground.opacity(0.08)),
+        font_weight: Some(FontWeight::MEDIUM),
+        ..Default::default()
+    }
+}
+
+fn markdown_link_highlight_style(cx: &App) -> HighlightStyle {
+    let colors = cx.theme().colors();
+    HighlightStyle {
+        color: Some(colors.link_text_hover),
+        underline: Some(UnderlineStyle {
+            thickness: px(1.),
+            color: Some(colors.link_text_hover.opacity(0.7)),
+            wavy: false,
+        }),
+        ..Default::default()
+    }
+}
+
+fn markdown_strikethrough_highlight_style(cx: &App) -> HighlightStyle {
+    HighlightStyle {
+        strikethrough: Some(StrikethroughStyle {
+            thickness: px(1.),
+            color: Some(cx.theme().colors().text_muted),
+        }),
         ..Default::default()
     }
 }
