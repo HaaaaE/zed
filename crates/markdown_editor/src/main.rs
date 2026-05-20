@@ -5,7 +5,10 @@ use std::{env, fs, ops::Range, path::PathBuf};
 use anyhow::{Context as _, Result};
 use assets::Assets;
 use clock::Global;
-use editor::{Anchor, Editor, EditorEvent, display_map::HighlightKey};
+use editor::{
+    Anchor, Editor, EditorEvent, RowHeightOverride,
+    display_map::{DisplayRow, HighlightKey},
+};
 use gpui::{
     App, Context, Entity, Focusable as _, FontStyle, FontWeight, HighlightStyle, KeyBinding,
     MouseButton, PathPromptOptions, SharedString, StrikethroughStyle, Subscription, UnderlineStyle,
@@ -74,9 +77,67 @@ impl MarkdownEditMode {
 }
 
 #[derive(Default)]
+struct RenderedRevealState {
+    hover: Option<RevealTarget>,
+    caret: Option<RevealTarget>,
+    drag_frozen: bool,
+}
+
+impl RenderedRevealState {
+    fn active_source_range(&self) -> Option<Range<usize>> {
+        self.hover
+            .as_ref()
+            .or(self.caret.as_ref())
+            .map(RevealTarget::source_range)
+    }
+}
+
+#[derive(Clone)]
+enum RevealTarget {
+    Heading {
+        row: u32,
+        source_range: Range<usize>,
+        content_range: Range<usize>,
+    },
+    Inline {
+        source_range: Range<usize>,
+        content_ranges: Vec<Range<usize>>,
+    },
+    Block {
+        source_range: Range<usize>,
+    },
+}
+
+impl RevealTarget {
+    fn source_range(&self) -> Range<usize> {
+        match self {
+            RevealTarget::Heading { source_range, .. }
+            | RevealTarget::Inline { source_range, .. }
+            | RevealTarget::Block { source_range } => source_range.clone(),
+        }
+    }
+
+    fn content_row(&self) -> Option<u32> {
+        match self {
+            RevealTarget::Heading { row, .. } => Some(*row),
+            _ => None,
+        }
+    }
+
+    fn content_ranges_len(&self) -> usize {
+        match self {
+            RevealTarget::Heading { content_range, .. } => content_range.len(),
+            RevealTarget::Inline { content_ranges, .. } => content_ranges.len(),
+            RevealTarget::Block { .. } => 0,
+        }
+    }
+}
+
+#[derive(Default)]
 struct MarkdownWysiwygController {
     parse_tree: Option<MarkdownSyntaxTree>,
     parsed_version: Option<Global>,
+    reveal_state: RenderedRevealState,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -434,11 +495,94 @@ impl MarkdownWysiwygController {
             return;
         };
 
+        let selection = editor.update(cx, |editor, cx| editor.newest_selection_point_range(cx));
+        self.reveal_state.caret = markdown_caret_reveal_target(parse_tree, mode, selection.start.row as u32);
+        self.reveal_state.drag_frozen = selection.start != selection.end;
+        let _ = self
+            .reveal_state
+            .active_source_range()
+            .zip(self.reveal_state.caret.as_ref().and_then(RevealTarget::content_row));
+        let _ = self
+            .reveal_state
+            .caret
+            .as_ref()
+            .map(RevealTarget::content_ranges_len);
+
         let highlights = markdown_highlight_ranges(editor, parse_tree, cx);
+        let row_height_overrides = markdown_row_height_overrides(parse_tree, mode);
         editor.update(cx, |editor, cx| {
             apply_markdown_highlights(editor, highlights, mode, cx);
+            if row_height_overrides.is_empty() {
+                editor.clear_row_height_overrides(cx);
+            } else {
+                editor.set_row_height_overrides(row_height_overrides, cx);
+            }
         });
     }
+}
+
+fn markdown_caret_reveal_target(
+    tree: &MarkdownSyntaxTree,
+    mode: MarkdownEditMode,
+    row: u32,
+) -> Option<RevealTarget> {
+    if mode == MarkdownEditMode::Source {
+        return None;
+    }
+
+    tree.inline_spans()
+        .iter()
+        .find(|span| span.source_range.start < span.source_range.end)
+        .map(|span| RevealTarget::Inline {
+            source_range: span.source_range.clone(),
+            content_ranges: span.content_ranges.clone(),
+        })
+        .or_else(|| {
+            tree.blocks().iter().find_map(|block| {
+                if !block.row_range.contains(&(row as usize)) {
+                    return None;
+                }
+                match block.kind {
+                    MarkdownBlockKind::AtxHeading { .. } => Some(RevealTarget::Heading {
+                        row,
+                        source_range: block.source_range.clone(),
+                        content_range: block.content_range.clone(),
+                    }),
+                    MarkdownBlockKind::FencedCodeBlock => Some(RevealTarget::Block {
+                        source_range: block.source_range.clone(),
+                    }),
+                    _ => None,
+                }
+            })
+        })
+}
+
+fn markdown_row_height_overrides(
+    tree: &MarkdownSyntaxTree,
+    mode: MarkdownEditMode,
+) -> Vec<RowHeightOverride> {
+    if mode == MarkdownEditMode::Source {
+        return Vec::new();
+    }
+
+    tree.blocks()
+        .iter()
+        .filter_map(|block| {
+            let MarkdownBlockKind::AtxHeading { level } = block.kind else {
+                return None;
+            };
+            let height = match level {
+                1 => px(42.),
+                2 => px(34.),
+                3 => px(28.),
+                _ => px(24.),
+            };
+            Some(RowHeightOverride {
+                row: DisplayRow(block.row_range.start as u32),
+                height,
+            })
+        })
+        .collect()
 }
 
 #[derive(Default)]

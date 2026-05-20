@@ -35,6 +35,8 @@
 
 ## 核心判断
 
+2026-05-21 进展：Rendered Mode 已开始走 editor 内部 row metrics，而不是 `block_map` / `fold_map`。当前 `editor` 新增了稀疏 `row_height_overrides`，`markdown_editor` 先用它驱动 ATX heading 行高；同时新增 `RenderedRevealState` / `RevealTarget` 骨架，为 hover/caret source reveal、drag freeze、后续 table/image/code fence/math 暴露源码入口做准备。
+
 完整 Typora 语义的难点不是 Markdown 解析，也不是 GPUI 画富文本。难点是同一份源 Markdown 文本同时具备两套坐标系统：
 
 - 源坐标：真实 buffer offset、row、column，包括所有 Markdown 标记。

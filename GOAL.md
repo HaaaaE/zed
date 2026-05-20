@@ -284,6 +284,13 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
 - 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过；未运行 `cargo run`。
 - 对后续目标的影响：Rendered Mode 已有模式边界和 marker hiding 入口，但当前 Zed editor 不支持真实单行变高：`position_map.line_height` 是全局单值，row->y、scroll、selection bounds 和 hit-test 均按统一行高计算。已撤回视觉 line-height 方案；后续若要 heading 真正占据更高行，需要先扩展 editor position map 的可变行高模型。
 
+### 2026-05-21 - Typora WYSIWYG 阶段 2：row metrics 与 reveal 骨架
+
+- 对应目标：为 Rendered Mode 建立真正可用的几何基础和 source reveal 入口，不再依赖 block/fold 的错位方案。
+- 完成情况：`editor` 新增 `EditorRowMetrics` 和 `row_height_overrides`，并通过 `Editor::set_row_height_overrides` / `clear_row_height_overrides` 将 row 高度偏移接入 `PositionMap` 计算；`markdown_editor` 在 Rendered Mode 中为 ATX heading 设置行高覆盖，Source Mode 清空覆盖。与此同时，`markdown_editor` 增加了 `RenderedRevealState` / `RevealTarget` 骨架，为 hover/caret reveal、drag freeze 和后续 block/inline source 暴露留出语义状态。
+- 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过；未运行 `cargo run`。
+- 对后续目标的影响：这一阶段把 heading 高度从视觉 hack 变成 row metrics 数据，但 hover overlay、actual source reveal UI、table/image/math 的具体 projection 仍未实现。后续应继续把 `RevealTarget` 接到鼠标 hover、caret 进入和 selection freeze 上，再扩展到 table/image/code fence。
+
 记录格式：
 
 ```md

@@ -76,7 +76,7 @@ pub use editor_settings::{
 };
 pub use element::{
     CursorLayout, EditorElement, HighlightedRange, HighlightedRangeLine, PointForPosition,
-    render_breadcrumb_text,
+    RowHeightOverride, render_breadcrumb_text,
 };
 pub use git::blame::BlameRenderer;
 pub use hover_popover::hover_markdown_style;
@@ -116,7 +116,7 @@ use edit_prediction_types::{
     EditPredictionGranularity, SuggestionDisplayType,
 };
 use editor_settings::{GoToDefinitionFallback, Minimap as MinimapSettings};
-use element::{LineWithInvisibles, PositionMap, layout_line};
+use element::{EditorRowMetrics, LineWithInvisibles, PositionMap, layout_line};
 use futures::{
     FutureExt,
     future::{self, Shared},
@@ -1276,6 +1276,7 @@ pub struct Editor {
     >,
     last_bounds: Option<Bounds<Pixels>>,
     last_position_map: Option<Rc<PositionMap>>,
+    row_height_overrides: Arc<[RowHeightOverride]>,
     expect_bounds_change: Option<Bounds<Pixels>>,
     runnables: RunnableData,
     bookmark_store: Option<Entity<BookmarkStore>>,
@@ -2502,6 +2503,7 @@ impl Editor {
             pixel_position_of_newest_cursor: None,
             last_bounds: None,
             last_position_map: None,
+            row_height_overrides: Arc::from([]),
             expect_bounds_change: None,
             gutter_dimensions: GutterDimensions::default(),
             style: None,
@@ -23636,6 +23638,31 @@ impl Editor {
         if cleared {
             cx.notify();
         }
+    }
+
+    pub fn set_row_height_overrides(
+        &mut self,
+        mut overrides: Vec<RowHeightOverride>,
+        cx: &mut Context<Self>,
+    ) {
+        overrides.sort_by_key(|override_| override_.row);
+        overrides.dedup_by_key(|override_| override_.row);
+        let overrides = Arc::<[RowHeightOverride]>::from(overrides);
+        if self.row_height_overrides != overrides {
+            self.row_height_overrides = overrides;
+            cx.notify();
+        }
+    }
+
+    pub fn clear_row_height_overrides(&mut self, cx: &mut Context<Self>) {
+        if !self.row_height_overrides.is_empty() {
+            self.row_height_overrides = Arc::from([]);
+            cx.notify();
+        }
+    }
+
+    fn row_metrics(&self, line_height: Pixels) -> EditorRowMetrics {
+        EditorRowMetrics::new(line_height, self.row_height_overrides.clone())
     }
 
     pub fn show_local_cursors(&self, window: &mut Window, cx: &mut App) -> bool {
