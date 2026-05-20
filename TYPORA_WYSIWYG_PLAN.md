@@ -615,3 +615,13 @@
 - 当前覆盖 ATX heading、paragraph、blank、fenced code block 的基础 block 识别，并验证 inline tree 可以识别 strong emphasis 和 inline link。
 - 已通过 `cargo test -p markdown_wysiwyg` 和 `cargo check -p markdown_editor`。
 - 下一步优先级：把 tree-sitter-backed semantic tree 接入 Zed `Editor` display map；继续扩展 inline/block 语义时必须沿用该解析路径，不应把 `markdown` crate 引入 WYSIWYG 渲染路径。
+
+### 2026-05-20 - 阶段 1 display-map 接入启动
+
+- `markdown_editor` 新增 `MarkdownWysiwygController`，作为产品入口和 WYSIWYG 核心层之间的接入点。
+- 控制器从当前 singleton `Buffer` 读取文本版本；只有文本版本变化时才解析 `MarkdownSyntaxTree`，selection 变化只复用已有语义树刷新投影 folds。
+- 当前接入范围是 ATX heading marker hiding：非活动 heading 的 `# ` marker 被转换为 `Editor` display-map folds，当前活动 heading 保持 marker reveal。
+- Markdown marker folds 使用独立 `MarkdownMarkerFold` type tag，并通过 `Editor::replace_folds_with_type` 原子刷新，避免与用户手动 folds 或其他系统 folds 混合。
+- `editor` crate 新增两个通用 API：`newest_selection_point_range` 用于读取主 selection 的 buffer point range；`replace_folds_with_type` 用于按 type tag 刷新一组 folds。
+- 已通过 `cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg`。
+- 下一步优先级：把 inline strong/emphasis/inline-code/link 和 list/blockquote 的 marker hiding、styling、focused reveal 全部接到同一条 `markdown_wysiwyg` -> `Editor` display pipeline，不再新增 preview/旁路渲染路径。

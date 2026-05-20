@@ -2755,6 +2755,11 @@ impl Editor {
         self.display_map.update(cx, |map, cx| map.snapshot(cx))
     }
 
+    pub fn newest_selection_point_range(&self, cx: &mut App) -> Range<Point> {
+        let display_snapshot = self.display_map.update(cx, |map, cx| map.snapshot(cx));
+        self.selections.newest::<Point>(&display_snapshot).range()
+    }
+
     pub fn deploy_mouse_context_menu(
         &mut self,
         position: gpui::Point<Pixels>,
@@ -20534,6 +20539,32 @@ impl Editor {
         self.remove_folds_with(ranges, auto_scroll, cx, |map, cx| {
             map.remove_folds_with_type(ranges.iter().cloned(), type_id, cx)
         });
+        self.folds_did_change(cx);
+    }
+
+    pub fn replace_folds_with_type<T: ToOffset + Clone>(
+        &mut self,
+        ranges_to_remove: &[Range<T>],
+        type_id: TypeId,
+        creases_to_insert: Vec<Crease<T>>,
+        cx: &mut Context<Self>,
+    ) {
+        if ranges_to_remove.is_empty() && creases_to_insert.is_empty() {
+            return;
+        }
+
+        self.display_map.update(cx, |map, cx| {
+            if !ranges_to_remove.is_empty() {
+                map.remove_folds_with_type(ranges_to_remove.iter().cloned(), type_id, cx);
+            }
+            if !creases_to_insert.is_empty() {
+                map.fold(creases_to_insert, cx);
+            }
+        });
+
+        cx.notify();
+        self.scrollbar_marker_state.dirty = true;
+        self.active_indent_guides_state.dirty = true;
         self.folds_did_change(cx);
     }
 

@@ -261,6 +261,13 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
 - 验收结果：`cargo test -p markdown_wysiwyg` 和 `cargo check -p markdown_editor` 通过。当前尚未接入 `markdown_editor` UI，也尚未替换旧 preview；这是刻意选择，避免从一开始绑定到全量 Markdown preview 渲染模型。
 - 对后续目标的影响：后续 WYSIWYG 路径必须继续走 tree-sitter-backed `markdown_wysiwyg` / editor display map，而不是直接使用 `markdown` crate。下一步应将 projection 接入 `Editor` 的 display-map 扩展点；`fold_map`、`block_map`、`inlay_map` 可以作为投影机制，但不能成为 Markdown 语义层本身。
 
+### 2026-05-20 - Typora WYSIWYG 阶段 1：接入 Editor display map
+
+- 对应目标：验证 tree-sitter-backed `markdown_wysiwyg` 能驱动真实 Zed `Editor` display pipeline，为 focused-block WYSIWYG 建立长期接入链路。
+- 完成情况：`markdown_editor` 新增 `MarkdownWysiwygController`，读取当前单文件 `Buffer` 的文本版本并在版本变化时解析 `MarkdownSyntaxTree`；selection 变化只复用已解析语义树重算 marker folds，避免光标移动触发 tree-sitter parse。控制器当前把非活动 ATX heading 的 marker range 转成带独立 `MarkdownMarkerFold` type tag 的 `Editor` folds，通过 display map 隐藏 `# ` marker；当前活动 heading 保持源码 marker reveal。为支持安全刷新，还在 `editor` crate 增加了通用的 `newest_selection_point_range` helper 和 `replace_folds_with_type` API，按 type tag 原子替换 WYSIWYG marker folds，避免与用户手动 fold 或其他系统 fold 混用。
+- 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过。
+- 对后续目标的影响：已形成第一条真实接入链路：tree-sitter Markdown semantic tree -> `markdown_wysiwyg` projection -> Zed `Editor` display map folds。下一步应继续把 bold、italic、inline code、link、list、blockquote 等语义扩展到同一条链路，并逐步减少旧 `markdown` preview 依赖。
+
 记录格式：
 
 ```md

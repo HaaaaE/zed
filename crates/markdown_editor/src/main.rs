@@ -1,16 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{env, fs, path::PathBuf};
+use std::{any::TypeId, env, fs, ops::Range, path::PathBuf, sync::Arc};
 
 use anyhow::{Context as _, Result};
 use assets::Assets;
-use editor::{Editor, EditorEvent};
+use clock::Global;
+use editor::{Anchor, Editor, EditorEvent, FoldPlaceholder, display_map::Crease};
 use gpui::{
     App, Context, Entity, Focusable as _, KeyBinding, MouseButton, PathPromptOptions, SharedString,
-    Subscription, Window, WindowOptions, actions,
+    Subscription, Window, WindowOptions, actions, div,
 };
-use language::Buffer;
+use language::{Buffer, Point};
 use markdown::{Markdown, MarkdownElement, MarkdownFont, MarkdownStyle};
+use markdown_wysiwyg::{MarkdownBlockKind, MarkdownSyntaxTree};
 use settings::{DEFAULT_KEYMAP_PATH, KeymapFile};
 use theme::LoadThemes;
 use ui::{
@@ -34,6 +36,7 @@ struct MarkdownEditorShell {
     show_preview: bool,
     show_command_palette: bool,
     preview: Entity<Markdown>,
+    wysiwyg: MarkdownWysiwygController,
 }
 
 struct Document {
@@ -43,6 +46,15 @@ struct Document {
     status: DocumentStatus,
     _editor_subscription: Subscription,
 }
+
+#[derive(Default)]
+struct MarkdownWysiwygController {
+    parse_tree: Option<MarkdownSyntaxTree>,
+    parsed_version: Option<Global>,
+    folded_marker_ranges: Vec<Range<Anchor>>,
+}
+
+struct MarkdownMarkerFold;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DocumentStatus {
@@ -68,8 +80,10 @@ impl MarkdownEditorShell {
             show_preview: false,
             show_command_palette: false,
             preview,
+            wysiwyg: MarkdownWysiwygController::default(),
         };
 
+        this.sync_wysiwyg(cx);
         this.focus_editor(window, cx);
         this.refresh_preview(cx);
         this
@@ -98,10 +112,13 @@ impl MarkdownEditorShell {
             EditorEvent::DirtyChanged | EditorEvent::Saved | EditorEvent::BufferEdited => {
                 this.refresh_status(cx);
                 this.refresh_preview(cx);
+                this.sync_wysiwyg(cx);
+            }
+            EditorEvent::SelectionsChanged { .. } => {
+                this.sync_wysiwyg(cx);
             }
             _ => {}
         });
-
         Document {
             editor,
             path,
@@ -113,6 +130,8 @@ impl MarkdownEditorShell {
 
     fn new_document(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.document = Self::build_document(None, Some("Untitled".to_string()), window, cx);
+        self.wysiwyg = MarkdownWysiwygController::default();
+        self.sync_wysiwyg(cx);
         self.focus_editor(window, cx);
         self.refresh_preview(cx);
         cx.notify();
@@ -120,6 +139,8 @@ impl MarkdownEditorShell {
 
     fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.document = Self::build_document(Some(path), None, window, cx);
+        self.wysiwyg = MarkdownWysiwygController::default();
+        self.sync_wysiwyg(cx);
         self.focus_editor(window, cx);
         self.refresh_preview(cx);
         cx.notify();
@@ -240,6 +261,10 @@ impl MarkdownEditorShell {
         });
     }
 
+    fn sync_wysiwyg(&mut self, cx: &mut Context<Self>) {
+        self.wysiwyg.sync(&self.document.editor, cx);
+    }
+
     fn focus_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.document.editor.focus_handle(cx), cx);
     }
@@ -347,6 +372,96 @@ impl MarkdownEditorShell {
             .child(command_row("Save", Save))
             .child(command_row("Save As...", SaveAs))
             .child(command_row("Toggle Markdown Preview", TogglePreview))
+    }
+}
+
+impl MarkdownWysiwygController {
+    fn sync(
+        &mut self,
+        editor: &Entity<Editor>,
+        cx: &mut Context<MarkdownEditorShell>,
+    ) {
+        let Some(buffer) = singleton_buffer(editor, cx) else {
+            return;
+        };
+        let snapshot = buffer.read(cx).text_snapshot();
+        let text_version = snapshot.version().clone();
+        if self.parsed_version.as_ref() != Some(&text_version) {
+            let text = snapshot.as_rope().to_string();
+            self.parse_tree = Some(MarkdownSyntaxTree::parse(&text));
+            self.parsed_version = Some(text_version);
+        }
+        let Some(parse_tree) = self.parse_tree.as_ref() else {
+            return;
+        };
+
+        let active_range = editor.update(cx, |editor, cx| editor.newest_selection_point_range(cx));
+        let folded_marker_ranges = marker_fold_ranges(editor, parse_tree, active_range, cx);
+        let marker_type = TypeId::of::<MarkdownMarkerFold>();
+        let marker_placeholder = markdown_marker_fold_placeholder();
+        let marker_creases = folded_marker_ranges
+            .iter()
+            .cloned()
+            .map(|range| Crease::simple(range, marker_placeholder.clone()))
+            .collect::<Vec<_>>();
+
+        editor.update(cx, |editor, cx| {
+            editor.replace_folds_with_type(
+                &self.folded_marker_ranges,
+                marker_type,
+                marker_creases,
+                cx,
+            );
+        });
+
+        self.folded_marker_ranges = folded_marker_ranges;
+    }
+}
+
+fn marker_fold_ranges(
+    editor: &Entity<Editor>,
+    tree: &MarkdownSyntaxTree,
+    active_range: Range<Point>,
+    cx: &mut App,
+) -> Vec<Range<Anchor>> {
+    let snapshot = editor.read(cx).buffer().read(cx).snapshot(cx);
+    let mut ranges = Vec::new();
+
+    for block in tree.blocks() {
+        if !matches!(block.kind, MarkdownBlockKind::AtxHeading { .. }) {
+            continue;
+        }
+        if point_ranges_overlap(block.row_range.start as u32..block.row_range.end as u32, active_range.start.row..active_range.end.row + 1) {
+            continue;
+        }
+
+        for marker_range in &block.marker_ranges {
+            let marker_start = Point::new(
+                block.row_range.start as u32,
+                (marker_range.start - block.source_range.start) as u32,
+            );
+            let marker_end = Point::new(
+                block.row_range.start as u32,
+                (marker_range.end - block.source_range.start) as u32,
+            );
+            ranges.push(snapshot.anchor_before(marker_start)..snapshot.anchor_after(marker_end));
+        }
+    }
+
+    ranges
+}
+
+fn point_ranges_overlap(left: Range<u32>, right: Range<u32>) -> bool {
+    left.start < right.end && right.start < left.end
+}
+
+fn markdown_marker_fold_placeholder() -> FoldPlaceholder {
+    FoldPlaceholder {
+        render: Arc::new(|_, _, _| div().into_any()),
+        constrain_width: false,
+        merge_adjacent: false,
+        type_tag: Some(TypeId::of::<MarkdownMarkerFold>()),
+        collapsed_text: None,
     }
 }
 

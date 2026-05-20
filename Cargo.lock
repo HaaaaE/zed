@@ -10467,11 +10467,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assets",
+ "clock",
  "editor",
  "gpui",
  "gpui_platform",
  "language",
  "markdown",
+ "markdown_wysiwyg",
  "settings",
  "theme",
  "theme_settings",
