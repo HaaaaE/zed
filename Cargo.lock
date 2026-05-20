@@ -10505,6 +10505,10 @@ dependencies = [
 [[package]]
 name = "markdown_wysiwyg"
 version = "0.1.0"
+dependencies = [
+ "tree-sitter",
+ "tree-sitter-md",
+]
 
 [[package]]
 name = "markup5ever"

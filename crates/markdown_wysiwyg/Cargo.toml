@@ -13,5 +13,7 @@ path = "src/markdown_wysiwyg.rs"
 doctest = false
 
 [dependencies]
+tree-sitter.workspace = true
+tree-sitter-md.workspace = true
 
 [dev-dependencies]

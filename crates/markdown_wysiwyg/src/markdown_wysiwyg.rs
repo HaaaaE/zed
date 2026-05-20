@@ -1,10 +1,66 @@
-use std::ops::Range;
+use std::{collections::HashMap, fmt, ops::Range};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+use tree_sitter::{InputEdit, Node, Parser, Point, Range as TreeSitterRange, Tree};
+
+#[derive(Clone)]
 pub struct MarkdownSyntaxTree {
+    tree: MarkdownParseTree,
     source_len: usize,
     line_starts: Vec<usize>,
     blocks: Vec<MarkdownBlock>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MarkdownParseTree {
+    block_tree: Tree,
+    inline_trees: Vec<MarkdownInlineTree>,
+    inline_tree_by_parent_id: HashMap<usize, usize>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MarkdownInlineTree {
+    pub parent_id: usize,
+    pub parent_range: Range<usize>,
+    tree: Tree,
+}
+
+impl fmt::Debug for MarkdownSyntaxTree {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MarkdownSyntaxTree")
+            .field("source_len", &self.source_len)
+            .field("line_starts", &self.line_starts)
+            .field("blocks", &self.blocks)
+            .finish_non_exhaustive()
+    }
+}
+
+impl MarkdownParseTree {
+    pub fn block_tree(&self) -> &Tree {
+        &self.block_tree
+    }
+
+    pub fn inline_trees(&self) -> &[MarkdownInlineTree] {
+        &self.inline_trees
+    }
+
+    pub fn inline_tree_for_parent(&self, parent: Node<'_>) -> Option<&Tree> {
+        self.inline_tree_by_parent_id
+            .get(&parent.id())
+            .map(|index| &self.inline_trees[*index].tree)
+    }
+
+    fn edit(&mut self, edit: &InputEdit) {
+        self.block_tree.edit(edit);
+        for inline_tree in &mut self.inline_trees {
+            inline_tree.tree.edit(edit);
+        }
+    }
+}
+
+impl MarkdownInlineTree {
+    pub fn tree(&self) -> &Tree {
+        &self.tree
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -18,7 +74,7 @@ pub struct MarkdownBlock {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct MarkdownNodeId(pub u32);
+pub struct MarkdownNodeId(pub u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MarkdownBlockKind {
@@ -37,126 +93,46 @@ pub struct MarkdownProjectionMap {
 
 impl MarkdownSyntaxTree {
     pub fn parse(source: &str) -> Self {
-        let line_starts = line_starts(source);
-        let mut blocks = Vec::new();
-        let mut row = 0;
-        let mut next_id = 0;
-        let mut fenced_code_start: Option<(usize, usize)> = None;
+        Self::parse_with_previous_tree(source, None)
+    }
 
-        while row < line_starts.len() {
-            let source_range = line_range(source, &line_starts, row);
-            let line = &source[source_range.clone()];
-            let line_without_newline = line.trim_end_matches(['\r', '\n']);
-            let trimmed_start = line_without_newline.len() - line_without_newline.trim_start().len();
-            let content_start = source_range.start + trimmed_start;
-            let trimmed = &source[content_start..source_range.start + line_without_newline.len()];
+    pub fn reparse_after_edit(
+        &self,
+        old_source: &str,
+        old_range: Range<usize>,
+        new_source: &str,
+    ) -> Self {
+        let old_line_starts = line_starts(old_source);
+        let new_line_starts = line_starts(new_source);
+        let inserted_len = new_source
+            .len()
+            .checked_sub(old_source.len() - (old_range.end - old_range.start))
+            .expect("new source must match the supplied edit range");
+        let new_end_byte = old_range.start + inserted_len;
 
-            if let Some((start_row, start_offset)) = fenced_code_start {
-                if is_fence_marker(trimmed) {
-                    let end_range = line_range(source, &line_starts, row);
-                    blocks.push(MarkdownBlock {
-                        id: MarkdownNodeId(next_id),
-                        kind: MarkdownBlockKind::FencedCodeBlock,
-                        source_range: start_offset..end_range.end,
-                        content_range: start_offset..end_range.end,
-                        marker_ranges: Vec::new(),
-                        row_range: start_row..row + 1,
-                    });
-                    next_id += 1;
-                    fenced_code_start = None;
-                }
-                row += 1;
-                continue;
-            }
+        let mut edited_tree = self.tree.clone();
+        edited_tree.edit(&InputEdit {
+            start_byte: old_range.start,
+            old_end_byte: old_range.end,
+            new_end_byte,
+            start_position: point_for_offset(&old_line_starts, old_range.start),
+            old_end_position: point_for_offset(&old_line_starts, old_range.end),
+            new_end_position: point_for_offset(&new_line_starts, new_end_byte),
+        });
 
-            if trimmed.is_empty() {
-                blocks.push(MarkdownBlock {
-                    id: MarkdownNodeId(next_id),
-                    kind: MarkdownBlockKind::Blank,
-                    source_range: source_range.clone(),
-                    content_range: source_range.start..source_range.start,
-                    marker_ranges: Vec::new(),
-                    row_range: row..row + 1,
-                });
-                next_id += 1;
-                row += 1;
-                continue;
-            }
+        Self::parse_with_previous_tree(new_source, Some(&edited_tree))
+    }
 
-            if is_fence_marker(trimmed) {
-                fenced_code_start = Some((row, source_range.start));
-                row += 1;
-                continue;
-            }
+    pub fn parse_tree(&self) -> &MarkdownParseTree {
+        &self.tree
+    }
 
-            if let Some((level, marker_len)) = atx_heading_marker(trimmed) {
-                let marker_start = content_start;
-                let marker_end = marker_start + marker_len;
-                blocks.push(MarkdownBlock {
-                    id: MarkdownNodeId(next_id),
-                    kind: MarkdownBlockKind::AtxHeading { level },
-                    source_range: source_range.clone(),
-                    content_range: marker_end..source_range.start + line_without_newline.len(),
-                    marker_ranges: vec![marker_start..marker_end],
-                    row_range: row..row + 1,
-                });
-                next_id += 1;
-                row += 1;
-                continue;
-            }
+    pub fn block_tree(&self) -> &Tree {
+        self.tree.block_tree()
+    }
 
-            let paragraph_start_row = row;
-            let paragraph_start_offset = source_range.start;
-            let mut paragraph_end_offset = source_range.end;
-            row += 1;
-
-            while row < line_starts.len() {
-                let next_range = line_range(source, &line_starts, row);
-                let next_line = &source[next_range.clone()];
-                let next_without_newline = next_line.trim_end_matches(['\r', '\n']);
-                let next_trimmed_start = next_without_newline.len() - next_without_newline.trim_start().len();
-                let next_content_start = next_range.start + next_trimmed_start;
-                let next_trimmed =
-                    &source[next_content_start..next_range.start + next_without_newline.len()];
-
-                if next_trimmed.is_empty()
-                    || atx_heading_marker(next_trimmed).is_some()
-                    || is_fence_marker(next_trimmed)
-                {
-                    break;
-                }
-
-                paragraph_end_offset = next_range.end;
-                row += 1;
-            }
-
-            blocks.push(MarkdownBlock {
-                id: MarkdownNodeId(next_id),
-                kind: MarkdownBlockKind::Paragraph,
-                source_range: paragraph_start_offset..paragraph_end_offset,
-                content_range: paragraph_start_offset..paragraph_end_offset,
-                marker_ranges: Vec::new(),
-                row_range: paragraph_start_row..row,
-            });
-            next_id += 1;
-        }
-
-        if let Some((start_row, start_offset)) = fenced_code_start {
-            blocks.push(MarkdownBlock {
-                id: MarkdownNodeId(next_id),
-                kind: MarkdownBlockKind::FencedCodeBlock,
-                source_range: start_offset..source.len(),
-                content_range: start_offset..source.len(),
-                marker_ranges: Vec::new(),
-                row_range: start_row..line_starts.len(),
-            });
-        }
-
-        Self {
-            source_len: source.len(),
-            line_starts,
-            blocks,
-        }
+    pub fn inline_trees(&self) -> &[MarkdownInlineTree] {
+        self.tree.inline_trees()
     }
 
     pub fn source_len(&self) -> usize {
@@ -222,6 +198,19 @@ impl MarkdownSyntaxTree {
         MarkdownProjectionMap::new(self.source_len, visible_source_range, hidden_ranges)
     }
 
+    fn parse_with_previous_tree(source: &str, old_tree: Option<&MarkdownParseTree>) -> Self {
+        let tree = parse_markdown(source, old_tree);
+        let line_starts = line_starts(source);
+        let blocks = collect_blocks(source, &line_starts, tree.block_tree());
+
+        Self {
+            tree,
+            source_len: source.len(),
+            line_starts,
+            blocks,
+        }
+    }
+
     fn partition_blocks_by_end(&self, offset: usize) -> usize {
         self.blocks
             .partition_point(|block| block.source_range.end <= offset)
@@ -272,7 +261,8 @@ impl MarkdownProjectionMap {
     }
 
     pub fn source_to_display(&self, source_offset: usize) -> usize {
-        let clipped_offset = source_offset.clamp(self.visible_source_range.start, self.visible_source_range.end);
+        let clipped_offset =
+            source_offset.clamp(self.visible_source_range.start, self.visible_source_range.end);
         let mut display_offset = clipped_offset - self.visible_source_range.start;
 
         for hidden_range in &self.hidden_ranges {
@@ -301,10 +291,288 @@ impl MarkdownProjectionMap {
     }
 }
 
+fn parse_markdown(source: &str, old_tree: Option<&MarkdownParseTree>) -> MarkdownParseTree {
+    let mut block_parser = Parser::new();
+    let block_language = tree_sitter_md::LANGUAGE.into();
+    block_parser
+        .set_language(&block_language)
+        .expect("failed to load tree-sitter markdown block grammar");
+    let block_tree = block_parser
+        .parse(source, old_tree.map(|tree| &tree.block_tree))
+        .expect("tree-sitter markdown block parser was cancelled");
+
+    let (inline_trees, inline_tree_by_parent_id) =
+        parse_inline_trees(source, &block_tree, old_tree);
+
+    MarkdownParseTree {
+        block_tree,
+        inline_trees,
+        inline_tree_by_parent_id,
+    }
+}
+
+fn parse_inline_trees(
+    source: &str,
+    block_tree: &Tree,
+    old_tree: Option<&MarkdownParseTree>,
+) -> (Vec<MarkdownInlineTree>, HashMap<usize, usize>) {
+    let mut inline_parser = Parser::new();
+    let inline_language = tree_sitter_md::INLINE_LANGUAGE.into();
+    inline_parser
+        .set_language(&inline_language)
+        .expect("failed to load tree-sitter markdown inline grammar");
+
+    let mut inline_trees = Vec::new();
+    let mut inline_tree_by_parent_id = HashMap::new();
+    let inline_parent_nodes = inline_parent_nodes(block_tree);
+
+    for parent_node in inline_parent_nodes {
+        let ranges = inline_included_ranges(parent_node);
+        if ranges.iter().all(|range| range.start_byte == range.end_byte) {
+            continue;
+        }
+
+        inline_parser
+            .set_included_ranges(&ranges)
+            .expect("failed to set markdown inline parse ranges");
+        let inline_tree = inline_parser
+            .parse(source, old_tree.and_then(|tree| tree.inline_trees.get(inline_trees.len()).map(|tree| &tree.tree)))
+            .expect("tree-sitter markdown inline parser was cancelled");
+        inline_tree_by_parent_id.insert(parent_node.id(), inline_trees.len());
+        inline_trees.push(MarkdownInlineTree {
+            parent_id: parent_node.id(),
+            parent_range: parent_node.byte_range(),
+            tree: inline_tree,
+        });
+    }
+
+    (inline_trees, inline_tree_by_parent_id)
+}
+
+fn inline_parent_nodes(block_tree: &Tree) -> Vec<Node<'_>> {
+    let mut nodes = Vec::new();
+    collect_inline_parent_nodes(block_tree.root_node(), &mut nodes);
+    nodes
+}
+
+fn collect_inline_parent_nodes<'tree>(node: Node<'tree>, nodes: &mut Vec<Node<'tree>>) {
+    if matches!(node.kind(), "inline" | "pipe_table_cell") {
+        nodes.push(node);
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_inline_parent_nodes(child, nodes);
+    }
+}
+
+fn inline_included_ranges(parent_node: Node<'_>) -> Vec<TreeSitterRange> {
+    let mut ranges = Vec::new();
+    let mut range = parent_node.range();
+    let mut cursor = parent_node.walk();
+
+    if cursor.goto_first_child() {
+        while cursor.goto_next_sibling() {
+            let child = cursor.node();
+            if !child.is_named() {
+                continue;
+            }
+
+            let child_range = child.range();
+            if range.start_byte < child_range.start_byte {
+                ranges.push(TreeSitterRange {
+                    start_byte: range.start_byte,
+                    start_point: range.start_point,
+                    end_byte: child_range.start_byte,
+                    end_point: child_range.start_point,
+                });
+            }
+            range.start_byte = child_range.end_byte;
+            range.start_point = child_range.end_point;
+        }
+    }
+
+    if range.start_byte < range.end_byte {
+        ranges.push(range);
+    }
+
+    ranges
+}
+
+fn collect_blocks(source: &str, line_starts: &[usize], tree: &Tree) -> Vec<MarkdownBlock> {
+    let mut blocks = Vec::new();
+    collect_block_nodes(source, tree.root_node(), &mut blocks);
+    add_blank_blocks(source, line_starts, &mut blocks);
+    blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
+    blocks
+}
+
+fn collect_block_nodes(source: &str, node: Node<'_>, blocks: &mut Vec<MarkdownBlock>) {
+    if let Some(block) = block_from_node(source, node) {
+        blocks.push(block);
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_block_nodes(source, child, blocks);
+    }
+}
+
+fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
+    match node.kind() {
+        "atx_heading" => atx_heading_block(source, node),
+        "paragraph" => Some(MarkdownBlock {
+            id: node_id(node),
+            kind: MarkdownBlockKind::Paragraph,
+            source_range: node.byte_range(),
+            content_range: trim_line_end(source, node.byte_range()),
+            marker_ranges: Vec::new(),
+            row_range: row_range_for_node(node),
+        }),
+        "fenced_code_block" => Some(MarkdownBlock {
+            id: node_id(node),
+            kind: MarkdownBlockKind::FencedCodeBlock,
+            source_range: node.byte_range(),
+            content_range: fenced_code_content_range(source, node),
+            marker_ranges: fenced_code_marker_ranges(node),
+            row_range: row_range_for_node(node),
+        }),
+        _ => None,
+    }
+}
+
+fn atx_heading_block(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
+    let source_range = node.byte_range();
+    let (level, marker_range, content_start) = atx_heading_marker_range(source, source_range.clone())?;
+
+    let content_end = trim_line_end(source, content_start..source_range.end).end;
+
+    Some(MarkdownBlock {
+        id: node_id(node),
+        kind: MarkdownBlockKind::AtxHeading { level },
+        source_range: source_range.clone(),
+        content_range: content_start..content_end,
+        marker_ranges: vec![marker_range],
+        row_range: row_range_for_node(node),
+    })
+}
+
+fn atx_heading_marker_range(
+    source: &str,
+    source_range: Range<usize>,
+) -> Option<(u8, Range<usize>, usize)> {
+    let bytes = source.as_bytes();
+    let mut marker_start = source_range.start;
+    while marker_start < source_range.end && matches!(bytes[marker_start], b' ' | b'\t') {
+        marker_start += 1;
+    }
+
+    let mut marker_end = marker_start;
+    while marker_end < source_range.end && bytes[marker_end] == b'#' {
+        marker_end += 1;
+    }
+
+    let level = marker_end - marker_start;
+    if !(1..=6).contains(&level) {
+        return None;
+    }
+
+    let mut content_start = marker_end;
+    while content_start < source_range.end && matches!(bytes[content_start], b' ' | b'\t') {
+        content_start += 1;
+    }
+
+    Some((level as u8, marker_start..content_start, content_start))
+}
+
+fn fenced_code_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
+    let mut marker_ranges = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "fenced_code_block_delimiter" | "info_string" => marker_ranges.push(child.byte_range()),
+            _ => {}
+        }
+    }
+    marker_ranges
+}
+
+fn fenced_code_content_range(source: &str, node: Node<'_>) -> Range<usize> {
+    let mut content_range = trim_line_end(source, node.byte_range());
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "fenced_code_block_delimiter" | "info_string" => {
+                if child.start_byte() == content_range.start {
+                    content_range.start = child.end_byte();
+                    while content_range.start < content_range.end
+                        && matches!(source.as_bytes()[content_range.start], b'\r' | b'\n')
+                    {
+                        content_range.start += 1;
+                    }
+                } else if child.end_byte() == content_range.end {
+                    content_range.end = child.start_byte();
+                    content_range = trim_line_end(source, content_range);
+                }
+            }
+            "code_fence_content" => return child.byte_range(),
+            _ => {}
+        }
+    }
+    content_range
+}
+
+fn add_blank_blocks(source: &str, line_starts: &[usize], blocks: &mut Vec<MarkdownBlock>) {
+    let mut covered_rows = vec![false; line_starts.len()];
+    for block in blocks.iter() {
+        for row in block.row_range.clone() {
+            if let Some(covered) = covered_rows.get_mut(row) {
+                *covered = true;
+            }
+        }
+    }
+
+    for row in 0..line_starts.len() {
+        if covered_rows[row] {
+            continue;
+        }
+
+        let range = line_range(source, line_starts, row);
+        if range.is_empty() || !source[range.clone()].trim().is_empty() {
+            continue;
+        }
+
+        blocks.push(MarkdownBlock {
+            id: MarkdownNodeId(1 << 63 | row as u64),
+            kind: MarkdownBlockKind::Blank,
+            source_range: range.clone(),
+            content_range: range.start..range.start,
+            marker_ranges: Vec::new(),
+            row_range: row..row + 1,
+        });
+    }
+}
+
+fn row_range_for_node(node: Node<'_>) -> Range<usize> {
+    let start = node.start_position().row;
+    let end_position = node.end_position();
+    let mut end = if end_position.column == 0 {
+        end_position.row
+    } else {
+        end_position.row + 1
+    };
+    if end <= start {
+        end = start + 1;
+    }
+    start..end
+}
+
 fn line_starts(source: &str) -> Vec<usize> {
     let mut starts = vec![0];
     for (index, byte) in source.bytes().enumerate() {
-        if byte == b'\n' && index + 1 < source.len() {
+        if byte == b'\n' {
             starts.push(index + 1);
         }
     }
@@ -317,46 +585,23 @@ fn line_range(source: &str, line_starts: &[usize], row: usize) -> Range<usize> {
     start..end
 }
 
-fn atx_heading_marker(line: &str) -> Option<(u8, usize)> {
-    let mut level = 0;
-    for byte in line.bytes() {
-        if byte == b'#' {
-            level += 1;
-            if level > 6 {
-                return None;
-            }
-        } else {
-            break;
-        }
+fn trim_line_end(source: &str, mut range: Range<usize>) -> Range<usize> {
+    while range.end > range.start && matches!(source.as_bytes()[range.end - 1], b'\r' | b'\n') {
+        range.end -= 1;
     }
-
-    if level == 0 {
-        return None;
-    }
-
-    let next = line.as_bytes().get(level);
-    if !matches!(next, Some(b' ' | b'\t')) {
-        return None;
-    }
-
-    let mut marker_len = level;
-    while matches!(line.as_bytes().get(marker_len), Some(b' ' | b'\t')) {
-        marker_len += 1;
-    }
-
-    Some((level as u8, marker_len))
+    range
 }
 
-fn is_fence_marker(line: &str) -> bool {
-    let bytes = line.as_bytes();
-    let Some(marker) = bytes.first().copied() else {
-        return false;
-    };
-    if marker != b'`' && marker != b'~' {
-        return false;
+fn point_for_offset(line_starts: &[usize], offset: usize) -> Point {
+    let row = line_starts.partition_point(|line_start| *line_start <= offset) - 1;
+    Point {
+        row,
+        column: offset - line_starts[row],
     }
+}
 
-    bytes.iter().take_while(|byte| **byte == marker).count() >= 3
+fn node_id(node: Node<'_>) -> MarkdownNodeId {
+    MarkdownNodeId(node.id() as u64)
 }
 
 fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool {
@@ -368,8 +613,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_atx_headings_without_allocating_source_text() {
+    fn parses_atx_headings_with_tree_sitter() {
         let tree = MarkdownSyntaxTree::parse("# Title\n\nText\n");
+        assert_eq!(tree.block_tree().root_node().kind(), "document");
         assert_eq!(tree.source_len(), 14);
         assert_eq!(tree.blocks().len(), 3);
         assert_eq!(tree.blocks()[0].kind, MarkdownBlockKind::AtxHeading { level: 1 });
@@ -378,6 +624,35 @@ mod tests {
         assert_eq!(tree.blocks()[0].marker_ranges, vec![0..2]);
         assert_eq!(tree.blocks()[1].kind, MarkdownBlockKind::Blank);
         assert_eq!(tree.blocks()[2].kind, MarkdownBlockKind::Paragraph);
+    }
+
+    #[test]
+    fn reparses_after_edit_with_tree_sitter() {
+        let old_source = "# Title\nBody\n";
+        let tree = MarkdownSyntaxTree::parse(old_source);
+        let new_source = "# Title!\nBody\n";
+        let tree = tree.reparse_after_edit(old_source, 7..7, new_source);
+
+        assert_eq!(tree.source_len(), new_source.len());
+        assert_eq!(tree.blocks()[0].kind, MarkdownBlockKind::AtxHeading { level: 1 });
+        assert_eq!(tree.blocks()[0].source_range, 0..9);
+        assert_eq!(tree.blocks()[0].content_range, 2..8);
+    }
+
+    #[test]
+    fn parses_inline_trees_with_tree_sitter() {
+        let tree = MarkdownSyntaxTree::parse("Text with **bold** and [link](https://zed.dev).\n");
+
+        assert_eq!(tree.inline_trees().len(), 1);
+        let inline_root = tree.inline_trees()[0].tree().root_node();
+        let mut cursor = inline_root.walk();
+        let inline_kinds = inline_root
+            .named_children(&mut cursor)
+            .map(|node| node.kind())
+            .collect::<Vec<_>>();
+
+        assert!(inline_kinds.contains(&"strong_emphasis"));
+        assert!(inline_kinds.contains(&"inline_link"));
     }
 
     #[test]

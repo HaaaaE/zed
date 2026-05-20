@@ -31,7 +31,7 @@
 - 不用 `markdown` crate 作为最终 WYSIWYG 渲染层。计划中可以参考其行为、fixtures 和视觉结果，但不能把它作为最终编辑区依赖。
 - 不把 current file 变成 project。图片路径、链接路径、资源解析都以当前 Markdown 文件所在目录为基准。
 - 不引入多文档、多标签或 workspace 心智。
-- 第一阶段不以瘦身依赖图为目标，但新 WYSIWYG 路径必须清楚标出最终可以删除的过渡依赖。
+- 第一阶段不以瘦身依赖图为目标，但 WYSIWYG 主路径不能新增临时解析器或临时渲染层。任何过渡依赖只能服务于旧 preview 或迁移验证，不能进入 Typora 编辑路径。
 
 ## 核心判断
 
@@ -69,7 +69,7 @@
 - 区分真实内容 range、marker range、container range、generated display range。
 - 记录当前解析版本，和 `Buffer` snapshot version 对齐。
 
-解析器选择需要单独验证，但默认方向是优先复用 Zed 语言基础设施和 tree-sitter Markdown 能力。如果 tree-sitter Markdown 在当前仓库里不能覆盖目标语义，再补充一个独立 parser crate。`pulldown-cmark` 可以作为兼容性参考和测试 oracle，但不应直接决定编辑投影，因为它不是为增量编辑和稳定节点设计的。
+解析器路线已经确定为 tree-sitter-backed，而不是手写 Markdown 扫描器。低层核心 crate `markdown_wysiwyg` 必须同时使用 tree-sitter Markdown block grammar 和 inline grammar，保存 block tree 与 inline trees。`pulldown-cmark` 可以作为兼容性参考和测试 oracle，但不进入编辑投影主路径。
 
 ### Markdown Projection Map
 
@@ -84,11 +84,11 @@
 - 提供 source-to-display 和 display-to-source 双向映射。
 - 支持 hit testing、selection、copy、find highlights、IME composition 和 soft wrap。
 
-不要把完整 Typora 逻辑塞进现有 `fold_map`。可以在前期用 `fold_map`、`inlay_map`、`block_map` 做验证，但最终应该有 Markdown 专属投影层，避免把语义隐藏伪装成普通 code fold。
+不要把完整 Typora 逻辑塞进现有 `fold_map`。`fold_map`、`inlay_map`、`block_map` 和 `custom_highlights` 是 editor display pipeline 的机制层，只能消费 `MarkdownProjectionMap` 产出的投影结果；Markdown 语义、marker 边界、source/display 映射和 focused-block reveal 必须归属于 `markdown_wysiwyg`，不能伪装成普通 code fold。
 
 ### Editor Integration
 
-短期策略：在 `markdown_editor` crate 里包一层 Markdown WYSIWYG controller，驱动已有 `Editor` 的 folds、blocks、custom highlights 和 actions。
+短期策略：在 `markdown_editor` crate 里包一层 Markdown WYSIWYG controller，把 `markdown_wysiwyg` 的 tree-sitter-backed semantic tree 和 projection 输出同步到 `Editor` 的 display pipeline。
 
 长期策略：为 `editor` crate 增加通用投影/decoration 扩展点，让 Markdown WYSIWYG 以插件式 display transform 接入，而不是把 Markdown 逻辑硬编码到通用 editor。
 
@@ -258,16 +258,16 @@
 
 - 列出 Zed `editor` display pipeline 当前可复用点和必须新增的扩展点。
 - 验证 `fold_map` / `inlay_map` / `block_map` 能否承载 marker hiding、replacement 和 block widgets。
-- 决定 parser 路线：tree-sitter Markdown、独立 parser，或混合方案。
+- 确认 parser 路线：固定为 tree-sitter Markdown block grammar + inline grammar，不引入手写 Markdown 扫描器。
 - 建立 Markdown fixture 集合，覆盖 inline、block、nesting、invalid Markdown、large file、CJK、emoji、Windows path、relative image。
 - 建立 source offset 和 display offset 的 property test 框架。
 - 写下 `markdown` crate 替换清单，明确当前哪些 preview 能力需要在 WYSIWYG 路径重建。
 
 验收：
 
-- 有一个明确的 `MarkdownSyntaxTree` 数据结构草案。
+- 已有一个 tree-sitter-backed `MarkdownSyntaxTree` / `MarkdownParseTree` 数据结构。
 - 有一个明确的 `MarkdownProjectionMap` 数据结构草案。
-- 有第一批 parser fixture 和 mapping fixture。
+- Parser fixture 直接覆盖 block tree 与 inline tree，不接受手写扫描器替代。
 - 可以解释为什么某些能力走现有 display map，某些能力需要新扩展点。
 
 ### 阶段 1：Focused-block WYSIWYG MVP
@@ -281,7 +281,7 @@
 - 非活动 bold / italic / inline code 隐藏 marker，显示样式。
 - 活动 block reveal 必要 marker，保证编辑稳定。
 - 保留保存、dirty、undo、redo、find、copy、paste 的基本行为。
-- 不再使用 `markdown::MarkdownElement` 做右侧 preview。可以暂时保留 preview 开关作为 source mode / rendered mode 调试入口，但目标是删除。
+- 不再使用 `markdown::MarkdownElement` 做右侧 preview。迁移期可以保留旧 preview 开关用于对照，但 Typora 编辑路径不能调用 `markdown` crate，不能把 preview 当作 rendered mode 调试入口。
 
 验收：
 
@@ -548,7 +548,7 @@
 
 ### 风险：全量 parse 导致大文档输入卡顿
 
-缓解：先用全量 parse 验证语义，尽快引入增量解析、visible range render、task cancellation 和 projection cache。
+缓解：`markdown_wysiwyg` 从阶段 0 起使用 tree-sitter incremental parse。初期可以先重建语义索引，但不能把全量字符串扫描作为 parser 路线；接入 UI 前必须支持 visible range projection、task cancellation 和 projection cache。
 
 ### 风险：IME 和隐藏 marker 冲突
 
@@ -575,9 +575,9 @@
 
 最终要求：
 
-- `markdown_editor` 不依赖 `markdown` crate。
-- Markdown parsing / projection / editing 逻辑位于新的 WYSIWYG path。
-- 如果需要共享 Markdown parser，建立新的低层 parser crate，而不是依赖 preview renderer crate。
+- `markdown_editor` 不依赖 `markdown` crate 作为 Typora 编辑路径；旧 preview 依赖只能在迁移期存在，且必须被隔离。
+- Markdown parsing / projection / editing 逻辑位于 tree-sitter-backed WYSIWYG path。
+- 共享 Markdown parser 固定在低层 `markdown_wysiwyg` / tree-sitter path，不能依赖 preview renderer crate，也不能引入手写扫描 parser。
 - 不引入 workspace/project UI，只允许内部复用不会泄露到产品心智的基础 crate。
 
 ## 成功标准
@@ -610,7 +610,8 @@
 
 - 新增 `crates/markdown_wysiwyg` 作为 Typora/WYSIWYG 的低层核心 crate。
 - 该 crate 当前不依赖 `markdown` crate，也不依赖 GPUI/UI 层；这是长期边界，不是临时限制。
-- 第一版只实现源 range 语义索引和可见区投影：`MarkdownSyntaxTree`、`MarkdownProjectionMap`、block 元数据、hidden marker ranges、focused-block reveal。
-- 当前覆盖 ATX heading、paragraph、blank、fenced code block 的基础 block 识别，目的是先验证 source/display mapping 数据结构，而不是追求完整 Markdown 语义。
-- 已通过 `cargo test -p markdown_wysiwyg`。
-- 下一步优先级：把解析层升级为增量或 tree-sitter-backed 语义树，再接入 `Editor` display map；不应把 `markdown` crate 引入 WYSIWYG 渲染路径。
+- 第一版直接采用 tree-sitter Markdown block grammar + inline grammar，不保留手写 Markdown 扫描器作为过渡实现。
+- 当前实现保存 `MarkdownParseTree`，包含 block tree、inline trees 和 inline parent 映射；`MarkdownSyntaxTree` 在其上提取 block 元数据、hidden marker ranges 和 focused-block reveal 所需投影。
+- 当前覆盖 ATX heading、paragraph、blank、fenced code block 的基础 block 识别，并验证 inline tree 可以识别 strong emphasis 和 inline link。
+- 已通过 `cargo test -p markdown_wysiwyg` 和 `cargo check -p markdown_editor`。
+- 下一步优先级：把 tree-sitter-backed semantic tree 接入 Zed `Editor` display map；继续扩展 inline/block 语义时必须沿用该解析路径，不应把 `markdown` crate 引入 WYSIWYG 渲染路径。
