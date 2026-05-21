@@ -361,6 +361,19 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
 - 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg`（9 个测试）通过。
 - 对后续目标的影响：fenced code block 和 pipe table 的 marker 已支持隐藏和 reveal，image 和 inline math 的视觉样式已就位。后续可继续打磨：code block 背景色、table 网格线、image alt 空状态提示、inline math 渲染等。
 
+### 2026-05-21 - Typora WYSIWYG 阶段 6：通用渲染接口与 HighlightStyle 视觉增强
+
+- 对应目标：为 block 级和 inline 级自定义渲染建立通用接口，继续用 HighlightStyle 增强 visual 表现力。
+- 完成情况：
+  - 新增 `MarkdownRenderer` 结构体，管理 Editor custom block 的生命周期（插入/清除），为后续 `BlockPlacement::Replace` 渲染图片、数学公式等非文本内容建立基础设施。
+  - `MarkdownWysiwygController` 新增 `renderer` 字段，在 `sync_wysiwyg` 中调用 `renderer.sync()`，同步 block 列表。
+  - `pipe_table_marker_ranges` 扩展收集所有 `|` 管道字符和 delimiter row，Rendered Mode 中 `|` 和 `---|---` 全部隐藏。
+  - `fenced_code_content` 和 `pipe_table_content` HighlightStyle 新增 `background_color`，分别为代码块（6%pacity）和表格（4%）加浅背景色区分。
+  - `MarkdownBlockKind` 新增 `PipeTable`，`MarkdownInlineKind` 新增 `Image` 和 `InlineMath`，已接入 tree-sitter 解析和高亮系统。
+  - `inline_marker_ranges` 新增 `latex_span_delimiter` 为 math 分隔符 marker。
+- 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg`（9 个测试）通过。
+- 对后续目标的影响：`MarkdownRenderer` 的 block lifecycle 已通链（插入/清除），但尚未有具体 block 渲染器实现。下一步应在 `MarkdownRenderer::sync()` 中为 `FencedCodeBlock` 和 `Image` 实现 `BlockPlacement::Replace` 渲染，建立第一个具体 renderer。
+
 ### 2026-05-21 - Typora WYSIWYG 阶段 5b：表格与代码块视觉增强
 
 - 对应目标：增强 Rendered Mode 中 pipe table 和 fenced code block 的视觉区分度。

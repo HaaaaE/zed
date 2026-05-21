@@ -5,14 +5,15 @@ use std::{env, fs, ops::Range, path::PathBuf};
 use anyhow::{Context as _, Result};
 use assets::Assets;
 use clock::Global;
+use collections::HashSet;
 use editor::{
     Anchor, Editor, EditorEvent, RowHeightOverride,
     display_map::{DisplayRow, HighlightKey},
 };
 use gpui::{
-    App, Context, Entity, Focusable as _, FontStyle, FontWeight, HighlightStyle, KeyBinding,
-    MouseButton, PathPromptOptions, SharedString, StrikethroughStyle, Subscription, UnderlineStyle,
-    Window, WindowOptions, actions, div, px,
+    App, Context, Entity, Focusable as _, FontStyle, FontWeight, HighlightStyle,
+    KeyBinding, MouseButton, PathPromptOptions, SharedString, StrikethroughStyle,
+    Subscription, UnderlineStyle, Window, WindowOptions, actions, div, px,
 };
 use language::Buffer;
 use markdown::{Markdown, MarkdownElement, MarkdownFont, MarkdownStyle};
@@ -90,11 +91,68 @@ impl RenderedRevealState {
     }
 }
 
-#[derive(Default)]
+struct MarkdownRenderer {
+    block_ids: Vec<editor::display_map::CustomBlockId>,
+}
+
+impl Default for MarkdownRenderer {
+    fn default() -> Self {
+        Self {
+            block_ids: Vec::new(),
+        }
+    }
+}
+
+impl MarkdownRenderer {
+    fn clear(&mut self, editor: &mut Editor, cx: &mut Context<Editor>) {
+        if self.block_ids.is_empty() {
+            return;
+        }
+        let ids = self.block_ids.drain(..).collect::<HashSet<_>>();
+        editor.remove_blocks(ids, None, cx);
+    }
+
+    fn sync(
+        &mut self,
+        editor: &Entity<Editor>,
+        tree: &MarkdownSyntaxTree,
+        mode: MarkdownEditMode,
+        cx: &mut Context<MarkdownEditorShell>,
+    ) {
+        editor.update(cx, |editor, cx| {
+            self.clear(editor, cx);
+        });
+
+        if mode != MarkdownEditMode::Rendered {
+            return;
+        }
+
+        for block in tree.blocks() {
+            match block.kind {
+                MarkdownBlockKind::FencedCodeBlock => {}
+                MarkdownBlockKind::PipeTable => {}
+                _ => continue,
+            }
+        }
+    }
+}
+
 struct MarkdownWysiwygController {
     parse_tree: Option<MarkdownSyntaxTree>,
     parsed_version: Option<Global>,
     reveal_state: RenderedRevealState,
+    renderer: MarkdownRenderer,
+}
+
+impl Default for MarkdownWysiwygController {
+    fn default() -> Self {
+        Self {
+            parse_tree: None,
+            parsed_version: None,
+            reveal_state: RenderedRevealState::default(),
+            renderer: MarkdownRenderer::default(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -469,6 +527,8 @@ impl MarkdownWysiwygController {
                 editor.set_row_height_overrides(row_height_overrides, cx);
             }
         });
+
+        self.renderer.sync(editor, parse_tree, mode, cx);
     }
 }
 
