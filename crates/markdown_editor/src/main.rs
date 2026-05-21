@@ -716,7 +716,7 @@ fn set_markdown_highlight(
 }
 
 fn markdown_marker_highlight_key() -> HighlightKey {
-    HighlightKey::SyntaxTreeView(usize::MAX - 1)
+    HighlightKey::SyntaxTreeView(usize::MAX - 11)
 }
 
 fn markdown_revealed_marker_highlight_key() -> HighlightKey {
