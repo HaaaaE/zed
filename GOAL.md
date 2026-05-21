@@ -301,3 +301,20 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
 - 验收结果：
 - 对后续目标的影响：
 ```
+
+### 2026-05-21 - Typora WYSIWYG 阶段 2：行垂直对齐修复
+
+- 对应目标：修复 Rendered Mode heading 行高已生效但文字贴顶部、行号区和文本区高度同步偏差、基线对齐不正确的问题。
+- 完成情况：在 `editor` crate 的 `element.rs` 中，将所有使用 `line_height * (row - scroll_position.y)` 计算行 y 坐标的地方改为使用 `EditorRowMetrics::y_for_row(row, scroll_position)`，并计算 `y_offset = (height_for_row - line_height) / 2` 将文本在增高行中垂直居中。具体修改了以下方法：
+  - `LineWithInvisibles::draw` 和 `draw_with_custom_offset`：使用 `row_metrics.y_for_row` 计算 `line_y`，添加 `y_offset` 垂直居中文本和不可见字符。
+  - `LineWithInvisibles::draw_background`：同上。
+  - `LineWithInvisibles::prepaint_with_custom_offset`：添加 `y_offset` 参数，在行内元素 pre-paint 时垂直居中。
+  - `layout_line_numbers`：行号区 y 坐标改用 `row_metrics.y_for_row`，hitbox 高度改用 `row_metrics.height_for_row`，行号文本垂直居中。
+  - `paint_highlighted_range`：`start_y` 改用 `row_metrics.y_for_row`，新增 `line_heights` 字段支持每行不同高度。
+  - `HighlightedRange` 结构体：新增 `line_heights: Vec<Pixels>` 字段，`paint_lines` 方法使用累积行高代替统一 `line_height`。
+  - 活动行高亮：`origin.y` 和 `size.height` 改用 `row_metrics` 计算。
+  - `Gutter` 结构体：新增 `row_metrics` 字段（owned），`prepaint_button` y 坐标改用 `row_metrics.y_for_row`。
+  - `prepaint_crease_toggles`：y 坐标改用 `row_metrics.y_for_row`，垂直居中。
+  - `prepaint_crease_trailers`：y 坐标改用 `row_metrics.y_for_row`，垂直居中。
+- 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过；`cargo test -p editor` 全部 731 个测试通过。用户验证 heading 文字垂直居中、行号区同步、光标高度跟随行高均正常。
+- 对后续目标的影响：heading 垂直对齐和光标高度均已修复。下一步可以继续实现 hover reveal overlay 和 caret reveal。
