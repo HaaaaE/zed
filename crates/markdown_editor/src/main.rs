@@ -78,58 +78,15 @@ impl MarkdownEditMode {
 
 #[derive(Default)]
 struct RenderedRevealState {
-    hover: Option<RevealTarget>,
-    caret: Option<RevealTarget>,
+    revealed_marker_ranges: Vec<Range<usize>>,
     drag_frozen: bool,
 }
 
 impl RenderedRevealState {
-    fn active_source_range(&self) -> Option<Range<usize>> {
-        self.hover
-            .as_ref()
-            .or(self.caret.as_ref())
-            .map(RevealTarget::source_range)
-    }
-}
-
-#[derive(Clone)]
-enum RevealTarget {
-    Heading {
-        row: u32,
-        source_range: Range<usize>,
-        content_range: Range<usize>,
-    },
-    Inline {
-        source_range: Range<usize>,
-        content_ranges: Vec<Range<usize>>,
-    },
-    Block {
-        source_range: Range<usize>,
-    },
-}
-
-impl RevealTarget {
-    fn source_range(&self) -> Range<usize> {
-        match self {
-            RevealTarget::Heading { source_range, .. }
-            | RevealTarget::Inline { source_range, .. }
-            | RevealTarget::Block { source_range } => source_range.clone(),
-        }
-    }
-
-    fn content_row(&self) -> Option<u32> {
-        match self {
-            RevealTarget::Heading { row, .. } => Some(*row),
-            _ => None,
-        }
-    }
-
-    fn content_ranges_len(&self) -> usize {
-        match self {
-            RevealTarget::Heading { content_range, .. } => content_range.len(),
-            RevealTarget::Inline { content_ranges, .. } => content_ranges.len(),
-            RevealTarget::Block { .. } => 0,
-        }
+    fn is_marker_revealed(&self, marker_range: &Range<usize>) -> bool {
+        self.revealed_marker_ranges
+            .iter()
+            .any(|revealed| revealed.start == marker_range.start && revealed.end == marker_range.end)
     }
 }
 
@@ -496,19 +453,13 @@ impl MarkdownWysiwygController {
         };
 
         let selection = editor.update(cx, |editor, cx| editor.newest_selection_point_range(cx));
-        self.reveal_state.caret = markdown_caret_reveal_target(parse_tree, mode, selection.start.row as u32);
+        let caret_offset = snapshot.point_to_offset(selection.start);
         self.reveal_state.drag_frozen = selection.start != selection.end;
-        let _ = self
-            .reveal_state
-            .active_source_range()
-            .zip(self.reveal_state.caret.as_ref().and_then(RevealTarget::content_row));
-        let _ = self
-            .reveal_state
-            .caret
-            .as_ref()
-            .map(RevealTarget::content_ranges_len);
+        self.reveal_state.revealed_marker_ranges =
+            caret_revealed_marker_ranges(parse_tree, mode, caret_offset);
 
-        let highlights = markdown_highlight_ranges(editor, parse_tree, cx);
+        let highlights =
+            markdown_highlight_ranges(editor, parse_tree, &self.reveal_state, cx);
         let row_height_overrides = markdown_row_height_overrides(parse_tree, mode);
         editor.update(cx, |editor, cx| {
             apply_markdown_highlights(editor, highlights, mode, cx);
@@ -521,40 +472,38 @@ impl MarkdownWysiwygController {
     }
 }
 
-fn markdown_caret_reveal_target(
+fn caret_revealed_marker_ranges(
     tree: &MarkdownSyntaxTree,
     mode: MarkdownEditMode,
-    row: u32,
-) -> Option<RevealTarget> {
+    caret_offset: usize,
+) -> Vec<Range<usize>> {
     if mode == MarkdownEditMode::Source {
-        return None;
+        return Vec::new();
     }
 
-    tree.inline_spans()
-        .iter()
-        .find(|span| span.source_range.start < span.source_range.end)
-        .map(|span| RevealTarget::Inline {
-            source_range: span.source_range.clone(),
-            content_ranges: span.content_ranges.clone(),
-        })
-        .or_else(|| {
-            tree.blocks().iter().find_map(|block| {
-                if !block.row_range.contains(&(row as usize)) {
-                    return None;
-                }
-                match block.kind {
-                    MarkdownBlockKind::AtxHeading { .. } => Some(RevealTarget::Heading {
-                        row,
-                        source_range: block.source_range.clone(),
-                        content_range: block.content_range.clone(),
-                    }),
-                    MarkdownBlockKind::FencedCodeBlock => Some(RevealTarget::Block {
-                        source_range: block.source_range.clone(),
-                    }),
-                    _ => None,
-                }
-            })
-        })
+    let mut revealed = Vec::new();
+
+    for block in tree.blocks() {
+        for marker_range in &block.marker_ranges {
+            if is_offset_near_range(caret_offset, marker_range, 1) {
+                revealed.push(marker_range.clone());
+            }
+        }
+    }
+
+    for span in tree.inline_spans() {
+        for marker_range in &span.marker_ranges {
+            if is_offset_near_range(caret_offset, marker_range, 1) {
+                revealed.push(marker_range.clone());
+            }
+        }
+    }
+
+    revealed
+}
+
+fn is_offset_near_range(offset: usize, range: &Range<usize>, margin: usize) -> bool {
+    offset >= range.start.saturating_sub(margin) && offset <= range.end.saturating_add(margin)
 }
 
 fn markdown_row_height_overrides(
@@ -588,6 +537,7 @@ fn markdown_row_height_overrides(
 #[derive(Default)]
 struct MarkdownHighlightRanges {
     marker: Vec<Range<Anchor>>,
+    revealed_marker: Vec<Range<Anchor>>,
     heading_1: Vec<Range<Anchor>>,
     heading_2: Vec<Range<Anchor>>,
     heading_3: Vec<Range<Anchor>>,
@@ -602,6 +552,7 @@ struct MarkdownHighlightRanges {
 fn markdown_highlight_ranges(
     editor: &Entity<Editor>,
     tree: &MarkdownSyntaxTree,
+    reveal_state: &RenderedRevealState,
     cx: &mut App,
 ) -> MarkdownHighlightRanges {
     let snapshot = editor.read(cx).buffer().read(cx).snapshot(cx);
@@ -610,7 +561,11 @@ fn markdown_highlight_ranges(
     for block in tree.blocks() {
         if let MarkdownBlockKind::AtxHeading { level } = block.kind {
             for marker_range in &block.marker_ranges {
-                push_byte_range(&snapshot, marker_range.clone(), &mut ranges.marker);
+                if reveal_state.is_marker_revealed(marker_range) {
+                    push_byte_range(&snapshot, marker_range.clone(), &mut ranges.revealed_marker);
+                } else {
+                    push_byte_range(&snapshot, marker_range.clone(), &mut ranges.marker);
+                }
             }
             push_byte_range(
                 &snapshot,
@@ -637,7 +592,11 @@ fn markdown_highlight_ranges(
             push_byte_range(&snapshot, content_range.clone(), target);
         }
         for marker_range in &span.marker_ranges {
-            push_byte_range(&snapshot, marker_range.clone(), &mut ranges.marker);
+            if reveal_state.is_marker_revealed(marker_range) {
+                push_byte_range(&snapshot, marker_range.clone(), &mut ranges.revealed_marker);
+            } else {
+                push_byte_range(&snapshot, marker_range.clone(), &mut ranges.marker);
+            }
         }
     }
 
@@ -668,6 +627,13 @@ fn apply_markdown_highlights(
         markdown_marker_highlight_key(),
         ranges.marker,
         markdown_marker_highlight_style(mode, cx),
+        cx,
+    );
+    set_markdown_highlight(
+        editor,
+        markdown_revealed_marker_highlight_key(),
+        ranges.revealed_marker,
+        markdown_revealed_marker_highlight_style(cx),
         cx,
     );
     set_markdown_highlight(
@@ -750,7 +716,11 @@ fn set_markdown_highlight(
 }
 
 fn markdown_marker_highlight_key() -> HighlightKey {
-    HighlightKey::SyntaxTreeView(usize::MAX)
+    HighlightKey::SyntaxTreeView(usize::MAX - 1)
+}
+
+fn markdown_revealed_marker_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX - 10)
 }
 
 fn markdown_heading_1_highlight_key() -> HighlightKey {
@@ -800,6 +770,14 @@ fn markdown_marker_highlight_style(mode: MarkdownEditMode, cx: &App) -> Highligh
             hide_text: true,
             ..Default::default()
         },
+    }
+}
+
+fn markdown_revealed_marker_highlight_style(cx: &App) -> HighlightStyle {
+    HighlightStyle {
+        color: Some(cx.theme().colors().text_muted.opacity(0.5)),
+        fade_out: Some(0.3),
+        ..Default::default()
     }
 }
 
