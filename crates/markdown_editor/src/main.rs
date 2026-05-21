@@ -543,6 +543,10 @@ struct MarkdownHighlightRanges {
     inline_code: Vec<Range<Anchor>>,
     link: Vec<Range<Anchor>>,
     strikethrough: Vec<Range<Anchor>>,
+    image: Vec<Range<Anchor>>,
+    inline_math: Vec<Range<Anchor>>,
+    fenced_code_content: Vec<Range<Anchor>>,
+    pipe_table_content: Vec<Range<Anchor>>,
 }
 
 fn markdown_highlight_ranges(
@@ -555,24 +559,47 @@ fn markdown_highlight_ranges(
     let mut ranges = MarkdownHighlightRanges::default();
 
     for block in tree.blocks() {
-        if let MarkdownBlockKind::AtxHeading { level } = block.kind {
-            for marker_range in &block.marker_ranges {
-                if reveal_state.is_marker_revealed(marker_range) {
-                    push_byte_range(&snapshot, marker_range.clone(), &mut ranges.revealed_marker);
-                } else {
-                    push_byte_range(&snapshot, marker_range.clone(), &mut ranges.marker);
+        match block.kind {
+            MarkdownBlockKind::AtxHeading { level } => {
+                for marker_range in &block.marker_ranges {
+                    if reveal_state.is_marker_revealed(marker_range) {
+                        push_byte_range(&snapshot, marker_range.clone(), &mut ranges.revealed_marker);
+                    } else {
+                        push_byte_range(&snapshot, marker_range.clone(), &mut ranges.marker);
+                    }
                 }
+                push_byte_range(
+                    &snapshot,
+                    block.content_range.clone(),
+                    match level {
+                        1 => &mut ranges.heading_1,
+                        2 => &mut ranges.heading_2,
+                        3 => &mut ranges.heading_3,
+                        _ => &mut ranges.heading_other,
+                    },
+                );
             }
-            push_byte_range(
-                &snapshot,
-                block.content_range.clone(),
-                match level {
-                    1 => &mut ranges.heading_1,
-                    2 => &mut ranges.heading_2,
-                    3 => &mut ranges.heading_3,
-                    _ => &mut ranges.heading_other,
-                },
-            );
+            MarkdownBlockKind::FencedCodeBlock => {
+                for marker_range in &block.marker_ranges {
+                    if reveal_state.is_marker_revealed(marker_range) {
+                        push_byte_range(&snapshot, marker_range.clone(), &mut ranges.revealed_marker);
+                    } else {
+                        push_byte_range(&snapshot, marker_range.clone(), &mut ranges.marker);
+                    }
+                }
+                push_byte_range(&snapshot, block.content_range.clone(), &mut ranges.fenced_code_content);
+            }
+            MarkdownBlockKind::PipeTable => {
+                for marker_range in &block.marker_ranges {
+                    if reveal_state.is_marker_revealed(marker_range) {
+                        push_byte_range(&snapshot, marker_range.clone(), &mut ranges.revealed_marker);
+                    } else {
+                        push_byte_range(&snapshot, marker_range.clone(), &mut ranges.marker);
+                    }
+                }
+                push_byte_range(&snapshot, block.content_range.clone(), &mut ranges.pipe_table_content);
+            }
+            _ => {}
         }
     }
 
@@ -583,6 +610,8 @@ fn markdown_highlight_ranges(
             MarkdownInlineKind::InlineCode => &mut ranges.inline_code,
             MarkdownInlineKind::Link => &mut ranges.link,
             MarkdownInlineKind::Strikethrough => &mut ranges.strikethrough,
+            MarkdownInlineKind::Image => &mut ranges.image,
+            MarkdownInlineKind::InlineMath => &mut ranges.inline_math,
         };
         for content_range in &span.content_ranges {
             push_byte_range(&snapshot, content_range.clone(), target);
@@ -695,6 +724,34 @@ fn apply_markdown_highlights(
         markdown_strikethrough_highlight_style(cx),
         cx,
     );
+    set_markdown_highlight(
+        editor,
+        markdown_image_highlight_key(),
+        ranges.image,
+        markdown_image_highlight_style(cx),
+        cx,
+    );
+    set_markdown_highlight(
+        editor,
+        markdown_inline_math_highlight_key(),
+        ranges.inline_math,
+        markdown_inline_math_highlight_style(cx),
+        cx,
+    );
+    set_markdown_highlight(
+        editor,
+        markdown_fenced_code_content_highlight_key(),
+        ranges.fenced_code_content,
+        markdown_fenced_code_content_highlight_style(mode, cx),
+        cx,
+    );
+    set_markdown_highlight(
+        editor,
+        markdown_pipe_table_content_highlight_key(),
+        ranges.pipe_table_content,
+        markdown_pipe_table_content_highlight_style(mode, cx),
+        cx,
+    );
 }
 
 fn set_markdown_highlight(
@@ -753,6 +810,22 @@ fn markdown_link_highlight_key() -> HighlightKey {
 
 fn markdown_strikethrough_highlight_key() -> HighlightKey {
     HighlightKey::SyntaxTreeView(usize::MAX - 9)
+}
+
+fn markdown_image_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX - 12)
+}
+
+fn markdown_inline_math_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX - 13)
+}
+
+fn markdown_fenced_code_content_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX - 14)
+}
+
+fn markdown_pipe_table_content_highlight_key() -> HighlightKey {
+    HighlightKey::SyntaxTreeView(usize::MAX - 15)
 }
 
 fn markdown_marker_highlight_style(mode: MarkdownEditMode, cx: &App) -> HighlightStyle {
@@ -852,6 +925,47 @@ fn markdown_strikethrough_highlight_style(cx: &App) -> HighlightStyle {
             thickness: px(1.),
             color: Some(cx.theme().colors().text_muted),
         }),
+        ..Default::default()
+    }
+}
+
+fn markdown_image_highlight_style(cx: &App) -> HighlightStyle {
+    let colors = cx.theme().colors();
+    HighlightStyle {
+        color: Some(colors.link_text_hover),
+        ..Default::default()
+    }
+}
+
+fn markdown_inline_math_highlight_style(cx: &App) -> HighlightStyle {
+    let colors = cx.theme().colors();
+    HighlightStyle {
+        color: Some(colors.text_accent),
+        font_style: Some(FontStyle::Italic),
+        ..Default::default()
+    }
+}
+
+fn markdown_fenced_code_content_highlight_style(mode: MarkdownEditMode, cx: &App) -> HighlightStyle {
+    let colors = cx.theme().colors();
+    HighlightStyle {
+        color: Some(colors.text),
+        font_size: match mode {
+            MarkdownEditMode::Source => None,
+            MarkdownEditMode::Rendered => Some(px(14.).into()),
+        },
+        ..Default::default()
+    }
+}
+
+fn markdown_pipe_table_content_highlight_style(mode: MarkdownEditMode, cx: &App) -> HighlightStyle {
+    let colors = cx.theme().colors();
+    HighlightStyle {
+        color: Some(colors.text_muted),
+        font_size: match mode {
+            MarkdownEditMode::Source => None,
+            MarkdownEditMode::Rendered => Some(px(13.).into()),
+        },
         ..Default::default()
     }
 }

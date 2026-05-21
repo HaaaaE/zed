@@ -84,6 +84,7 @@ pub enum MarkdownBlockKind {
     Paragraph,
     AtxHeading { level: u8 },
     FencedCodeBlock,
+    PipeTable,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -101,6 +102,8 @@ pub enum MarkdownInlineKind {
     InlineCode,
     Link,
     Strikethrough,
+    Image,
+    InlineMath,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -463,6 +466,8 @@ fn inline_span_from_node(node: Node<'_>) -> Option<MarkdownInlineSpan> {
         "inline_link" | "full_reference_link" | "collapsed_reference_link" | "shortcut_link"
         | "uri_autolink" | "email_autolink" => MarkdownInlineKind::Link,
         "strikethrough" => MarkdownInlineKind::Strikethrough,
+        "image" => MarkdownInlineKind::Image,
+        "latex_block" => MarkdownInlineKind::InlineMath,
         _ => return None,
     };
 
@@ -484,7 +489,7 @@ fn inline_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
     for child in node.children(&mut cursor) {
         match child.kind() {
             "emphasis_delimiter" | "code_span_delimiter" | "link_destination"
-            | "link_label" | "link_title" => marker_ranges.push(child.byte_range()),
+            | "link_label" | "link_title" | "latex_span_delimiter" => marker_ranges.push(child.byte_range()),
             _ if !child.is_named() => marker_ranges.push(child.byte_range()),
             _ => {}
         }
@@ -542,6 +547,14 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
             marker_ranges: fenced_code_marker_ranges(node),
             row_range: row_range_for_node(node),
         }),
+        "pipe_table" => Some(MarkdownBlock {
+            id: node_id(node),
+            kind: MarkdownBlockKind::PipeTable,
+            source_range: node.byte_range(),
+            content_range: trim_line_end(source, node.byte_range()),
+            marker_ranges: pipe_table_marker_ranges(node),
+            row_range: row_range_for_node(node),
+        }),
         _ => None,
     }
 }
@@ -596,6 +609,18 @@ fn fenced_code_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
     for child in node.children(&mut cursor) {
         match child.kind() {
             "fenced_code_block_delimiter" | "info_string" => marker_ranges.push(child.byte_range()),
+            _ => {}
+        }
+    }
+    marker_ranges
+}
+
+fn pipe_table_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
+    let mut marker_ranges = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "pipe_table_delimiter_row" => marker_ranges.push(child.byte_range()),
             _ => {}
         }
     }
@@ -799,5 +824,24 @@ mod tests {
         assert_eq!(tree.blocks()[0].kind, MarkdownBlockKind::FencedCodeBlock);
         assert_eq!(tree.blocks()[0].row_range, 0..3);
         assert_eq!(tree.blocks()[1].kind, MarkdownBlockKind::AtxHeading { level: 1 });
+    }
+
+    #[test]
+    fn parses_pipe_table() {
+        let source = "# Title\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let table_block = tree.blocks().iter().find(|b| b.kind == MarkdownBlockKind::PipeTable);
+        assert!(table_block.is_some(), "expected a PipeTable block");
+        let table = table_block.unwrap();
+        assert!(!table.marker_ranges.is_empty(), "table should have marker ranges");
+    }
+
+    #[test]
+    fn parses_image_and_math_inline() {
+        let source = "text ![alt](url) $math$\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let spans = tree.inline_spans();
+        assert!(spans.iter().any(|s| s.kind == MarkdownInlineKind::Image));
+        assert!(spans.iter().any(|s| s.kind == MarkdownInlineKind::InlineMath));
     }
 }

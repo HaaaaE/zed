@@ -347,6 +347,20 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
 - 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过。
 - 对后续目标的影响：光标靠近 marker 时语义单元级显示已实现，drag freeze 已实现，半开区间比较已修复。下一步可扩展到 block 级内容（table/image/code fence）、inline math。
 
+### 2026-05-21 - Typora WYSIWYG 阶段 5：Block 级显示与 Inline Math/图片/表格
+
+- 对应目标：扩展 Rendered Mode 的语义高亮覆盖范围，增加对 fenced code block、pipe table、image、inline math 的解析和视觉样式。
+- 完成情况：
+  - `markdown_wysiwyg` 新增 `MarkdownBlockKind::PipeTable`，解析 `pipe_table` 节点，提取 delimiter row 为 marker range，表格内容为 content range。
+  - `markdown_wysiwyg` 新增 `MarkdownInlineKind::Image` 和 `MarkdownInlineKind::InlineMath`，解析 `image` 节点和 `latex_block` 节点。
+  - `inline_marker_ranges` 新增 `latex_span_delimiter` 为 marker（`$...$` / `$$...$$` 的分隔符）。
+  - `markdown_editor` 的 `MarkdownHighlightRanges` 新增 `image`、`inline_math`、`fenced_code_content`、`pipe_table_content` 字段。
+  - `markdown_highlight_ranges` 新增对 `FencedCodeBlock`、`PipeTable`、`Image`、`InlineMath` 的高亮 range 收集，marker 全部统一走 revealed/hidden 二分处理。
+  - `apply_markdown_highlights` 新增 image（链接色）、inline math（accent 色 + 斜体）、fenced code content（等宽小字号）、pipe table content（muted 色 + 小字号）的样式应用。
+  - 新增 `parses_pipe_table` 和 `parses_image_and_math_inline` 测试。
+- 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg`（9 个测试）通过。
+- 对后续目标的影响：fenced code block 和 pipe table 的 marker 已支持隐藏和 reveal，image 和 inline math 的视觉样式已就位。后续可继续打磨：code block 背景色、table 网格线、image alt 空状态提示、inline math 渲染等。
+
 - 对应目标：Rendered Mode 中，当光标靠近被 hide_text 隐藏的 markdown 控制字符（`#`、`**`、`*`、`` ` ``、`~~`、`[]()`）时，局部显示这些字符。
 - 完成情况：
   - 简化 `RenderedRevealState`：移除 `RevealTarget` 枚举和 `hover`/`caret` 字段，替换为 `revealed_marker_ranges: Vec<Range<usize>>`，记录当前光标附近应显示的 marker 字节范围。
