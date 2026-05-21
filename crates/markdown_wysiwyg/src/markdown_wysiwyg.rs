@@ -547,14 +547,18 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
             marker_ranges: fenced_code_marker_ranges(node),
             row_range: row_range_for_node(node),
         }),
-        "pipe_table" => Some(MarkdownBlock {
-            id: node_id(node),
-            kind: MarkdownBlockKind::PipeTable,
-            source_range: node.byte_range(),
-            content_range: trim_line_end(source, node.byte_range()),
-            marker_ranges: pipe_table_marker_ranges(node),
-            row_range: row_range_for_node(node),
-        }),
+        "pipe_table" => {
+            let marker_ranges = pipe_table_marker_ranges(node);
+            let content_range = trim_line_end(source, node.byte_range());
+            Some(MarkdownBlock {
+                id: node_id(node),
+                kind: MarkdownBlockKind::PipeTable,
+                source_range: node.byte_range(),
+                content_range,
+                marker_ranges,
+                row_range: row_range_for_node(node),
+            })
+        }
         _ => None,
     }
 }
@@ -623,7 +627,14 @@ fn pipe_table_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
             "pipe_table_delimiter_row" => marker_ranges.push(child.byte_range()),
             _ => {}
         }
+        let mut inner_cursor = child.walk();
+        for grandchild in child.children(&mut inner_cursor) {
+            if !grandchild.is_named() && grandchild.kind() == "|" {
+                marker_ranges.push(grandchild.byte_range());
+            }
+        }
     }
+    marker_ranges.sort_by_key(|range| (range.start, range.end));
     marker_ranges
 }
 
@@ -834,6 +845,8 @@ mod tests {
         assert!(table_block.is_some(), "expected a PipeTable block");
         let table = table_block.unwrap();
         assert!(!table.marker_ranges.is_empty(), "table should have marker ranges");
+        let has_pipe_marker = table.marker_ranges.iter().any(|r| &source[r.clone()] == "|");
+        assert!(has_pipe_marker, "table markers should include pipe characters");
     }
 
     #[test]

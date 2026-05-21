@@ -950,6 +950,10 @@ fn markdown_fenced_code_content_highlight_style(mode: MarkdownEditMode, cx: &App
     let colors = cx.theme().colors();
     HighlightStyle {
         color: Some(colors.text),
+        background_color: match mode {
+            MarkdownEditMode::Source => None,
+            MarkdownEditMode::Rendered => Some(colors.editor_foreground.opacity(0.06)),
+        },
         font_size: match mode {
             MarkdownEditMode::Source => None,
             MarkdownEditMode::Rendered => Some(px(14.).into()),
@@ -962,6 +966,10 @@ fn markdown_pipe_table_content_highlight_style(mode: MarkdownEditMode, cx: &App)
     let colors = cx.theme().colors();
     HighlightStyle {
         color: Some(colors.text_muted),
+        background_color: match mode {
+            MarkdownEditMode::Source => None,
+            MarkdownEditMode::Rendered => Some(colors.editor_foreground.opacity(0.04)),
+        },
         font_size: match mode {
             MarkdownEditMode::Source => None,
             MarkdownEditMode::Rendered => Some(px(13.).into()),

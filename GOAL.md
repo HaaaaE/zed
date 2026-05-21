@@ -361,6 +361,15 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
 - 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg`（9 个测试）通过。
 - 对后续目标的影响：fenced code block 和 pipe table 的 marker 已支持隐藏和 reveal，image 和 inline math 的视觉样式已就位。后续可继续打磨：code block 背景色、table 网格线、image alt 空状态提示、inline math 渲染等。
 
+### 2026-05-21 - Typora WYSIWYG 阶段 5b：表格与代码块视觉增强
+
+- 对应目标：增强 Rendered Mode 中 pipe table 和 fenced code block 的视觉区分度。
+- 完成情况：
+  - `pipe_table_marker_ranges` 现在同时收集 delimiter row 和所有 `|` 管道字符为 marker ranges，Rendered Mode 中 `|` 和 `---|---` 行隐藏，只显示 cell 内容。
+  - `fenced_code_content_highlight_style` 和 `pipe_table_content_highlight_style` 新增 `background_color`，在 Rendered Mode 中分别为代码块（`editor_foreground` 6% 透明度）和表格（4%）加浅背景色。
+- 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过。
+- 对后续目标的影响：pipe table 的 `|` 字符和 delimiter row 可在 Rendered Mode 中隐藏，cell 内容有浅背景。后续可继续实现等宽字体、cell 对齐、border line 等。
+
 - 对应目标：Rendered Mode 中，当光标靠近被 hide_text 隐藏的 markdown 控制字符（`#`、`**`、`*`、`` ` ``、`~~`、`[]()`）时，局部显示这些字符。
 - 完成情况：
   - 简化 `RenderedRevealState`：移除 `RevealTarget` 枚举和 `hover`/`caret` 字段，替换为 `revealed_marker_ranges: Vec<Range<usize>>`，记录当前光标附近应显示的 marker 字节范围。
