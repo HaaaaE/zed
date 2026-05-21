@@ -332,5 +332,18 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
   - 新增 `markdown_revealed_marker_highlight_key()` 和 `markdown_revealed_marker_highlight_style(cx)`：显示的 marker 使用 `fade_out: 0.3` + `color: text_muted.opacity(0.5)` 而非 `hide_text: true`。
   - `apply_markdown_highlights` 对 `revealed_marker` 单独应用显示样式。
   - 光标 offset 通过 `snapshot.point_to_offset(selection.start)` 从 `text::BufferSnapshot` 获取。
+- Bug fix：`markdown_marker_highlight_key()` 和 `markdown_heading_1_highlight_key()` 同为 `SyntaxTreeView(usize::MAX - 1)`，导致 heading 样式覆盖了 marker 的 `hide_text`。marker key 改为 `usize::MAX - 11`。
+- 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过。
+- 对后续目标的影响：光标靠近 marker 时字符级显示已实现，`hide_text` key 冲突已修复。下一步可扩展 margin 范围、支持 drag freeze、扩展到 block 级内容（table/image/code fence）。
+
+- 对应目标：Rendered Mode 中，当光标靠近被 hide_text 隐藏的 markdown 控制字符（`#`、`**`、`*`、`` ` ``、`~~`、`[]()`）时，局部显示这些字符。
+- 完成情况：
+  - 简化 `RenderedRevealState`：移除 `RevealTarget` 枚举和 `hover`/`caret` 字段，替换为 `revealed_marker_ranges: Vec<Range<usize>>`，记录当前光标附近应显示的 marker 字节范围。
+  - 新增 `caret_revealed_marker_ranges(tree, mode, caret_offset)`：遍历所有 block 和 inline 的 `marker_ranges`，当光标 offset 在 marker 范围 ±1 字符内时，将该 marker 收入 revealed 集合。
+  - 新增 `is_offset_near_range(offset, range, margin)` 辅助函数。
+  - `MarkdownHighlightRanges` 新增 `revealed_marker` 字段，`markdown_highlight_ranges` 根据 `reveal_state.is_marker_revealed()` 将 marker 分为隐藏和显示两组。
+  - 新增 `markdown_revealed_marker_highlight_key()` 和 `markdown_revealed_marker_highlight_style(cx)`：显示的 marker 使用 `fade_out: 0.3` + `color: text_muted.opacity(0.5)` 而非 `hide_text: true`。
+  - `apply_markdown_highlights` 对 `revealed_marker` 单独应用显示样式。
+  - 光标 offset 通过 `snapshot.point_to_offset(selection.start)` 从 `text::BufferSnapshot` 获取。
 - 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过。
 - 对后续目标的影响：光标靠近 marker 时字符级显示已实现。下一步可扩展 margin 范围、支持 drag freeze、扩展到 block 级内容（table/image/code fence）。
