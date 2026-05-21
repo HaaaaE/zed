@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{env, fs, ops::Range, path::PathBuf};
+use std::{env, fs, ops::Range, path::PathBuf, sync::Arc};
 
 use anyhow::{Context as _, Result};
 use assets::Assets;
@@ -8,13 +8,16 @@ use clock::Global;
 use collections::HashSet;
 use editor::{
     Anchor, Editor, EditorEvent, RowHeightOverride,
-    display_map::{DisplayRow, HighlightKey},
+    display_map::{
+        BlockPlacement, BlockProperties, BlockStyle, DisplayRow, HighlightKey,
+    },
 };
 use gpui::{
     App, Context, Entity, Focusable as _, FontStyle, FontWeight, HighlightStyle,
     KeyBinding, MouseButton, PathPromptOptions, SharedString, StrikethroughStyle,
-    Subscription, UnderlineStyle, Window, WindowOptions, actions, div, px,
+    Subscription, UnderlineStyle, Window, WindowOptions, actions, div, img, px,
 };
+use http_client::{AsyncBody, HttpClient, Url};
 use language::Buffer;
 use markdown::{Markdown, MarkdownElement, MarkdownFont, MarkdownStyle};
 use markdown_wysiwyg::{MarkdownBlockKind, MarkdownInlineKind, MarkdownSyntaxTree};
@@ -119,6 +122,7 @@ impl MarkdownRenderer {
         mode: MarkdownEditMode,
         cx: &mut Context<MarkdownEditorShell>,
     ) {
+        let snapshot = editor.read(cx).buffer().read(cx).snapshot(cx);
         editor.update(cx, |editor, cx| {
             self.clear(editor, cx);
         });
@@ -127,12 +131,54 @@ impl MarkdownRenderer {
             return;
         }
 
-        for block in tree.blocks() {
-            match block.kind {
-                MarkdownBlockKind::FencedCodeBlock => {}
-                MarkdownBlockKind::PipeTable => {}
-                _ => continue,
+        let mut new_blocks = Vec::new();
+
+        for span in tree.inline_spans() {
+            if span.kind != MarkdownInlineKind::Image {
+                continue;
             }
+            let Some(url) = &span.url else {
+                continue;
+            };
+            if !url.starts_with("http://") && !url.starts_with("https://") {
+                continue;
+            }
+            let start_anchor = snapshot.anchor_before(MultiBufferOffset(span.source_range.start));
+            let end_anchor = snapshot.anchor_after(MultiBufferOffset(span.source_range.end));
+            let url = url.clone();
+            new_blocks.push(BlockProperties {
+                placement: BlockPlacement::Replace(start_anchor..=end_anchor),
+                height: Some(6),
+                style: BlockStyle::Flex,
+                render: Arc::new(move |cx| {
+                    let max_width = cx.max_width;
+                    let gutter = cx.margins.gutter.width;
+                    let _display_url = url.split('?').next().unwrap_or(&url).to_string();
+                    img(url.clone())
+                        .with_fallback(move || {
+                            div()
+                                .max_w(px(600.))
+                                .h(px(120.))
+                                .rounded_md()
+                                .border_1()
+                                .into_any_element()
+                        })
+                        .object_fit(gpui::ObjectFit::Contain)
+                        .max_w(max_width)
+                        .pl(gutter)
+                        .pt(px(4.))
+                        .pb(px(4.))
+                        .into_any_element()
+                }),
+                priority: 0,
+            });
+        }
+
+        if !new_blocks.is_empty() {
+            editor.update(cx, |editor, cx| {
+                let ids = editor.insert_blocks(new_blocks, None, cx);
+                self.block_ids.extend(ids);
+            });
         }
     }
 }
@@ -1099,6 +1145,7 @@ fn main() {
     gpui_platform::application()
         .with_assets(Assets)
         .run(move |cx| {
+            cx.set_http_client(Arc::new(UreqHttpClient));
             settings::init(cx);
             theme_settings::init(LoadThemes::All(Box::new(Assets)), cx);
             editor::init(cx);
@@ -1165,6 +1212,44 @@ fn document_status(document: &Document, cx: &App) -> DocumentStatus {
 
 fn singleton_buffer(editor: &Entity<Editor>, cx: &App) -> Option<Entity<Buffer>> {
     editor.read(cx).buffer().read(cx).as_singleton()
+}
+
+struct UreqHttpClient;
+
+impl HttpClient for UreqHttpClient {
+    fn user_agent(&self) -> Option<&http::HeaderValue> {
+        None
+    }
+
+    fn proxy(&self) -> Option<&Url> {
+        None
+    }
+
+    fn send(
+        &self,
+        req: http::Request<AsyncBody>,
+    ) -> futures::future::BoxFuture<'static, anyhow::Result<http::Response<AsyncBody>>> {
+        let uri = req.uri().clone();
+        let method = req.method().clone();
+        Box::pin(async move {
+            smol::unblock(move || {
+                let url = uri.to_string();
+                let agent = ureq::Agent::new_with_defaults();
+                let request = http::Request::builder()
+                    .method(method)
+                    .uri(&url)
+                    .header("User-Agent", "markdown-editor/1.0")
+                    .body(())
+                    .map_err(|e| anyhow::anyhow!("failed to build request: {e}"))?;
+                let response = agent.run(request)?;
+                let (parts, mut body) = response.into_parts();
+                let body_bytes = body.read_to_vec()?;
+                let async_body = AsyncBody::from(body_bytes);
+                Ok(http::Response::from_parts(parts, async_body))
+            })
+            .await
+        })
+    }
 }
 
 fn read_markdown_file(path: &PathBuf) -> Result<String> {

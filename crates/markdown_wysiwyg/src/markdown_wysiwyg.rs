@@ -93,6 +93,7 @@ pub struct MarkdownInlineSpan {
     pub source_range: Range<usize>,
     pub content_ranges: Vec<Range<usize>>,
     pub marker_ranges: Vec<Range<usize>>,
+    pub url: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -228,7 +229,7 @@ impl MarkdownSyntaxTree {
         let tree = parse_markdown(source, old_tree);
         let line_starts = line_starts(source);
         let blocks = collect_blocks(source, &line_starts, tree.block_tree());
-        let inline_spans = collect_inline_spans(&tree);
+        let inline_spans = collect_inline_spans(source, &tree);
 
         Self {
             tree,
@@ -438,27 +439,27 @@ fn collect_blocks(source: &str, line_starts: &[usize], tree: &Tree) -> Vec<Markd
     blocks
 }
 
-fn collect_inline_spans(parse_tree: &MarkdownParseTree) -> Vec<MarkdownInlineSpan> {
+fn collect_inline_spans(source: &str, parse_tree: &MarkdownParseTree) -> Vec<MarkdownInlineSpan> {
     let mut spans = Vec::new();
     for inline_tree in parse_tree.inline_trees() {
-        collect_inline_span_nodes(inline_tree.tree().root_node(), &mut spans);
+        collect_inline_span_nodes(source, inline_tree.tree().root_node(), &mut spans);
     }
     spans.sort_by_key(|span| (span.source_range.start, span.source_range.end));
     spans
 }
 
-fn collect_inline_span_nodes(node: Node<'_>, spans: &mut Vec<MarkdownInlineSpan>) {
-    if let Some(span) = inline_span_from_node(node) {
+fn collect_inline_span_nodes(source: &str, node: Node<'_>, spans: &mut Vec<MarkdownInlineSpan>) {
+    if let Some(span) = inline_span_from_node(source, node) {
         spans.push(span);
     }
 
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        collect_inline_span_nodes(child, spans);
+        collect_inline_span_nodes(source, child, spans);
     }
 }
 
-fn inline_span_from_node(node: Node<'_>) -> Option<MarkdownInlineSpan> {
+fn inline_span_from_node(source: &str, node: Node<'_>) -> Option<MarkdownInlineSpan> {
     let kind = match node.kind() {
         "emphasis" => MarkdownInlineKind::Emphasis,
         "strong_emphasis" => MarkdownInlineKind::Strong,
@@ -474,12 +475,19 @@ fn inline_span_from_node(node: Node<'_>) -> Option<MarkdownInlineSpan> {
     let source_range = node.byte_range();
     let marker_ranges = inline_marker_ranges(node);
     let content_ranges = inline_content_ranges(source_range.clone(), &marker_ranges);
+    let url = match kind {
+        MarkdownInlineKind::Image | MarkdownInlineKind::Link => {
+            extract_link_url(source, &node)
+        }
+        _ => None,
+    };
 
     Some(MarkdownInlineSpan {
         kind,
         source_range,
         content_ranges,
         marker_ranges,
+        url,
     })
 }
 
@@ -496,6 +504,17 @@ fn inline_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
     }
     marker_ranges.sort_by_key(|range| (range.start, range.end));
     marker_ranges
+}
+
+fn extract_link_url(source: &str, node: &Node<'_>) -> Option<String> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "link_destination" {
+            let range = child.byte_range();
+            return Some(source[range].to_string());
+        }
+    }
+    None
 }
 
 fn inline_content_ranges(

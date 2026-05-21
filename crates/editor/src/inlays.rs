@@ -19,12 +19,13 @@ pub mod inlay_hints;
 
 use std::sync::OnceLock;
 
-use gpui::{Context, HighlightStyle, Hsla, Rgba, Task};
+use gpui::{AnyElement, Context, HighlightStyle, Hsla, Rgba, Task};
 use multi_buffer::Anchor;
 use project::{InlayHint, InlayId};
 use text::Rope;
 
-use crate::{Editor, HighlightKey, hover_links::InlayHighlight};
+use crate::{Editor, HighlightKey, display_map::ChunkRendererContext, hover_links::InlayHighlight};
+use std::sync::Arc;
 
 /// A splice to send into the `inlay_map` for updating the visible inlays on the screen.
 /// "Visible" inlays may not be displayed in the buffer right away, but those are ready to be displayed on further buffer scroll, pane item activations, etc. right away without additional LSP queries or settings changes.
@@ -45,15 +46,25 @@ impl InlaySplice {
 #[derive(Debug, Clone)]
 pub struct Inlay {
     pub id: InlayId,
-    // TODO this could be an ExcerptAnchor
     pub position: Anchor,
     pub content: InlayContent,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum InlayContent {
     Text(text::Rope),
     Color(Hsla),
+    Element(Arc<dyn Send + Sync + Fn(&mut ChunkRendererContext) -> AnyElement>),
+}
+
+impl std::fmt::Debug for InlayContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InlayContent::Text(text) => f.debug_tuple("Text").field(text).finish(),
+            InlayContent::Color(color) => f.debug_tuple("Color").field(color).finish(),
+            InlayContent::Element(_) => f.debug_tuple("Element").finish(),
+        }
+    }
 }
 
 impl Inlay {
@@ -117,9 +128,11 @@ impl Inlay {
 
     pub fn text(&self) -> &Rope {
         static COLOR_TEXT: OnceLock<Rope> = OnceLock::new();
+        static EMPTY_TEXT: OnceLock<Rope> = OnceLock::new();
         match &self.content {
             InlayContent::Text(text) => text,
             InlayContent::Color(_) => COLOR_TEXT.get_or_init(|| Rope::from("◼")),
+            InlayContent::Element(_) => EMPTY_TEXT.get_or_init(Rope::default),
         }
     }
 

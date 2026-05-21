@@ -395,6 +395,18 @@ impl<'a> Iterator for InlayChunks<'a> {
                         }
                         self.highlight_styles.inlay_hint
                     }
+                    InlayId::Custom(_) => {
+                        if let InlayContent::Element(render_fn) = &inlay.content {
+                            let render_fn = render_fn.clone();
+                            renderer = Some(ChunkRenderer {
+                                id: ChunkRendererId::Inlay(inlay.id),
+                                render: Arc::new(move |cx| render_fn(cx)),
+                                constrain_width: false,
+                                measured_width: None,
+                            });
+                        }
+                        None
+                    }
                 };
                 let next_inlay_highlight_endpoint;
                 let offset_in_inlay = self.output_offset - self.transforms.start().0;
@@ -715,8 +727,8 @@ impl InlayMap {
         });
 
         for inlay_to_insert in to_insert {
-            // Avoid inserting empty inlays.
-            if inlay_to_insert.text().is_empty() {
+            // Avoid inserting empty text inlays. Element and Color inlays may have empty text but still render visually.
+            if matches!(&inlay_to_insert.content, InlayContent::Text(t) if t.is_empty()) {
                 continue;
             }
 
