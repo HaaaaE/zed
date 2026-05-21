@@ -266,6 +266,17 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
 - 对应目标：验证 tree-sitter-backed `markdown_wysiwyg` 能驱动真实 Zed `Editor` display pipeline，为 focused-block WYSIWYG 建立长期接入链路。
 - 完成情况：`markdown_editor` 新增 `MarkdownWysiwygController`，读取当前单文件 `Buffer` 的文本版本并在版本变化时解析 `MarkdownSyntaxTree`。曾尝试把非活动 ATX heading 的 marker range 转成 `Editor` folds 来隐藏 `# ` marker，但拖拽选择时 fold replacement 会改变 display/source 几何，在 CJK/UTF-8 文本中触发 hit-test 越界和非 char-boundary panic。因此当前安全实现改为用 `Editor` text highlights 弱化 ATX heading 的 `# ` marker，不改变文本几何、selection 或 hit-test 坐标。交互规则也更新为：只有 collapsed caret 位于语义元素内时才 reveal 原型；非空 selection 不触发 raw reveal；拖拽开始后冻结拖拽开始前的 projection 状态。
 - 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过。
+
+### 2026-05-21 - Typora WYSIWYG 阶段 4：reveal 语义单元级显示与 drag freeze
+
+- 对应目标：修复 Rendered Mode 中光标 reveal 的两个问题：(1) 多字符控制单元（如 `**bold**` 的开闭 `**`）只 reveal 靠近光标的那一个，而不是整个语义单元；(2) 拖选过程中 reveal 状态随光标移动重新计算，导致不应显示的 marker 被显示。
+- 完成情况：
+  - `caret_revealed_marker_ranges` 改为以语义单元（block 或 inline span）为单位判断 reveal：光标在 unit 的 `source_range` 内时，reveal 该 unit 的所有 `marker_ranges`。例如 `**bold**` 光标在内容区时，开闭 `**` 同时显示；`### heading` 光标在该行内时，`###` 整体显示。
+  - `is_offset_near_range` 边界条件从 `offset <= range.end` 改为 `offset < range.end`，修复 Rust 半开区间 `Range<usize>` 的 off-by-one：光标在下一行起始位置时不再错误 reveal 上一行的 marker。
+  - reveal margin 从 `1` 改为 `0`：光标必须严格在语义单元内部才触发 reveal，不在 `±1` 邻域内触发。
+  - Drag freeze：`EditorEvent::SelectionsChanged` 在非空选区时不触发 `sync_wysiwyg`，只在 caret collapsed 时才重新计算 reveal。拖选期间 reveal 状态完全冻结，光标经过新 marker 不会意外 reveal。
+- 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过。
+- 对后续目标的影响：reveal 的语义正确性已修复，drag freeze 行为符合预期。下一步可继续扩展到 block 级内容（table/image/code fence）、inline math。
 - 对后续目标的影响：已形成第一条真实接入链路：tree-sitter Markdown semantic tree -> `markdown_wysiwyg` projection -> Zed `Editor` display map styling。普通 `fold_map` 不再作为 inline marker hiding 的长期方案；后续 marker 真隐藏、heading 字号/行高变化和 selection-safe rendered editing 需要真正的 Markdown projection transform。下一步应先用 `custom_highlights` 增加 heading 内容加粗、inline strong/emphasis/inline-code/link 等不改变文本几何的视觉变化，同时设计长期 projection 扩展。
 
 ### 2026-05-20 - Typora WYSIWYG 阶段 1：安全视觉语义增强
@@ -334,7 +345,7 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
   - 光标 offset 通过 `snapshot.point_to_offset(selection.start)` 从 `text::BufferSnapshot` 获取。
 - Bug fix：`markdown_marker_highlight_key()` 和 `markdown_heading_1_highlight_key()` 同为 `SyntaxTreeView(usize::MAX - 1)`，导致 heading 样式覆盖了 marker 的 `hide_text`。marker key 改为 `usize::MAX - 11`。
 - 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过。
-- 对后续目标的影响：光标靠近 marker 时字符级显示已实现，`hide_text` key 冲突已修复。下一步可扩展 margin 范围、支持 drag freeze、扩展到 block 级内容（table/image/code fence）。
+- 对后续目标的影响：光标靠近 marker 时语义单元级显示已实现，drag freeze 已实现，半开区间比较已修复。下一步可扩展到 block 级内容（table/image/code fence）、inline math。
 
 - 对应目标：Rendered Mode 中，当光标靠近被 hide_text 隐藏的 markdown 控制字符（`#`、`**`、`*`、`` ` ``、`~~`、`[]()`）时，局部显示这些字符。
 - 完成情况：

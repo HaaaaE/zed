@@ -484,18 +484,14 @@ fn caret_revealed_marker_ranges(
     let mut revealed = Vec::new();
 
     for block in tree.blocks() {
-        for marker_range in &block.marker_ranges {
-            if is_offset_near_range(caret_offset, marker_range, 1) {
-                revealed.push(marker_range.clone());
-            }
+        if is_offset_near_range(caret_offset, &block.source_range, 0) {
+            revealed.extend(block.marker_ranges.iter().cloned());
         }
     }
 
     for span in tree.inline_spans() {
-        for marker_range in &span.marker_ranges {
-            if is_offset_near_range(caret_offset, marker_range, 1) {
-                revealed.push(marker_range.clone());
-            }
+        if is_offset_near_range(caret_offset, &span.source_range, 0) {
+            revealed.extend(span.marker_ranges.iter().cloned());
         }
     }
 
@@ -503,7 +499,7 @@ fn caret_revealed_marker_ranges(
 }
 
 fn is_offset_near_range(offset: usize, range: &Range<usize>, margin: usize) -> bool {
-    offset >= range.start.saturating_sub(margin) && offset <= range.end.saturating_add(margin)
+    offset >= range.start.saturating_sub(margin) && offset < range.end.saturating_add(margin)
 }
 
 fn markdown_row_height_overrides(
