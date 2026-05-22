@@ -10629,6 +10629,11 @@ dependencies = [
 [[package]]
 name = "md_editor"
 version = "0.1.0"
+dependencies = [
+ "gpui",
+ "md_buffer",
+ "md_text",
+]
 
 [[package]]
 name = "md_rope"

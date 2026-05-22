@@ -536,3 +536,17 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - cargo check -p markdown_editor --features legacy-editor ✓
   - cargo check -p markdown_editor --features md-editor --no-default-features ✓
 - 对后续目标的影响：R2 已收尾，后续工作可聚焦 R3 的 `md_editor` UI / display / selection / editing path 迁移，不再需要回补单文件 buffer 或文件读写基础能力。
+
+### 2026-05-22 - 阶段 R3：只读显示启动片
+
+- 对应目标：启动 `md_editor` 核心迁移的第一小步：buffer snapshot → display rows → GPUI text layout。
+- 完成情况：
+  - `md_editor` 从 R0 占位改为可渲染 GPUI entity，直接消费 `md_buffer::Buffer`，提供只读 display rows、行号 gutter、focus handle 和 virtualized row rendering。
+  - `markdown_editor --features md-editor --no-default-features` 不再只打印占位提示，现可打开窗口，并从命令行路径读取 Markdown 文件到 md-buffer-backed 只读编辑表面。
+  - `legacy-editor` 默认路径保持不变；未调用 `editor::init`，未在 md-editor 路径引入 `editor` / `language` / `multi_buffer`。
+  - 该批次是 R3 bootstrap，尚未迁入 Zed `display_map` / selection / input / WYSIWYG decoration；这些继续作为 R3 后续小批次。
+- 验收结果：
+  - cargo test -p md_editor: 3/3 ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+  - cargo check -p markdown_editor --features legacy-editor ✓
+- 对后续目标的影响：R3 后续可以在这个可运行的 md-editor feature path 上逐步替换为 Zed-quality display pipeline、selection 与编辑事务，而不再需要 R0 占位入口。

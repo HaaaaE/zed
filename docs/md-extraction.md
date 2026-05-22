@@ -158,3 +158,25 @@ This file tracks every batch of source files ported from Zed crates into the
   - cargo check -p markdown_editor --features legacy-editor ✓
   - cargo check -p markdown_editor --features md-editor --no-default-features ✓
 
+
+### 2026-05-22 — R3: md_editor read-only display slice
+
+- **Source files:**
+  - crates/gpui/examples/uniform_list.rs  (virtualized list rendering pattern)
+  - crates/gpui/examples/input.rs         (focus handle / focused text surface pattern)
+  - crates/editor/src/editor.rs           (`Editor::for_buffer` goal reference only)
+- **Destination files:**
+  - crates/md_editor/Cargo.toml
+  - crates/md_editor/src/lib.rs
+  - crates/markdown_editor/src/main.rs
+  - crates/markdown_editor/src/md_editor_app.rs
+- **Source baseline:** fork-HEAD, hand-written first R3 slice atop md_buffer + GPUI
+- **Retained capabilities:** standalone md_editor entity, GPUI focus handle, virtualized row rendering, line-number gutter, md-editor feature path opens a Markdown file into an md_buffer-backed read-only surface
+- **Removed capabilities:** editing transactions, selections, soft wrap, syntax highlighting, WYSIWYG decorations, project/workspace/lsp/editor crate integration
+- **Hand-written replacements:**
+  - md_editor renders md_buffer text rows directly via `gpui::uniform_list`; this is a temporary read-only R3 bootstrap before porting Zed display_map / element pipeline
+  - markdown_editor `md-editor` path now opens a real window instead of printing the R0 placeholder; legacy-editor remains the default feature path
+- **Verification:**
+  - cargo test -p md_editor                              3/3 passed
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+  - cargo check -p markdown_editor --features legacy-editor ✓

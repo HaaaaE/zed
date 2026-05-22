@@ -13,3 +13,6 @@ path = "src/lib.rs"
 doctest = false
 
 [dependencies]
+gpui.workspace = true
+md_buffer.workspace = true
+md_text.workspace = true
