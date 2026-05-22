@@ -591,3 +591,17 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - cargo check -p markdown_editor --features md-editor --no-default-features ✓
   - cargo check -p markdown_editor --features legacy-editor ✓
 - 对后续目标的影响：`md_editor` 已具备最小鼠标定位与拖选闭环，后续可以围绕它逐步替换为更接近 Zed `PositionMap` / `SelectPhase` 的实现，而不是继续停留在纯键盘 surface。
+
+### 2026-05-22 - 阶段 R3：最小文本输入
+
+- 对应目标：把 `md_editor` 从“可移动、可选中”推进到“可以真正修改 md_buffer 内容”的第一步。
+- 完成情况：
+  - `md_editor` 已接入最小文本编辑 helpers：插入文本、以选区替换、Backspace、Delete、Enter/newline。
+  - 普通可打印字符目前通过 key-down `key_char` 直接落到 `md_buffer::edit` 路径；Backspace/Delete/Enter 通过 actions 绑定到 `MarkdownEditor` key context。
+  - 本批仍未接 IME / marked text / OS input handler，也未做 undo/redo、save 状态 UI 或 composition bounds；这些继续留在后续 R3 批次。
+  - 已补最小编辑层单测，覆盖插入、替换选区、Backspace UTF-8 边界删除和 Delete 选区删除。
+- 验收结果：
+  - cargo test -p md_editor: 13/13 ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+  - cargo check -p markdown_editor --features legacy-editor ✓
+- 对后续目标的影响：`md_editor` 现在已经具备最小“选择 → 修改 buffer → 更新 selection”闭环，下一批可以继续补 undo/redo、dirty/save 和更接近 Zed 的文本输入/IME 语义。

@@ -1,9 +1,9 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Context, FocusHandle, Focusable, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Render, SharedString, StatefulInteractiveElement, TextAlign, TextRun, Window,
-    div, font, prelude::*, px, uniform_list,
+    App, Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Render, SharedString, StatefulInteractiveElement, TextAlign,
+    TextRun, Window, div, font, prelude::*, px, uniform_list,
 };
 use md_buffer::{Buffer, BufferSnapshot};
 use md_text::{Bias, Point, Selection, SelectionGoal};
@@ -24,6 +24,9 @@ gpui::actions!(
         SelectToBeginningOfLine,
         SelectToEndOfLine,
         SelectAll,
+        Backspace,
+        Delete,
+        InsertNewline,
     ]
 );
 
@@ -179,6 +182,42 @@ impl MarkdownEditor {
         cx.notify();
     }
 
+    pub fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+        self.selection = backspace_selection(&mut self.buffer, &self.selection);
+        cx.notify();
+    }
+
+    pub fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
+        self.selection = delete_selection(&mut self.buffer, &self.selection);
+        cx.notify();
+    }
+
+    pub fn insert_newline(&mut self, _: &InsertNewline, _: &mut Window, cx: &mut Context<Self>) {
+        self.selection = replace_selection(&mut self.buffer, &self.selection, "\n");
+        cx.notify();
+    }
+
+    fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        if event.keystroke.modifiers.control
+            || event.keystroke.modifiers.platform
+            || event.keystroke.modifiers.function
+            || event.keystroke.modifiers.alt
+        {
+            return;
+        }
+
+        let Some(text) = event.keystroke.key_char.as_deref() else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+
+        self.selection = replace_selection(&mut self.buffer, &self.selection, text);
+        cx.stop_propagation();
+        cx.notify();
+    }
+
     fn mouse_left_down_on_row(
         &mut self,
         display_row: &DisplayRow,
@@ -250,6 +289,10 @@ impl Render for MarkdownEditor {
             .on_action(cx.listener(Self::select_to_beginning_of_line))
             .on_action(cx.listener(Self::select_to_end_of_line))
             .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::backspace))
+            .on_action(cx.listener(Self::delete))
+            .on_action(cx.listener(Self::insert_newline))
+            .on_key_down(cx.listener(Self::key_down))
             .bg(gpui::rgb(0x181818))
             .text_color(gpui::rgb(0xd6d6d6))
             .font_family("Zed Mono")
@@ -523,6 +566,97 @@ pub fn select_to_point(
     let mut updated = selection.clone();
     updated.set_head(head, SelectionGoal::None);
     updated
+}
+
+pub fn selection_byte_range(
+    snapshot: &BufferSnapshot,
+    selection: &Selection<Point>,
+) -> Range<usize> {
+    let selection = clip_selection(snapshot, selection);
+    let text_snapshot = snapshot.as_text_snapshot();
+    text_snapshot.point_to_offset(selection.start)..text_snapshot.point_to_offset(selection.end)
+}
+
+pub fn replace_selection(
+    buffer: &mut Buffer,
+    selection: &Selection<Point>,
+    text: &str,
+) -> Selection<Point> {
+    let snapshot = buffer.snapshot();
+    let selection = clip_selection(&snapshot, selection);
+    let range = selection_byte_range(&snapshot, &selection);
+
+    if range.is_empty() && text.is_empty() {
+        return selection;
+    }
+
+    buffer.start_transaction();
+    buffer.edit([(range.clone(), text)]);
+    buffer.end_transaction();
+
+    let snapshot = buffer.snapshot();
+    let cursor = snapshot
+        .as_text_snapshot()
+        .offset_to_point(range.start.saturating_add(text.len()));
+    collapsed_selection(cursor)
+}
+
+pub fn backspace_selection(buffer: &mut Buffer, selection: &Selection<Point>) -> Selection<Point> {
+    let snapshot = buffer.snapshot();
+    let selection = clip_selection(&snapshot, selection);
+    if !selection.is_empty() {
+        return replace_selection(buffer, &selection, "");
+    }
+
+    let text_snapshot = snapshot.as_text_snapshot();
+    let offset = text_snapshot.point_to_offset(selection.head());
+    if offset == 0 {
+        return selection;
+    }
+
+    let previous_offset = text_snapshot
+        .as_rope()
+        .floor_char_boundary(offset.saturating_sub(1));
+    replace_selection(
+        buffer,
+        &Selection {
+            id: selection.id,
+            start: text_snapshot.offset_to_point(previous_offset),
+            end: selection.head(),
+            reversed: false,
+            goal: SelectionGoal::None,
+        },
+        "",
+    )
+}
+
+pub fn delete_selection(buffer: &mut Buffer, selection: &Selection<Point>) -> Selection<Point> {
+    let snapshot = buffer.snapshot();
+    let selection = clip_selection(&snapshot, selection);
+    if !selection.is_empty() {
+        return replace_selection(buffer, &selection, "");
+    }
+
+    let text_snapshot = snapshot.as_text_snapshot();
+    let offset = text_snapshot.point_to_offset(selection.head());
+    if offset >= text_snapshot.len() {
+        return selection;
+    }
+
+    let next_offset = text_snapshot
+        .as_rope()
+        .ceil_char_boundary(offset.saturating_add(1));
+    replace_selection(
+        buffer,
+        &Selection {
+            id: selection.id,
+            start: selection.head(),
+            end: text_snapshot.offset_to_point(next_offset),
+            reversed: false,
+            goal: SelectionGoal::None,
+        },
+        "",
+    )
 }
 
 fn point_for_row_and_column(snapshot: &BufferSnapshot, row: u32, column: u32) -> Point {
@@ -837,5 +971,67 @@ mod tests {
             ),
             Some(0..1)
         );
+    }
+
+    #[test]
+    fn replace_selection_inserts_text_and_collapses_after_inserted_text() {
+        let mut buffer = Buffer::local("abef");
+        let selection = Selection {
+            id: 1,
+            start: Point::new(0, 2),
+            end: Point::new(0, 2),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+
+        let selection = replace_selection(&mut buffer, &selection, "cd");
+
+        assert_eq!(buffer.text(), "abcdef");
+        assert_eq!(selection, collapsed_selection(Point::new(0, 4)));
+    }
+
+    #[test]
+    fn replace_selection_replaces_active_selection() {
+        let mut buffer = Buffer::local("abcdef");
+        let selection = Selection {
+            id: 1,
+            start: Point::new(0, 2),
+            end: Point::new(0, 4),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+
+        let selection = replace_selection(&mut buffer, &selection, "ZZ");
+
+        assert_eq!(buffer.text(), "abZZef");
+        assert_eq!(selection, collapsed_selection(Point::new(0, 4)));
+    }
+
+    #[test]
+    fn backspace_selection_deletes_previous_utf8_character() {
+        let mut buffer = Buffer::local("aβ");
+        let selection = collapsed_selection(Point::new(0, "aβ".len() as u32));
+
+        let selection = backspace_selection(&mut buffer, &selection);
+
+        assert_eq!(buffer.text(), "a");
+        assert_eq!(selection, collapsed_selection(Point::new(0, 1)));
+    }
+
+    #[test]
+    fn delete_selection_deletes_selected_range() {
+        let mut buffer = Buffer::local("abcdef");
+        let selection = Selection {
+            id: 1,
+            start: Point::new(0, 1),
+            end: Point::new(0, 4),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+
+        let selection = delete_selection(&mut buffer, &selection);
+
+        assert_eq!(buffer.text(), "aef");
+        assert_eq!(selection, collapsed_selection(Point::new(0, 1)));
     }
 }

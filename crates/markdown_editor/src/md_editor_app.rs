@@ -5,9 +5,9 @@ use gpui::{
     WindowOptions, div, prelude::*, px,
 };
 use md_editor::{
-    MarkdownEditor, MoveDown, MoveLeft, MoveRight, MoveToBeginningOfLine, MoveToEndOfLine, MoveUp,
-    SelectAll, SelectDown, SelectLeft, SelectRight, SelectToBeginningOfLine, SelectToEndOfLine,
-    SelectUp,
+    Backspace, Delete, InsertNewline, MarkdownEditor, MoveDown, MoveLeft, MoveRight,
+    MoveToBeginningOfLine, MoveToEndOfLine, MoveUp, SelectAll, SelectDown, SelectLeft, SelectRight,
+    SelectToBeginningOfLine, SelectToEndOfLine, SelectUp,
 };
 
 struct MarkdownEditorShell {
@@ -91,10 +91,7 @@ impl MarkdownEditorShell {
                 div()
                     .text_xs()
                     .text_color(gpui::rgba(0xffffff99))
-                    .child(SharedString::from(format!(
-                        "{} · R3 selection",
-                        self.title()
-                    ))),
+                    .child(SharedString::from(format!("{} · R3 editing", self.title()))),
             )
     }
 }
@@ -145,6 +142,9 @@ pub fn run() {
             KeyBinding::new("shift-end", SelectToEndOfLine, Some("MarkdownEditor")),
             KeyBinding::new("ctrl-a", SelectAll, Some("MarkdownEditor")),
             KeyBinding::new("cmd-a", SelectAll, Some("MarkdownEditor")),
+            KeyBinding::new("backspace", Backspace, Some("MarkdownEditor")),
+            KeyBinding::new("delete", Delete, Some("MarkdownEditor")),
+            KeyBinding::new("enter", InsertNewline, Some("MarkdownEditor")),
         ]);
 
         let path = path.clone();
