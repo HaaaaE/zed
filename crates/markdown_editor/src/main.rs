@@ -161,6 +161,8 @@ impl MarkdownRenderer {
                                 .h(px(120.))
                                 .rounded_md()
                                 .border_1()
+                                .border_color(gpui::white())
+                                .bg(gpui::hsla(0., 0., 0.15, 1.))
                                 .into_any_element()
                         })
                         .object_fit(gpui::ObjectFit::Contain)
@@ -254,6 +256,7 @@ impl MarkdownEditorShell {
             let buffer = cx.new(|cx| Buffer::local(contents, cx));
             Editor::for_buffer(buffer, None, window, cx)
         });
+        editor.update(cx, |editor, cx| editor.set_soft_wrap());
         let editor_subscription = cx.subscribe(&editor, |this, _editor, event, cx| match event {
             EditorEvent::DirtyChanged | EditorEvent::Saved | EditorEvent::BufferEdited => {
                 this.refresh_status(cx);
