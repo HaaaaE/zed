@@ -222,6 +222,29 @@ impl MarkdownSyntaxTree {
             }
         }
 
+        for span in &self.inline_spans {
+            if span.source_range.end <= visible_source_range.start
+                || span.source_range.start >= visible_source_range.end
+            {
+                continue;
+            }
+
+            let is_active = active_source_range
+                .as_ref()
+                .is_some_and(|active| ranges_overlap(&span.source_range, active));
+            if is_active {
+                continue;
+            }
+
+            for marker_range in &span.marker_ranges {
+                let start = marker_range.start.max(visible_source_range.start);
+                let end = marker_range.end.min(visible_source_range.end);
+                if start < end {
+                    hidden_ranges.push(start..end);
+                }
+            }
+        }
+
         MarkdownProjectionMap::new(self.source_len, visible_source_range, hidden_ranges)
     }
 
@@ -835,6 +858,22 @@ mod tests {
         assert_eq!(projection.hidden_ranges(), &[8..11]);
         assert_eq!(projection.source_to_display(2), 2);
         assert_eq!(projection.display_to_source(0), 0);
+    }
+
+    #[test]
+    fn hides_inactive_inline_markers_in_projection() {
+        let tree = MarkdownSyntaxTree::parse("Before **bold** after\n");
+        let projection = tree.projection_for_visible_rows(0..1, None);
+        assert_eq!(projection.hidden_ranges(), &[7..9, 13..15]);
+        assert_eq!(projection.display_len(), "Before bold after\n".len());
+    }
+
+    #[test]
+    fn reveals_active_inline_markers() {
+        let tree = MarkdownSyntaxTree::parse("Before **bold** after\n");
+        let projection = tree.projection_for_visible_rows(0..1, Some(10..11));
+        assert!(projection.hidden_ranges().is_empty());
+        assert_eq!(projection.display_to_source(7), 7);
     }
 
     #[test]

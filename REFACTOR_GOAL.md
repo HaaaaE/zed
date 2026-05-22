@@ -630,3 +630,14 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - cargo test -p md_editor: 15/15 ✓
   - cargo check -p markdown_editor --features md-editor --no-default-features ✓
 - 对后续目标的影响：R3 后续可以继续把 projection 从“块级 marker 隐藏”扩展到更完整的 WYSIWYG 渲染，但不需要再先解决 source/display 坐标双向映射这个基础问题。
+
+### 2026-05-23 - 阶段 R3：inline marker 投影
+
+- 对应目标：继续推进 `md_editor` 的 Rendered 模式，让它不只隐藏块级 marker，而是开始直接消费 `markdown_wysiwyg` 的 inline span 语义。
+- 完成情况：
+  - `markdown_wysiwyg::MarkdownSyntaxTree::projection_for_source_range` 现在会把非活动 inline span 的 `marker_ranges` 一并写入 `MarkdownProjectionMap`，与原有块级 marker 共用同一套 source/display 映射。
+  - `md_editor` 无需额外分支就获得了 `**strong**`、`*emphasis*`、`` `code` `` 等 inline 控制符在 Rendered 模式下的隐藏能力；点击命中、拖选、caret 和选区高亮仍继续基于 projection 做 source/display 转换。
+  - 新增 `markdown_wysiwyg` 与 `md_editor` 单测，覆盖 inactive inline marker 隐藏和 active inline marker reveal。
+- 验收结果：
+  - 待本批验证
+- 对后续目标的影响：Rendered 模式现在的投影粒度已经从 block 扩展到 inline，后续可以在不推翻现有坐标模型的前提下继续补语义样式、图片/表格/code block replacement 和更完整的 WYSIWYG 视觉层。

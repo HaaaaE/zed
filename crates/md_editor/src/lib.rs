@@ -1124,6 +1124,36 @@ mod tests {
     }
 
     #[test]
+    fn rendered_display_rows_hide_inactive_inline_markers() {
+        let mut buffer = Buffer::local("Before **bold** after\n");
+        let snapshot = buffer.snapshot();
+
+        let rows = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&collapsed_selection(Point::new(0, 0))),
+            MarkdownEditorMode::Rendered,
+        );
+
+        assert_eq!(rows[0].text, "Before bold after");
+    }
+
+    #[test]
+    fn rendered_display_rows_reveal_active_inline_markers() {
+        let mut buffer = Buffer::local("Before **bold** after\n");
+        let snapshot = buffer.snapshot();
+
+        let rows = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&collapsed_selection(Point::new(0, 10))),
+            MarkdownEditorMode::Rendered,
+        );
+
+        assert_eq!(rows[0].text, "Before **bold** after");
+    }
+
+    #[test]
     fn horizontal_movement_crosses_lines_and_respects_utf8_boundaries() {
         let mut buffer = Buffer::local("a\nβ");
         let snapshot = buffer.snapshot();

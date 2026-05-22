@@ -262,3 +262,22 @@ This file tracks every batch of source files ported from Zed crates into the
   - `OpenDocument` uses GPUI `prompt_for_paths` directly and keeps the workflow confined to the standalone markdown-editor shell
 - **Verification:**
   - not run in this batch
+
+### 2026-05-23 — R3: md_editor inline marker projection
+
+- **Source files:**
+  - crates/markdown_editor/src/legacy_editor.rs  (rendered-mode marker hiding behavior reference)
+  - crates/markdown_wysiwyg/src/markdown_wysiwyg.rs  (projection and inline span model)
+- **Destination files:**
+  - crates/markdown_wysiwyg/src/markdown_wysiwyg.rs
+  - crates/md_editor/src/lib.rs
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Source baseline:** fork-HEAD, hand-written rendered-mode follow-up on top of the earlier md_editor projection slice
+- **Retained capabilities:** source/display coordinate mapping, active-block reveal, keyboard editing, mouse hit-testing, undo/redo, save/new/open shell flow
+- **Removed capabilities:** none
+- **Hand-written replacements:**
+  - `MarkdownSyntaxTree::projection_for_source_range` now folds inline span marker ranges into the same `MarkdownProjectionMap` that already hid inactive block markers, so `md_editor` does not need a separate rendered-only text transform for `**`, `*`, backticks, or similar inline control syntax
+  - `md_editor` keeps the existing selection/caret and hit-test code unchanged because it already routes through the projection map; only the projection inputs widened from block markers to block + inline markers
+- **Verification:**
+  - pending
