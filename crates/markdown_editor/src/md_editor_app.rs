@@ -6,6 +6,8 @@ use gpui::{
 };
 use md_editor::{
     MarkdownEditor, MoveDown, MoveLeft, MoveRight, MoveToBeginningOfLine, MoveToEndOfLine, MoveUp,
+    SelectAll, SelectDown, SelectLeft, SelectRight, SelectToBeginningOfLine, SelectToEndOfLine,
+    SelectUp,
 };
 
 struct MarkdownEditorShell {
@@ -89,7 +91,10 @@ impl MarkdownEditorShell {
                 div()
                     .text_xs()
                     .text_color(gpui::rgba(0xffffff99))
-                    .child(SharedString::from(format!("{} · R3 cursor", self.title()))),
+                    .child(SharedString::from(format!(
+                        "{} · R3 selection",
+                        self.title()
+                    ))),
             )
     }
 }
@@ -128,6 +133,18 @@ pub fn run() {
             KeyBinding::new("down", MoveDown, Some("MarkdownEditor")),
             KeyBinding::new("home", MoveToBeginningOfLine, Some("MarkdownEditor")),
             KeyBinding::new("end", MoveToEndOfLine, Some("MarkdownEditor")),
+            KeyBinding::new("shift-left", SelectLeft, Some("MarkdownEditor")),
+            KeyBinding::new("shift-right", SelectRight, Some("MarkdownEditor")),
+            KeyBinding::new("shift-up", SelectUp, Some("MarkdownEditor")),
+            KeyBinding::new("shift-down", SelectDown, Some("MarkdownEditor")),
+            KeyBinding::new(
+                "shift-home",
+                SelectToBeginningOfLine,
+                Some("MarkdownEditor"),
+            ),
+            KeyBinding::new("shift-end", SelectToEndOfLine, Some("MarkdownEditor")),
+            KeyBinding::new("ctrl-a", SelectAll, Some("MarkdownEditor")),
+            KeyBinding::new("cmd-a", SelectAll, Some("MarkdownEditor")),
         ]);
 
         let path = path.clone();

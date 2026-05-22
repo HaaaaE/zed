@@ -564,3 +564,30 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - cargo check -p markdown_editor --features md-editor --no-default-features ✓
   - cargo check -p markdown_editor --features legacy-editor ✓
 - 对后续目标的影响：`md_editor` 已具备可聚焦、可键盘移动的最小 caret 模型，可作为下一批 selection range、鼠标定位和编辑事务的承载点。
+
+### 2026-05-22 - 阶段 R3：基础单选区
+
+- 对应目标：继续推进 `md_editor` 的 selection 迁移，先补上单光标下的键盘选区语义与最小可见反馈。
+- 完成情况：
+  - `md_editor` 内部状态已从单一 `cursor` 提升为单一 `Selection<Point>`，plain move 与 shift-select 共用同一套 head / tail 语义。
+  - 新增 `SelectLeft` / `SelectRight` / `SelectUp` / `SelectDown` / `SelectToBeginningOfLine` / `SelectToEndOfLine` / `SelectAll` actions，并在纯 `md-editor` 入口绑定 `Shift+Arrow` / `Shift+Home` / `Shift+End` / `Ctrl/Cmd+A`。
+  - 渲染表面已支持单选区高亮；无选区时仍显示 caret，有选区时按逻辑行拆分高亮当前选中范围。
+  - 本批仍未接入鼠标 hit testing、拖选、multi-cursor、column selection 或编辑事务；这些继续留在后续 R3 小批次。
+- 验收结果：
+  - cargo test -p md_editor: 9/9 ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+  - cargo check -p markdown_editor --features legacy-editor ✓
+- 对后续目标的影响：`md_editor` 现在已经不只是“能移动 caret”，而是具备了后续接鼠标拖选、插入/删除和 undo/redo 所需的最小 selection state 容器。
+
+### 2026-05-22 - 阶段 R3：基础鼠标选区
+
+- 对应目标：继续推进 `md_editor` 的 selection/input 迁移，先补上最小鼠标 click + drag 单选区。
+- 完成情况：
+  - `md_editor` 现在支持左键点击放置 caret、`Shift+Click` 基于现有 tail 扩展单选区，以及按住左键跨行拖选。
+  - 鼠标命中暂时基于当前逻辑行文本和 `Zed Mono` 的单行 shape 结果，将 x 坐标映射为 UTF-8 安全的 `md_text::Point`；未接入 Zed `PositionMap` / soft wrap / block map。
+  - 当前仍只覆盖单选区；double-click word select、triple-click line select、column selection、hover/link hit testing 和 autoscroll drag 继续留给后续 R3 批次。
+- 验收结果：
+  - cargo test -p md_editor: 9/9 ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+  - cargo check -p markdown_editor --features legacy-editor ✓
+- 对后续目标的影响：`md_editor` 已具备最小鼠标定位与拖选闭环，后续可以围绕它逐步替换为更接近 Zed `PositionMap` / `SelectPhase` 的实现，而不是继续停留在纯键盘 surface。
