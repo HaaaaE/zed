@@ -1,10 +1,12 @@
-use std::ops::Range;
+use std::{collections::HashMap, ops::Range};
 
 use gpui::{
-    App, Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Render, SharedString, StatefulInteractiveElement, TextAlign,
-    TextRun, Window, div, font, prelude::*, px, uniform_list,
+    App, Context, EventEmitter, FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, SharedString,
+    StatefulInteractiveElement, TextAlign, TextRun, Window, div, font, prelude::*, px,
+    uniform_list,
 };
+use markdown_wysiwyg::MarkdownProjectionMap;
 use md_buffer::{Buffer, BufferSnapshot};
 use md_text::{Bias, Point, Selection, SelectionGoal};
 
@@ -27,29 +29,79 @@ gpui::actions!(
         Backspace,
         Delete,
         InsertNewline,
+        Undo,
+        Redo,
     ]
 );
 
 pub struct MarkdownEditor {
     buffer: Buffer,
     focus_handle: FocusHandle,
+    mode: MarkdownEditorMode,
     selection: Selection<Point>,
     is_selecting_with_mouse: bool,
+    selection_history: HashMap<md_text::TransactionId, TransactionSelectionState>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MarkdownEditorMode {
+    Source,
+    Rendered,
+}
+
+impl MarkdownEditorMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Source => "Source",
+            Self::Rendered => "Rendered",
+        }
+    }
+
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Source => Self::Rendered,
+            Self::Rendered => Self::Source,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct DisplayRow {
     pub row: u32,
     pub text: String,
+    projection: MarkdownProjectionMap,
 }
+
+impl PartialEq for DisplayRow {
+    fn eq(&self, other: &Self) -> bool {
+        self.row == other.row && self.text == other.text
+    }
+}
+
+impl Eq for DisplayRow {}
+
+#[derive(Clone, Debug, PartialEq)]
+struct TransactionSelectionState {
+    before: Selection<Point>,
+    after: Selection<Point>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MarkdownEditorEvent {
+    DirtyChanged(bool),
+}
+
+impl EventEmitter<MarkdownEditorEvent> for MarkdownEditor {}
 
 impl MarkdownEditor {
     pub fn new(buffer: Buffer, cx: &mut Context<Self>) -> Self {
         Self {
             buffer,
             focus_handle: cx.focus_handle(),
+            mode: MarkdownEditorMode::Source,
             selection: collapsed_selection(Point::zero()),
             is_selecting_with_mouse: false,
+            selection_history: HashMap::default(),
         }
     }
 
@@ -63,6 +115,36 @@ impl MarkdownEditor {
 
     pub fn buffer_mut(&mut self) -> &mut Buffer {
         &mut self.buffer
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.buffer.is_dirty()
+    }
+
+    pub fn serialized_text(&self) -> String {
+        self.buffer.serialized_text()
+    }
+
+    pub fn mode(&self) -> MarkdownEditorMode {
+        self.mode
+    }
+
+    pub fn set_mode(&mut self, mode: MarkdownEditorMode, cx: &mut Context<Self>) {
+        if self.mode == mode {
+            return;
+        }
+
+        self.mode = mode;
+        cx.notify();
+    }
+
+    pub fn toggle_mode(&mut self, cx: &mut Context<Self>) {
+        self.set_mode(self.mode.toggle(), cx);
+    }
+
+    pub fn mark_saved(&mut self, cx: &mut Context<Self>) {
+        self.buffer.did_save_at_current_version();
+        self.emit_dirty_state(cx);
     }
 
     pub fn row_count(&mut self) -> u32 {
@@ -183,18 +265,59 @@ impl MarkdownEditor {
     }
 
     pub fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
-        self.selection = backspace_selection(&mut self.buffer, &self.selection);
-        cx.notify();
+        let selection_before = self.selection.clone();
+        let (selection, transaction_id) = backspace_selection(&mut self.buffer, &self.selection);
+        let changed = transaction_id.is_some();
+        self.selection = selection;
+        self.record_selection_history(transaction_id, selection_before, self.selection.clone());
+        self.notify_after_edit(changed, cx);
     }
 
     pub fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
-        self.selection = delete_selection(&mut self.buffer, &self.selection);
-        cx.notify();
+        let selection_before = self.selection.clone();
+        let (selection, transaction_id) = delete_selection(&mut self.buffer, &self.selection);
+        let changed = transaction_id.is_some();
+        self.selection = selection;
+        self.record_selection_history(transaction_id, selection_before, self.selection.clone());
+        self.notify_after_edit(changed, cx);
     }
 
     pub fn insert_newline(&mut self, _: &InsertNewline, _: &mut Window, cx: &mut Context<Self>) {
-        self.selection = replace_selection(&mut self.buffer, &self.selection, "\n");
-        cx.notify();
+        let selection_before = self.selection.clone();
+        let (selection, transaction_id) =
+            replace_selection(&mut self.buffer, &self.selection, "\n");
+        let changed = transaction_id.is_some();
+        self.selection = selection;
+        self.record_selection_history(transaction_id, selection_before, self.selection.clone());
+        self.notify_after_edit(changed, cx);
+    }
+
+    pub fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
+        let mut changed = false;
+        if let Some(transaction_id) = self.buffer.undo() {
+            let fallback = collapsed_selection(clip_cursor(&self.buffer.snapshot(), self.cursor()));
+            self.selection = self
+                .selection_history
+                .get(&transaction_id)
+                .map(|state| state.before.clone())
+                .unwrap_or(fallback);
+            changed = true;
+        }
+        self.notify_after_edit(changed, cx);
+    }
+
+    pub fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
+        let mut changed = false;
+        if let Some(transaction_id) = self.buffer.redo() {
+            let fallback = collapsed_selection(clip_cursor(&self.buffer.snapshot(), self.cursor()));
+            self.selection = self
+                .selection_history
+                .get(&transaction_id)
+                .map(|state| state.after.clone())
+                .unwrap_or(fallback);
+            changed = true;
+        }
+        self.notify_after_edit(changed, cx);
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -213,8 +336,39 @@ impl MarkdownEditor {
             return;
         }
 
-        self.selection = replace_selection(&mut self.buffer, &self.selection, text);
+        let selection_before = self.selection.clone();
+        let (selection, transaction_id) =
+            replace_selection(&mut self.buffer, &self.selection, text);
+        let changed = transaction_id.is_some();
+        self.selection = selection;
+        self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         cx.stop_propagation();
+        self.notify_after_edit(changed, cx);
+    }
+
+    fn record_selection_history(
+        &mut self,
+        transaction_id: Option<md_text::TransactionId>,
+        before: Selection<Point>,
+        after: Selection<Point>,
+    ) {
+        let Some(transaction_id) = transaction_id else {
+            return;
+        };
+        self.selection_history
+            .insert(transaction_id, TransactionSelectionState { before, after });
+    }
+
+    fn notify_after_edit(&mut self, changed: bool, cx: &mut Context<Self>) {
+        if changed {
+            self.emit_dirty_state(cx);
+        } else {
+            cx.notify();
+        }
+    }
+
+    fn emit_dirty_state(&mut self, cx: &mut Context<Self>) {
+        cx.emit(MarkdownEditorEvent::DirtyChanged(self.buffer.is_dirty()));
         cx.notify();
     }
 
@@ -269,6 +423,7 @@ impl Focusable for MarkdownEditor {
 impl Render for MarkdownEditor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let row_count = self.row_count() as usize;
+        let mode = self.mode;
         let selection = self.selection.clone();
 
         div()
@@ -292,6 +447,8 @@ impl Render for MarkdownEditor {
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::insert_newline))
+            .on_action(cx.listener(Self::undo))
+            .on_action(cx.listener(Self::redo))
             .on_key_down(cx.listener(Self::key_down))
             .bg(gpui::rgb(0x181818))
             .text_color(gpui::rgb(0xd6d6d6))
@@ -307,7 +464,7 @@ impl Render for MarkdownEditor {
                         let snapshot = this.buffer.snapshot();
                         let selection = clip_selection(&snapshot, &selection);
                         let cursor = selection.head();
-                        display_rows(&snapshot, range)
+                        display_rows_in_mode(&snapshot, range, Some(&selection), mode)
                             .into_iter()
                             .map(|display_row| {
                                 let is_cursor_row = display_row.row == cursor.row;
@@ -358,7 +515,7 @@ impl Render for MarkdownEditor {
                                             .flex()
                                             .items_baseline()
                                             .whitespace_nowrap()
-                                            .children(render_row_text(display_row, &selection)),
+                                            .children(render_row_text(&snapshot, &display_row, &selection)),
                                     )
                             })
                             .collect::<Vec<_>>()
@@ -370,14 +527,45 @@ impl Render for MarkdownEditor {
 }
 
 pub fn display_rows(snapshot: &BufferSnapshot, range: Range<usize>) -> Vec<DisplayRow> {
+    display_rows_in_mode(snapshot, range, None, MarkdownEditorMode::Source)
+}
+
+fn display_rows_in_mode(
+    snapshot: &BufferSnapshot,
+    range: Range<usize>,
+    selection: Option<&Selection<Point>>,
+    mode: MarkdownEditorMode,
+) -> Vec<DisplayRow> {
     let row_count = snapshot.row_count() as usize;
     let start = range.start.min(row_count);
     let end = range.end.min(row_count);
+    let active_source_range = if mode == MarkdownEditorMode::Rendered {
+        selection.and_then(|selection| active_source_range_for_selection(snapshot, selection))
+    } else {
+        None
+    };
 
     (start..end)
-        .map(|row| DisplayRow {
-            row: row as u32,
-            text: row_text(snapshot, row as u32),
+        .map(|row| {
+            let row = row as u32;
+            let source_text = row_text(snapshot, row);
+            let source_range = row_source_range(snapshot, row);
+            let projection = match mode {
+                MarkdownEditorMode::Source => MarkdownProjectionMap::new(
+                    snapshot.as_text_snapshot().len(),
+                    source_range.clone(),
+                    Vec::new(),
+                ),
+                MarkdownEditorMode::Rendered => snapshot
+                    .syntax_tree()
+                    .projection_for_source_range(source_range.clone(), active_source_range.clone()),
+            };
+
+            DisplayRow {
+                row,
+                text: project_row_text(&source_text, &projection),
+                projection,
+            }
         })
         .collect()
 }
@@ -391,6 +579,46 @@ pub fn row_text(snapshot: &BufferSnapshot, row: u32) -> String {
     let start = text_snapshot.point_to_offset(Point::new(row, 0));
     let end = start + text_snapshot.line_len(row) as usize;
     text_snapshot.text_for_range(start..end).collect()
+}
+
+fn row_source_range(snapshot: &BufferSnapshot, row: u32) -> Range<usize> {
+    let text_snapshot = snapshot.as_text_snapshot();
+    if row >= text_snapshot.row_count() {
+        return text_snapshot.len()..text_snapshot.len();
+    }
+
+    let start = text_snapshot.point_to_offset(Point::new(row, 0));
+    let end = start + text_snapshot.line_len(row) as usize;
+    start..end
+}
+
+fn project_row_text(source_text: &str, projection: &MarkdownProjectionMap) -> String {
+    if projection.hidden_ranges().is_empty() {
+        return source_text.to_string();
+    }
+
+    let visible_source_range = projection.visible_source_range();
+    let mut rendered_text = String::new();
+    let mut cursor = visible_source_range.start;
+
+    for hidden_range in projection.hidden_ranges() {
+        let start = hidden_range.start.max(visible_source_range.start);
+        let end = hidden_range.end.min(visible_source_range.end);
+        if cursor < start {
+            rendered_text.push_str(
+                &source_text[(cursor - visible_source_range.start)..(start - visible_source_range.start)],
+            );
+        }
+        cursor = cursor.max(end);
+    }
+
+    if cursor < visible_source_range.end {
+        rendered_text.push_str(
+            &source_text[(cursor - visible_source_range.start)..(visible_source_range.end - visible_source_range.start)],
+        );
+    }
+
+    rendered_text
 }
 
 pub fn clip_cursor(snapshot: &BufferSnapshot, cursor: Point) -> Point {
@@ -581,27 +809,30 @@ pub fn replace_selection(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
     text: &str,
-) -> Selection<Point> {
+) -> (Selection<Point>, Option<md_text::TransactionId>) {
     let snapshot = buffer.snapshot();
     let selection = clip_selection(&snapshot, selection);
     let range = selection_byte_range(&snapshot, &selection);
 
     if range.is_empty() && text.is_empty() {
-        return selection;
+        return (selection, None);
     }
 
     buffer.start_transaction();
     buffer.edit([(range.clone(), text)]);
-    buffer.end_transaction();
+    let transaction_id = buffer.end_transaction();
 
     let snapshot = buffer.snapshot();
     let cursor = snapshot
         .as_text_snapshot()
         .offset_to_point(range.start.saturating_add(text.len()));
-    collapsed_selection(cursor)
+    (collapsed_selection(cursor), transaction_id)
 }
 
-pub fn backspace_selection(buffer: &mut Buffer, selection: &Selection<Point>) -> Selection<Point> {
+pub fn backspace_selection(
+    buffer: &mut Buffer,
+    selection: &Selection<Point>,
+) -> (Selection<Point>, Option<md_text::TransactionId>) {
     let snapshot = buffer.snapshot();
     let selection = clip_selection(&snapshot, selection);
     if !selection.is_empty() {
@@ -611,7 +842,7 @@ pub fn backspace_selection(buffer: &mut Buffer, selection: &Selection<Point>) ->
     let text_snapshot = snapshot.as_text_snapshot();
     let offset = text_snapshot.point_to_offset(selection.head());
     if offset == 0 {
-        return selection;
+        return (selection, None);
     }
 
     let previous_offset = text_snapshot
@@ -630,7 +861,10 @@ pub fn backspace_selection(buffer: &mut Buffer, selection: &Selection<Point>) ->
     )
 }
 
-pub fn delete_selection(buffer: &mut Buffer, selection: &Selection<Point>) -> Selection<Point> {
+pub fn delete_selection(
+    buffer: &mut Buffer,
+    selection: &Selection<Point>,
+) -> (Selection<Point>, Option<md_text::TransactionId>) {
     let snapshot = buffer.snapshot();
     let selection = clip_selection(&snapshot, selection);
     if !selection.is_empty() {
@@ -640,7 +874,7 @@ pub fn delete_selection(buffer: &mut Buffer, selection: &Selection<Point>) -> Se
     let text_snapshot = snapshot.as_text_snapshot();
     let offset = text_snapshot.point_to_offset(selection.head());
     if offset >= text_snapshot.len() {
-        return selection;
+        return (selection, None);
     }
 
     let next_offset = text_snapshot
@@ -693,25 +927,31 @@ fn point_for_mouse_x(
         }],
         None,
     );
-    let column = shaped_line.closest_index_for_x(text_x) as u32;
+    let display_offset = shaped_line.closest_index_for_x(text_x);
+    let source_offset = display_row.projection.display_to_source(display_offset);
+    let source_offset = snapshot
+        .as_text_snapshot()
+        .as_rope()
+        .floor_char_boundary(source_offset);
 
-    Point::new(
-        display_row.row,
-        clip_cursor(snapshot, Point::new(display_row.row, column)).column,
-    )
+    clip_cursor(snapshot, snapshot.as_text_snapshot().offset_to_point(source_offset))
 }
 
-fn render_row_text(display_row: DisplayRow, selection: &Selection<Point>) -> Vec<gpui::AnyElement> {
+fn render_row_text(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    selection: &Selection<Point>,
+) -> Vec<gpui::AnyElement> {
     let selection = selection.clone();
     if selection.is_empty() {
-        return render_caret_row(display_row, selection.head());
+        return render_caret_row(snapshot, display_row, selection.head());
     }
 
-    let Some(selected_range) = selected_range_for_row(&display_row, &selection) else {
-        return vec![SharedString::from(display_row.text).into_any_element()];
+    let Some(selected_range) = selected_range_for_row(snapshot, display_row, &selection) else {
+        return vec![SharedString::from(display_row.text.clone()).into_any_element()];
     };
     if selected_range.is_empty() {
-        return vec![SharedString::from(display_row.text).into_any_element()];
+        return vec![SharedString::from(display_row.text.clone()).into_any_element()];
     }
 
     let before = SharedString::from(display_row.text[..selected_range.start].to_string());
@@ -729,13 +969,18 @@ fn render_row_text(display_row: DisplayRow, selection: &Selection<Point>) -> Vec
     ]
 }
 
-fn render_caret_row(display_row: DisplayRow, cursor: Point) -> Vec<gpui::AnyElement> {
+fn render_caret_row(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    cursor: Point,
+) -> Vec<gpui::AnyElement> {
     if display_row.row != cursor.row {
-        return vec![SharedString::from(display_row.text).into_any_element()];
+        return vec![SharedString::from(display_row.text.clone()).into_any_element()];
     }
 
-    let column = (cursor.column as usize).min(display_row.text.len());
-    let column = display_row.text.floor_char_boundary(column);
+    let cursor_offset = snapshot.as_text_snapshot().point_to_offset(clip_cursor(snapshot, cursor));
+    let column = display_row.projection.source_to_display(cursor_offset);
+    let column = display_row.text.floor_char_boundary(column.min(display_row.text.len()));
     let left = SharedString::from(display_row.text[..column].to_string());
     let right = SharedString::from(display_row.text[column..].to_string());
 
@@ -751,6 +996,7 @@ fn render_caret_row(display_row: DisplayRow, cursor: Point) -> Vec<gpui::AnyElem
 }
 
 fn selected_range_for_row(
+    snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
     selection: &Selection<Point>,
 ) -> Option<Range<usize>> {
@@ -758,31 +1004,46 @@ fn selected_range_for_row(
         return None;
     }
 
-    let selection_range = selection.range();
-    let row = display_row.row;
-    if row < selection_range.start.row || row > selection_range.end.row {
+    let selection_range = selection_byte_range(snapshot, selection);
+    let row_range = display_row.projection.visible_source_range();
+    if selection_range.end <= row_range.start || selection_range.start >= row_range.end {
         return None;
     }
 
-    let mut start = if row == selection_range.start.row {
-        selection_range.start.column as usize
-    } else {
-        0
-    };
-    let mut end = if row == selection_range.end.row {
-        selection_range.end.column as usize
-    } else {
-        display_row.text.len()
-    };
-
-    start = display_row
-        .text
-        .floor_char_boundary(start.min(display_row.text.len()));
-    end = display_row
-        .text
-        .floor_char_boundary(end.min(display_row.text.len()));
+    let start = selection_range.start.max(row_range.start);
+    let end = selection_range.end.min(row_range.end);
+    let start = display_row.projection.source_to_display(start);
+    let end = display_row.projection.source_to_display(end);
 
     Some(start.min(end)..end.max(start))
+}
+
+fn active_source_range_for_selection(
+    snapshot: &BufferSnapshot,
+    selection: &Selection<Point>,
+) -> Option<Range<usize>> {
+    let selection = clip_selection(snapshot, selection);
+    if !selection.is_empty() {
+        return Some(selection_byte_range(snapshot, &selection));
+    }
+
+    let text_snapshot = snapshot.as_text_snapshot();
+    if text_snapshot.len() == 0 {
+        return None;
+    }
+
+    let offset = text_snapshot.point_to_offset(selection.head());
+    if offset < text_snapshot.len() {
+        let end = text_snapshot
+            .as_rope()
+            .ceil_char_boundary(offset.saturating_add(1));
+        Some(offset..end)
+    } else {
+        let start = text_snapshot
+            .as_rope()
+            .floor_char_boundary(offset.saturating_sub(1));
+        Some(start..offset)
+    }
 }
 
 #[cfg(test)]
@@ -795,24 +1056,15 @@ mod tests {
         let snapshot = buffer.snapshot();
 
         assert_eq!(
-            display_rows(&snapshot, 0..snapshot.row_count() as usize),
+            display_rows(&snapshot, 0..snapshot.row_count() as usize)
+                .into_iter()
+                .map(|row| (row.row, row.text))
+                .collect::<Vec<_>>(),
             vec![
-                DisplayRow {
-                    row: 0,
-                    text: "alpha".to_string(),
-                },
-                DisplayRow {
-                    row: 1,
-                    text: String::new(),
-                },
-                DisplayRow {
-                    row: 2,
-                    text: "beta".to_string(),
-                },
-                DisplayRow {
-                    row: 3,
-                    text: String::new(),
-                },
+                (0, "alpha".to_string()),
+                (1, String::new()),
+                (2, "beta".to_string()),
+                (3, String::new()),
             ]
         );
     }
@@ -823,11 +1075,11 @@ mod tests {
         let snapshot = buffer.snapshot();
 
         assert_eq!(
-            display_rows(&snapshot, 1..10),
-            vec![DisplayRow {
-                row: 1,
-                text: "two".to_string(),
-            }]
+            display_rows(&snapshot, 1..10)
+                .into_iter()
+                .map(|row| (row.row, row.text))
+                .collect::<Vec<_>>(),
+            vec![(1, "two".to_string())]
         );
     }
 
@@ -837,6 +1089,38 @@ mod tests {
         let snapshot = buffer.snapshot();
 
         assert_eq!(row_text(&snapshot, 1), "");
+    }
+
+    #[test]
+    fn rendered_display_rows_hide_inactive_heading_markers() {
+        let mut buffer = Buffer::local("# Title\nBody\n");
+        let snapshot = buffer.snapshot();
+
+        let rows = display_rows_in_mode(
+            &snapshot,
+            0..2,
+            Some(&collapsed_selection(Point::new(1, 0))),
+            MarkdownEditorMode::Rendered,
+        );
+
+        assert_eq!(rows[0].text, "Title");
+        assert_eq!(rows[1].text, "Body");
+    }
+
+    #[test]
+    fn rendered_display_rows_reveal_active_heading_markers() {
+        let mut buffer = Buffer::local("# Title\n## Other\n");
+        let snapshot = buffer.snapshot();
+
+        let rows = display_rows_in_mode(
+            &snapshot,
+            0..2,
+            Some(&collapsed_selection(Point::new(0, 0))),
+            MarkdownEditorMode::Rendered,
+        );
+
+        assert_eq!(rows[0].text, "# Title");
+        assert_eq!(rows[1].text, "Other");
     }
 
     #[test]
@@ -933,6 +1217,9 @@ mod tests {
 
     #[test]
     fn selected_range_for_row_handles_multiline_selection() {
+        let mut buffer = Buffer::local("abcd\nxy\npq");
+        let snapshot = buffer.snapshot();
+        let display_rows = display_rows(&snapshot, 0..3);
         let selection = Selection {
             id: 1,
             start: Point::new(0, 2),
@@ -942,33 +1229,15 @@ mod tests {
         };
 
         assert_eq!(
-            selected_range_for_row(
-                &DisplayRow {
-                    row: 0,
-                    text: "abcd".to_string(),
-                },
-                &selection
-            ),
+            selected_range_for_row(&snapshot, &display_rows[0], &selection),
             Some(2..4)
         );
         assert_eq!(
-            selected_range_for_row(
-                &DisplayRow {
-                    row: 1,
-                    text: "xy".to_string(),
-                },
-                &selection
-            ),
+            selected_range_for_row(&snapshot, &display_rows[1], &selection),
             Some(0..2)
         );
         assert_eq!(
-            selected_range_for_row(
-                &DisplayRow {
-                    row: 2,
-                    text: "pq".to_string(),
-                },
-                &selection
-            ),
+            selected_range_for_row(&snapshot, &display_rows[2], &selection),
             Some(0..1)
         );
     }
@@ -984,10 +1253,11 @@ mod tests {
             goal: SelectionGoal::None,
         };
 
-        let selection = replace_selection(&mut buffer, &selection, "cd");
+        let (selection, transaction_id) = replace_selection(&mut buffer, &selection, "cd");
 
         assert_eq!(buffer.text(), "abcdef");
         assert_eq!(selection, collapsed_selection(Point::new(0, 4)));
+        assert!(transaction_id.is_some());
     }
 
     #[test]
@@ -1001,10 +1271,11 @@ mod tests {
             goal: SelectionGoal::None,
         };
 
-        let selection = replace_selection(&mut buffer, &selection, "ZZ");
+        let (selection, transaction_id) = replace_selection(&mut buffer, &selection, "ZZ");
 
         assert_eq!(buffer.text(), "abZZef");
         assert_eq!(selection, collapsed_selection(Point::new(0, 4)));
+        assert!(transaction_id.is_some());
     }
 
     #[test]
@@ -1012,10 +1283,11 @@ mod tests {
         let mut buffer = Buffer::local("aβ");
         let selection = collapsed_selection(Point::new(0, "aβ".len() as u32));
 
-        let selection = backspace_selection(&mut buffer, &selection);
+        let (selection, transaction_id) = backspace_selection(&mut buffer, &selection);
 
         assert_eq!(buffer.text(), "a");
         assert_eq!(selection, collapsed_selection(Point::new(0, 1)));
+        assert!(transaction_id.is_some());
     }
 
     #[test]
@@ -1029,9 +1301,10 @@ mod tests {
             goal: SelectionGoal::None,
         };
 
-        let selection = delete_selection(&mut buffer, &selection);
+        let (selection, transaction_id) = delete_selection(&mut buffer, &selection);
 
         assert_eq!(buffer.text(), "aef");
         assert_eq!(selection, collapsed_selection(Point::new(0, 1)));
+        assert!(transaction_id.is_some());
     }
 }

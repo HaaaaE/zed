@@ -10631,6 +10631,7 @@ name = "md_editor"
 version = "0.1.0"
 dependencies = [
  "gpui",
+ "markdown_wysiwyg",
  "md_buffer",
  "md_text",
 ]

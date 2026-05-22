@@ -203,3 +203,62 @@ This file tracks every batch of source files ported from Zed crates into the
   - cargo test -p md_editor                              6/6 passed
   - cargo check -p markdown_editor --features md-editor --no-default-features ✓
   - cargo check -p markdown_editor --features legacy-editor ✓
+
+
+### 2026-05-23 — R3: md_editor save and dirty-state shell sync
+
+- **Source files:**
+  - crates/markdown_editor/src/legacy_editor.rs  (save/save-as shell flow reference)
+  - crates/gpui/examples/input.rs                (entity focus + action wiring reference)
+- **Destination files:**
+  - crates/md_editor/src/lib.rs
+  - crates/markdown_editor/src/md_editor_app.rs
+  - docs/md-extraction.md
+- **Source baseline:** fork-HEAD, hand-written md-editor shell/document status follow-up on top of the earlier R3 bootstrap
+- **Retained capabilities:** standalone md_editor editing surface, single-buffer editing, keyboard/mouse selection, undo/redo, md-editor feature-gated app shell
+- **Removed capabilities:** open dialog, preview toggle, source/rendered mode toggle, WYSIWYG decorations, project/workspace/editor crate integration
+- **Hand-written replacements:**
+  - md_editor now emits a minimal `DirtyChanged` event so the app shell can observe edit/save transitions without depending on Zed editor events
+  - markdown_editor `md-editor` path now implements `Save` / `SaveAs`, writes via `md_editor::serialized_text()`, and reflects saved/unsaved state in the title bar while keeping the shell GPUI-only
+- **Verification:**
+  - not run in this batch
+
+
+### 2026-05-23 — R3: md_editor minimal rendered block projection
+
+- **Source files:**
+  - crates/markdown_wysiwyg/src/markdown_wysiwyg.rs  (block marker projection and active-range reveal)
+  - crates/gpui/examples/input.rs                    (single-surface hit-testing / focus flow reference)
+- **Destination files:**
+  - crates/md_editor/src/lib.rs
+  - crates/markdown_editor/src/md_editor_app.rs
+  - docs/md-extraction.md
+- **Source baseline:** fork-HEAD, hand-written minimal Rendered mode follow-up on top of the earlier R3 editing shell
+- **Retained capabilities:** source-coordinate selection/caret model, keyboard editing, mouse hit-testing, undo/redo, save/save-as, new/open document shell flow
+- **Removed capabilities:** inline WYSIWYG decorations, block widgets, soft wrap-aware position mapping, IME/composition handling, multi-selection, project/workspace/editor crate integration
+- **Hand-written replacements:**
+  - `md_editor` now carries `MarkdownEditorMode::{Source, Rendered}` and attaches a per-row `MarkdownProjectionMap` so Rendered mode can hide block-level marker ranges while continuing to store caret/selection in source coordinates
+  - Rendered rows reveal marker text for the active block by threading the current selection/caret source range into `markdown_wysiwyg` projection generation, avoiding a fully markerless editing surface
+  - caret painting, selection highlighting, and mouse hit-testing now convert through the row projection instead of assuming source offsets and display offsets are identical
+  - `markdown_editor` shell now exposes `ToggleMode` and shows the active mode in the title bar, while save/open paths continue to serialize the unchanged source text from `md_buffer`
+- **Verification:**
+  - cargo test -p md_editor                              15/15 passed
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+
+
+### 2026-05-23 — R3: md_editor new/open document shell workflow
+
+- **Source files:**
+  - crates/markdown_editor/src/legacy_editor.rs  (new/open document shell flow reference)
+  - crates/gpui/examples/input.rs                (entity replacement + focus flow reference)
+- **Destination files:**
+  - crates/markdown_editor/src/md_editor_app.rs
+  - docs/md-extraction.md
+- **Source baseline:** fork-HEAD, hand-written md-editor shell workflow follow-up on top of the save/dirty batch
+- **Retained capabilities:** standalone md-editor window, dirty-state subscription, save/save-as, keyboard-driven editing and navigation
+- **Removed capabilities:** unsaved-change confirmation, command palette, preview toggle, source/rendered mode toggle, WYSIWYG decorations, project/workspace/editor crate integration
+- **Hand-written replacements:**
+  - md-editor shell now rebuilds the active `MarkdownEditor` entity when creating or opening a document, replacing the editor-local subscription in place instead of depending on workspace item infrastructure
+  - `OpenDocument` uses GPUI `prompt_for_paths` directly and keeps the workflow confined to the standalone markdown-editor shell
+- **Verification:**
+  - not run in this batch

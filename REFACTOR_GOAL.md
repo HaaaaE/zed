@@ -605,3 +605,28 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - cargo check -p markdown_editor --features md-editor --no-default-features ✓
   - cargo check -p markdown_editor --features legacy-editor ✓
 - 对后续目标的影响：`md_editor` 现在已经具备最小“选择 → 修改 buffer → 更新 selection”闭环，下一批可以继续补 undo/redo、dirty/save 和更接近 Zed 的文本输入/IME 语义。
+
+### 2026-05-22 - 阶段 R3：最小 undo/redo
+
+- 对应目标：继续把 `md_editor` 从“能编辑”推进到“能回退编辑”，补上最基础的历史操作能力。
+- 完成情况：
+  - `md_editor` 新增 `Undo` / `Redo` actions，并在纯 `md-editor` 入口绑定 `Ctrl/Cmd+Z` 与 `Ctrl/Cmd+Shift+Z`。
+  - 编辑路径会按 transaction id 记录单选区编辑前后位置；undo/redo 时优先恢复对应 selection，而不是只回滚文本。
+  - 当前仍只覆盖单选区历史恢复；尚未处理多选区、复杂 composition、跨批次 transaction merge 或保存状态 UI。
+- 验收结果：
+  - cargo test -p md_editor: 13/13 ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+  - cargo check -p markdown_editor --features legacy-editor ✓
+- 对后续目标的影响：`md_editor` 的编辑路径现在已经具备最小 “输入 → 回退 → 重做” 闭环，后续可以继续接 dirty/save 指示和更完整的文本输入语义，而不必先回头补历史操作。
+### 2026-05-23 - 阶段 R3：最小 Rendered 块级投影
+
+- 对应目标：开始沿 `markdown_wysiwyg` 的 projection 能力把 `md_editor` 从纯 source 视图推进到最小 Rendered 模式，同时保持 source 坐标作为唯一编辑真相。
+- 完成情况：
+  - `md_editor` 新增 `MarkdownEditorMode::{Source, Rendered}`，并在 display row 上挂接 `MarkdownProjectionMap`，让 Rendered 模式按行隐藏块级 marker。
+  - caret、选区高亮和鼠标 hit-testing 已改为走 source/display offset 映射；编辑、undo/redo、保存仍继续使用 source buffer 坐标与 `serialized_text()`。
+  - 当前活动块会通过 selection/caret source range 触发 reveal，在 Rendered 模式下保留原始 marker，避免完全失去编辑定位。
+  - `markdown_editor` 纯 `md-editor` 壳层已接入 `ToggleMode` action / keybinding，并在标题栏展示当前模式。
+- 验收结果：
+  - cargo test -p md_editor: 15/15 ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+- 对后续目标的影响：R3 后续可以继续把 projection 从“块级 marker 隐藏”扩展到更完整的 WYSIWYG 渲染，但不需要再先解决 source/display 坐标双向映射这个基础问题。
