@@ -7,11 +7,10 @@ use std::{
     time::Instant,
 };
 
-use clock::{Global, Lamport, ReplicaId};
 use markdown_wysiwyg::MarkdownSyntaxTree;
 use md_text::{
-    Buffer as TextBuffer, BufferId, BufferSnapshot as TextBufferSnapshot, LineEnding, Rope,
-    ToOffset, Transaction, TransactionId,
+    Buffer as TextBuffer, BufferId, BufferSnapshot as TextBufferSnapshot, Global, Lamport,
+    LineEnding, ReplicaId, Rope, ToOffset, Transaction, TransactionId,
 };
 
 static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1);

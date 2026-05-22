@@ -10621,7 +10621,6 @@ version = "0.1.0"
 name = "md_buffer"
 version = "0.1.0"
 dependencies = [
- "clock",
  "markdown_wysiwyg",
  "md_text",
  "rand 0.9.4",

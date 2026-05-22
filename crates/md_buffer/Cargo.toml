@@ -16,7 +16,6 @@ doctest = false
 test-support = ["md_text/test-support"]
 
 [dependencies]
-clock.workspace = true
 markdown_wysiwyg.workspace = true
 md_text.workspace = true
 

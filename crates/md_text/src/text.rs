@@ -12,8 +12,7 @@ mod undo_map;
 
 pub use anchor::*;
 use anyhow::{Context as _, Result};
-use clock::Lamport;
-pub use clock::ReplicaId;
+pub use clock::{Global, Lamport, ReplicaId};
 use collections::{HashMap, HashSet};
 use locator::Locator;
 use operation_queue::OperationQueue;

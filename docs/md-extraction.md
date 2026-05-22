@@ -91,3 +91,23 @@ This file tracks every batch of source files ported from Zed crates into the
   - cargo test -p md_buffer                              3/3 passed
   - cargo tree -p md_buffer --edges normal -q           no language / multi_buffer / project / workspace matches
 
+
+### 2026-05-22 — R2: md_buffer boundary tightening
+
+- **Source files:**
+  - crates/md_text/src/text.rs
+  - crates/md_buffer/src/md_buffer.rs
+  - crates/md_buffer/Cargo.toml
+- **Destination files:**
+  - crates/md_text/src/text.rs
+  - crates/md_buffer/src/md_buffer.rs
+  - crates/md_buffer/Cargo.toml
+- **Source baseline:** fork-HEAD, refine initial R2 port to match target dependency direction
+- **Retained capabilities:** unchanged standalone buffer API, syntax snapshot, dirty/saved, undo/redo behavior
+- **Removed capabilities:** direct md_buffer dependency on workspace clock crate
+- **Hand-written replacements:**
+  - md_text re-exports `Global`, `Lamport`, and `ReplicaId` so md_buffer consumes versioning types through md_text instead of depending on clock directly
+- **Verification:**
+  - cargo test -p md_buffer
+  - cargo tree -p md_buffer --edges normal -q
+
