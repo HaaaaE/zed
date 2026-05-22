@@ -11,7 +11,8 @@ mod tests;
 mod undo_map;
 
 pub use anchor::*;
-use anyhow::{Context as _, Result};
+pub use anyhow::Result;
+use anyhow::Context as _;
 pub use clock::{Global, Lamport, ReplicaId};
 use collections::{HashMap, HashSet};
 use locator::Locator;
@@ -884,6 +885,7 @@ impl Buffer {
         self.history.push(operation.clone());
         self.history.push_undo(operation.timestamp());
         self.snapshot.version.observe(operation.timestamp());
+        self.resolve_waiting_versions();
         self.end_transaction();
         operation
     }
@@ -1095,6 +1097,10 @@ impl Buffer {
                 }
             }
         }
+        self.resolve_waiting_versions();
+    }
+
+    fn resolve_waiting_versions(&mut self) {
         self.wait_for_version_txs.retain_mut(|(version, tx)| {
             if self.snapshot.version().observed_all(version) {
                 tx.try_send(()).ok();
@@ -1635,6 +1641,7 @@ impl Buffer {
             counts,
         };
         self.apply_undo(&undo);
+        self.resolve_waiting_versions();
         Operation::Undo(undo)
     }
 

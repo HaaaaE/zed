@@ -5,6 +5,8 @@ use std::{
     cmp::Ordering,
     env,
     iter::Iterator,
+    pin::Pin,
+    task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
     time::{Duration, Instant},
 };
 
@@ -28,6 +30,51 @@ fn test_edit() {
     assert_eq!(buffer.text(), "ghiabjlcdef");
     buffer.edit([(4..9, "mno")]);
     assert_eq!(buffer.text(), "ghiamnoef");
+}
+
+const NOOP_WAKER_VTABLE: RawWakerVTable = RawWakerVTable::new(
+    noop_clone_raw_waker,
+    noop_wake_raw_waker,
+    noop_wake_raw_waker,
+    noop_drop_raw_waker,
+);
+
+fn noop_clone_raw_waker(_: *const ()) -> RawWaker {
+    RawWaker::new(std::ptr::null(), &NOOP_WAKER_VTABLE)
+}
+
+fn noop_wake_raw_waker(_: *const ()) {}
+
+fn noop_drop_raw_waker(_: *const ()) {}
+
+fn noop_waker() -> Waker {
+    unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &NOOP_WAKER_VTABLE)) }
+}
+
+fn poll_once<F: Future>(future: Pin<&mut F>) -> Poll<F::Output> {
+    let waker = noop_waker();
+    let mut context = Context::from_waker(&waker);
+    future.poll(&mut context)
+}
+
+#[test]
+fn test_wait_for_version_resolves_after_local_edit() {
+    let mut buffer = Buffer::new(ReplicaId::LOCAL, BufferId::new(1).unwrap(), "A");
+    let transaction_id = buffer.start_transaction().unwrap();
+    let target_timestamp = Lamport {
+        replica_id: transaction_id.replica_id,
+        value: transaction_id.value + 1,
+    };
+    let mut target_version = buffer.version();
+    target_version.observe(target_timestamp);
+
+    let mut future = Box::pin(buffer.wait_for_version(target_version));
+    assert!(matches!(poll_once(future.as_mut()), Poll::Pending));
+
+    let edit_timestamp = buffer.edit([(1..1, "B")]).timestamp();
+    assert_eq!(edit_timestamp, target_timestamp);
+
+    assert!(matches!(poll_once(future.as_mut()), Poll::Ready(Ok(()))));
 }
 
 #[test]

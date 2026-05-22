@@ -111,3 +111,29 @@ This file tracks every batch of source files ported from Zed crates into the
   - cargo test -p md_buffer
   - cargo tree -p md_buffer --edges normal -q
 
+
+### 2026-05-22 — R2: md_buffer API alignment follow-up
+
+- **Source files:**
+  - crates/language/src/buffer.rs  (standalone editing API semantics reference)
+  - crates/md_text/src/text.rs     (has_edits_since, line ending, transaction helpers)
+- **Destination files:**
+  - crates/md_text/src/text.rs
+  - crates/md_text/src/tests.rs
+  - crates/md_buffer/src/md_buffer.rs
+- **Source baseline:** fork-HEAD, refine the standalone md_buffer surface toward language::Buffer single-file behavior
+- **Retained capabilities:** local buffer creation, syntax snapshotting, undo/redo, saved-version tracking
+- **Removed capabilities:** none
+- **Hand-written replacements:**
+  - md_buffer dirty tracking now uses `md_text::Buffer::has_edits_since(saved_version)` so undo back to saved content clears the dirty flag
+  - md_buffer now forwards `edit_non_coalesce`, `undo_transaction`, `undo_to_transaction`, `redo_to_transaction`, `transaction_group_interval`, `set_group_interval`, and `set_line_ending`
+  - md_buffer now tracks `preview_version` and exposes `refresh_preview` / `preserve_preview` with the same content-based semantics as `language::Buffer`'s single-file path
+  - md_buffer now exposes `remote_id`, `replica_id`, `base_text`, `deferred_ops_len`, and `has_deferred_ops` for standalone callers that need low-level buffer identity/history inspection
+  - md_buffer now exposes `as_text_snapshot` and `has_edits_since` so callers can inspect the raw text snapshot by reference and query content changes against arbitrary versions without cloning or re-deriving dirty state
+  - md_buffer now forwards `wait_for_version` and `give_up_waiting`; to support that standalone contract, md_text now resolves version waiters after local edit / undo paths in addition to applied remote operations
+  - added standalone tests for undo-to-saved-state, transaction-specific undo/redo, reversed edit ranges, group interval forwarding, line-ending metadata updates, preview preservation behavior, base text stability, deferred-op inspection, content-change tracking across undo, immediate version waits, successful version waits after local edits, and forced waiter cancellation
+- **Verification:**
+  - cargo test -p md_text                                37/37 passed
+  - cargo test -p md_buffer                              14/14 passed
+  - cargo tree -p md_buffer --depth 1 -q                direct deps limited to markdown_wysiwyg + md_text
+
