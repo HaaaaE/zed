@@ -1,10 +1,12 @@
 use std::{env, fs, path::PathBuf};
 
 use gpui::{
-    Context, Entity, Focusable as _, IntoElement, Render, SharedString, Window, WindowOptions, div,
-    prelude::*, px,
+    Context, Entity, Focusable as _, IntoElement, KeyBinding, Render, SharedString, Window,
+    WindowOptions, div, prelude::*, px,
 };
-use md_editor::MarkdownEditor;
+use md_editor::{
+    MarkdownEditor, MoveDown, MoveLeft, MoveRight, MoveToBeginningOfLine, MoveToEndOfLine, MoveUp,
+};
 
 struct MarkdownEditorShell {
     editor: Entity<MarkdownEditor>,
@@ -87,10 +89,7 @@ impl MarkdownEditorShell {
                 div()
                     .text_xs()
                     .text_color(gpui::rgba(0xffffff99))
-                    .child(SharedString::from(format!(
-                        "{} · R3 read-only",
-                        self.title()
-                    ))),
+                    .child(SharedString::from(format!("{} · R3 cursor", self.title()))),
             )
     }
 }
@@ -122,6 +121,15 @@ pub fn run() {
     let path = env::args_os().nth(1).map(PathBuf::from);
 
     gpui_platform::application().run(move |cx| {
+        cx.bind_keys([
+            KeyBinding::new("left", MoveLeft, Some("MarkdownEditor")),
+            KeyBinding::new("right", MoveRight, Some("MarkdownEditor")),
+            KeyBinding::new("up", MoveUp, Some("MarkdownEditor")),
+            KeyBinding::new("down", MoveDown, Some("MarkdownEditor")),
+            KeyBinding::new("home", MoveToBeginningOfLine, Some("MarkdownEditor")),
+            KeyBinding::new("end", MoveToEndOfLine, Some("MarkdownEditor")),
+        ]);
+
         let path = path.clone();
         match cx.open_window(WindowOptions::default(), move |window, cx| {
             cx.new(|cx| MarkdownEditorShell::new(path, window, cx))

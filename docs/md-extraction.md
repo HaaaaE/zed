@@ -180,3 +180,26 @@ This file tracks every batch of source files ported from Zed crates into the
   - cargo test -p md_editor                              3/3 passed
   - cargo check -p markdown_editor --features md-editor --no-default-features ✓
   - cargo check -p markdown_editor --features legacy-editor ✓
+
+
+### 2026-05-22 — R3: md_editor basic cursor movement
+
+- **Source files:**
+  - crates/gpui/examples/input.rs         (action binding and focus/caret reference)
+  - crates/editor/src/movement.rs         (movement semantics reference only)
+  - crates/editor/src/editor.rs           (keyboard action wiring reference only)
+- **Destination files:**
+  - crates/md_editor/src/lib.rs
+  - crates/markdown_editor/src/md_editor_app.rs
+  - REFACTOR_GOAL.md
+  - docs/md-extraction.md
+- **Source baseline:** fork-HEAD, hand-written minimal cursor model using md_buffer snapshots
+- **Retained capabilities:** focused editor surface, current-row highlight, visible caret, left/right/up/down/home/end actions, UTF-8-safe cursor movement across Markdown buffer rows
+- **Removed capabilities:** multi-cursor selection, mouse hit-testing, soft wrap aware movement, edit transactions, IME/text input, project/workspace/editor crate integration
+- **Hand-written replacements:**
+  - movement is implemented on top of `md_text::Point` and `BufferSnapshot` while the full Zed movement/display map stack is still pending migration
+  - markdown_editor `md-editor` path binds basic movement keys directly to the standalone `MarkdownEditor` key context
+- **Verification:**
+  - cargo test -p md_editor                              6/6 passed
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+  - cargo check -p markdown_editor --features legacy-editor ✓

@@ -550,3 +550,17 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - cargo check -p markdown_editor --features md-editor --no-default-features ✓
   - cargo check -p markdown_editor --features legacy-editor ✓
 - 对后续目标的影响：R3 后续可以在这个可运行的 md-editor feature path 上逐步替换为 Zed-quality display pipeline、selection 与编辑事务，而不再需要 R0 占位入口。
+
+### 2026-05-22 - 阶段 R3：基础光标移动
+
+- 对应目标：推进 `md_editor` 核心迁移的第二小步：光标状态、键盘移动和最小视觉反馈。
+- 完成情况：
+  - `md_editor` 新增独立光标状态与 `MoveLeft` / `MoveRight` / `MoveUp` / `MoveDown` / line start / line end actions。
+  - 光标移动直接基于 `md_buffer::BufferSnapshot` / `md_text::Point`，跨行移动、行尾/行首移动和 UTF-8 边界均有单测覆盖。
+  - 只读渲染表面新增当前行背景和竖线 caret；纯 `md-editor` 入口绑定方向键、Home、End 到 `MarkdownEditor` key context。
+  - 本批仍不接编辑事务、鼠标选择、文本输入或 IME；后续 R3 继续迁入 Zed selection/input 语义。
+- 验收结果：
+  - cargo test -p md_editor: 6/6 ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+  - cargo check -p markdown_editor --features legacy-editor ✓
+- 对后续目标的影响：`md_editor` 已具备可聚焦、可键盘移动的最小 caret 模型，可作为下一批 selection range、鼠标定位和编辑事务的承载点。
