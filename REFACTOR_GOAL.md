@@ -639,5 +639,22 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - `md_editor` 无需额外分支就获得了 `**strong**`、`*emphasis*`、`` `code` `` 等 inline 控制符在 Rendered 模式下的隐藏能力；点击命中、拖选、caret 和选区高亮仍继续基于 projection 做 source/display 转换。
   - 新增 `markdown_wysiwyg` 与 `md_editor` 单测，覆盖 inactive inline marker 隐藏和 active inline marker reveal。
 - 验收结果：
-  - 待本批验证
+  - cargo test -p markdown_wysiwyg ✓
+  - cargo test -p md_editor ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+  - cargo check -p markdown_editor --features legacy-editor ✓
 - 对后续目标的影响：Rendered 模式现在的投影粒度已经从 block 扩展到 inline，后续可以在不推翻现有坐标模型的前提下继续补语义样式、图片/表格/code block replacement 和更完整的 WYSIWYG 视觉层。
+
+### 2026-05-23 - 阶段 R3：Rendered 语义样式
+
+- 对应目标：让 `md_editor` 的 Rendered 模式开始显示 Markdown 语义本身，而不是仅仅隐藏 marker。
+- 完成情况：
+  - `md_editor` 现已把 `markdown_wysiwyg` 的 block / inline 语义范围转成逐行 styled segments，在 standalone 渲染路径里直接表现 heading、strong、emphasis、inline code、link、strikethrough、inline math，以及 fenced code / pipe table 的基础背景样式。
+  - caret 与选区高亮不再走“整行纯文本切三段”的简化路径，而是基于 styled segments 再切分，因此 Rendered 模式下的语义样式与交互状态可共存。
+  - 本批仍未引入 `md_theme`；样式 palette 暂时内嵌在 `md_editor`，作为 R4 前的过渡实现。
+- 验收结果：
+  - cargo test -p md_editor ✓
+  - cargo test -p markdown_wysiwyg ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+  - cargo check -p markdown_editor --features legacy-editor ✓
+- 对后续目标的影响：`md_editor` 现在已经具备“projection + semantic styling + interaction”同路渲染基础，后续可以继续在这一条路径上追加 block replacement、row metrics 和 theme 抽离，而不必退回到 `legacy-editor` 的 custom highlight 体系。

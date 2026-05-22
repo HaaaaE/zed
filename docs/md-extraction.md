@@ -280,4 +280,29 @@ This file tracks every batch of source files ported from Zed crates into the
   - `MarkdownSyntaxTree::projection_for_source_range` now folds inline span marker ranges into the same `MarkdownProjectionMap` that already hid inactive block markers, so `md_editor` does not need a separate rendered-only text transform for `**`, `*`, backticks, or similar inline control syntax
   - `md_editor` keeps the existing selection/caret and hit-test code unchanged because it already routes through the projection map; only the projection inputs widened from block markers to block + inline markers
 - **Verification:**
-  - pending
+  - cargo test -p markdown_wysiwyg
+  - cargo test -p md_editor
+  - cargo check -p markdown_editor --features md-editor --no-default-features
+  - cargo check -p markdown_editor --features legacy-editor
+
+### 2026-05-23 — R3: md_editor rendered semantic styling
+
+- **Source files:**
+  - crates/markdown_editor/src/legacy_editor.rs  (Rendered mode highlight palette and semantic styling reference)
+  - crates/markdown_wysiwyg/src/markdown_wysiwyg.rs  (block + inline semantic ranges)
+- **Destination files:**
+  - crates/md_editor/src/lib.rs
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Source baseline:** fork-HEAD, hand-written style-aware rendering follow-up on top of the md_editor projection batches
+- **Retained capabilities:** source/display coordinate mapping, keyboard editing, mouse hit-testing, save/new/open shell flow, inline/block marker projection, single-selection rendering
+- **Removed capabilities:** none
+- **Hand-written replacements:**
+  - `md_editor` now converts `markdown_wysiwyg` block and inline semantic ranges into per-row styled text segments, rather than depending on Zed editor custom highlights
+  - caret and selection painting continue to operate on display offsets by splitting those styled segments at caret/selection boundaries, so the standalone renderer keeps one text path instead of forking separate “styled” and “interactive” renderers
+  - the current standalone palette is hard-coded inside `md_editor`; this is intentionally temporary until `md_theme` exists and can own Markdown-specific colors/typography
+- **Verification:**
+  - cargo test -p md_editor
+  - cargo test -p markdown_wysiwyg
+  - cargo check -p markdown_editor --features md-editor --no-default-features
+  - cargo check -p markdown_editor --features legacy-editor
