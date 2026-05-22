@@ -137,3 +137,24 @@ This file tracks every batch of source files ported from Zed crates into the
   - cargo test -p md_buffer                              14/14 passed
   - cargo tree -p md_buffer --depth 1 -q                direct deps limited to markdown_wysiwyg + md_text
 
+
+### 2026-05-22 — R2: md_buffer file I/O closeout
+
+- **Source files:**
+  - crates/markdown_editor/src/legacy_editor.rs  (legacy application shell file open/save path)
+  - crates/text/src/text.rs                      (line-ending-aware text serialization helper reference)
+- **Destination files:**
+  - crates/md_buffer/src/md_buffer.rs
+  - crates/markdown_editor/src/legacy_editor.rs
+  - crates/markdown_editor/Cargo.toml
+- **Source baseline:** fork-HEAD, finish the optional R2 application-side file I/O wiring without crossing into R3 md_editor work
+- **Retained capabilities:** legacy editor UI path unchanged; md_buffer remains the standalone single-file document model; markdown_editor legacy shell can still open/save files normally
+- **Removed capabilities:** none
+- **Hand-written replacements:**
+  - md_buffer now exposes `serialized_text`, which emits the normalized buffer text using the buffer's tracked line ending convention so standalone saves preserve LF/CRLF semantics
+  - markdown_editor `legacy-editor` now constructs an `md_buffer::Buffer` when opening documents and uses that standalone buffer as the file I/O source of truth during save, while the editing UI continues to use the legacy `editor` / `language` stack until R3
+- **Verification:**
+  - cargo test -p md_buffer                              15/15 passed
+  - cargo check -p markdown_editor --features legacy-editor ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+

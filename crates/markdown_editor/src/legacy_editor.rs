@@ -16,6 +16,7 @@ use gpui::{
     Subscription, UnderlineStyle, Window, WindowOptions, actions, div, img, px,
 };
 use http_client::{AsyncBody, HttpClient, Url};
+use md_buffer::Buffer as MdBuffer;
 use language::Buffer;
 use markdown::{Markdown, MarkdownElement, MarkdownFont, MarkdownStyle};
 use markdown_wysiwyg::{MarkdownBlockKind, MarkdownInlineKind, MarkdownSyntaxTree};
@@ -50,6 +51,7 @@ struct MarkdownEditorShell {
 
 struct Document {
     editor: Entity<Editor>,
+    file_buffer: MdBuffer,
     path: Option<PathBuf>,
     title: Option<String>,
     status: DocumentStatus,
@@ -250,11 +252,12 @@ impl MarkdownEditorShell {
                 None
             })
             .unwrap_or_default();
-        let editor = cx.new(|cx| {
-            let buffer = cx.new(|cx| Buffer::local(contents, cx));
+        let file_buffer = MdBuffer::local(contents.clone());
+        let editor = cx.new(move |cx| {
+            let buffer = cx.new(move |cx| Buffer::local(contents, cx));
             Editor::for_buffer(buffer, None, window, cx)
         });
-        editor.update(cx, |editor, cx| editor.set_soft_wrap());
+        editor.update(cx, |editor, _cx| editor.set_soft_wrap());
         let editor_subscription = cx.subscribe(&editor, |this, _editor, event, cx| match event {
             EditorEvent::DirtyChanged | EditorEvent::Saved | EditorEvent::BufferEdited => {
                 this.refresh_status(cx);
@@ -274,6 +277,7 @@ impl MarkdownEditorShell {
         });
         Document {
             editor,
+            file_buffer,
             path,
             title,
             status: DocumentStatus::Saved,
@@ -369,11 +373,14 @@ impl MarkdownEditorShell {
         };
 
         let contents = self.document.editor.read(cx).text(cx);
+        self.document.file_buffer.set_text(contents);
+        let contents = self.document.file_buffer.serialized_text();
         if let Err(error) = fs::write(&path, contents) {
             eprintln!("failed to save markdown file {}: {error:#}", path.display());
             return;
         }
 
+        self.document.file_buffer.did_save_at_current_version();
         let editor = self.document.editor.clone();
         if let Some(buffer) = singleton_buffer(&editor, cx) {
             let version = buffer.read(cx).text_snapshot().version().clone();

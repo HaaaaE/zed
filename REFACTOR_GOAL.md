@@ -520,3 +520,19 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - cargo test -p md_text: 36/36 ✓
   - cargo tree -p md_text 无 language / editor / project / workspace ✓
 - 对后续目标的影响：R2 可开始向 md_buffer 移植单文件 Buffer（使用 md_text 而非 language::Buffer）。
+
+### 2026-05-22 - 阶段 R2：单文件 Buffer
+
+- 对应目标：让 [md_buffer::Buffer::local](cci:1://file:///c:/Users/zwl31/code/rust/zed/crates/language/src/buffer.rs:931:4-942:5) 对齐 [language::Buffer::local](cci:1://file:///c:/Users/zwl31/code/rust/zed/crates/language/src/buffer.rs:931:4-942:5) 的单文件能力，并在不接入 LSP / Project 的前提下完成 markdown-editor 文件读写侧消费。
+- 完成情况：
+  - 已实现 standalone `md_buffer`：本地构造、snapshot、Markdown 语法树、dirty/saved、undo/redo、transaction helpers、preview version、version waiters、line ending metadata、低层 identity/history inspection。
+  - 依赖边界已收紧为 `md_buffer -> md_text + markdown_wysiwyg`，并通过 `md_text` re-export 消费版本类型，未重新引入 [language](cci:1://file:///c:/Users/zwl31/code/rust/zed/crates/language/src/buffer.rs:1704:4-1707:5) / `multi_buffer` / `project` / `workspace` 依赖。
+  - `markdown_editor` 的 `legacy-editor` 文件打开/保存路径现已接入 `md_buffer`：打开时构造 standalone buffer，保存时通过 `md_buffer` 序列化文本并保留 LF/CRLF 语义；编辑 UI 仍保留在 legacy `editor` 路径，等待 R3 的 `md_editor` 替换。
+  - 当前 Markdown 语法刷新仍在版本变化后全量 reparse；这一性能优化点已在 extraction log 登记，留待后续 R3 批次处理。
+- 验收结果：
+  - cargo test -p md_text: 37/37 ✓
+  - cargo test -p md_buffer: 15/15 ✓
+  - cargo tree -p md_buffer --depth 1 -q：直接依赖仅 markdown_wysiwyg + md_text ✓
+  - cargo check -p markdown_editor --features legacy-editor ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+- 对后续目标的影响：R2 已收尾，后续工作可聚焦 R3 的 `md_editor` UI / display / selection / editing path 迁移，不再需要回补单文件 buffer 或文件读写基础能力。

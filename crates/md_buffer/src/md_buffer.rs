@@ -13,6 +13,7 @@ use markdown_wysiwyg::MarkdownSyntaxTree;
 use md_text::{
     Buffer as TextBuffer, BufferId, BufferSnapshot as TextBufferSnapshot, Global, Lamport,
     LineEnding, ReplicaId, Result, Rope, ToOffset, Transaction, TransactionId,
+    chunks_with_line_ending,
 };
 
 static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
@@ -138,6 +139,10 @@ impl Buffer {
 
     pub fn text(&self) -> String {
         self.text.text()
+    }
+
+    pub fn serialized_text(&self) -> String {
+        chunks_with_line_ending(self.text.snapshot().as_rope(), self.line_ending()).collect()
     }
 
     pub fn has_edits_since(&self, version: &Global) -> bool {
@@ -609,6 +614,17 @@ mod tests {
         assert_eq!(buffer.line_ending(), LineEnding::Windows);
         assert_eq!(snapshot.line_ending(), LineEnding::Windows);
         assert_eq!(snapshot.text(), "one\ntwo\n");
+    }
+
+    #[test]
+    fn serialized_text_preserves_windows_line_endings() {
+        let mut buffer = Buffer::local("one\r\ntwo\r\n");
+
+        assert_eq!(buffer.text(), "one\ntwo\n");
+        assert_eq!(buffer.serialized_text(), "one\r\ntwo\r\n");
+
+        assert!(buffer.append("three\n").is_some());
+        assert_eq!(buffer.serialized_text(), "one\r\ntwo\r\nthree\r\n");
     }
 
     #[test]
