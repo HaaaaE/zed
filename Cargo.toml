@@ -130,6 +130,14 @@ members = [
     "crates/markdown",
     "crates/markdown_editor",
     "crates/markdown_preview",
+    "crates/md_rope",
+    "crates/md_sum_tree",
+    "crates/md_text",
+    "crates/md_buffer",
+    "crates/md_editor",
+    "crates/md_theme",
+    "crates/md_settings",
+    "crates/md_assets",
     "crates/markdown_wysiwyg",
     "crates/media",
     "crates/menu",
@@ -389,6 +397,14 @@ lsp = { path = "crates/lsp" }
 markdown = { path = "crates/markdown" }
 markdown_preview = { path = "crates/markdown_preview" }
 markdown_wysiwyg = { path = "crates/markdown_wysiwyg" }
+md_rope = { path = "crates/md_rope" }
+md_sum_tree = { path = "crates/md_sum_tree" }
+md_text = { path = "crates/md_text" }
+md_buffer = { path = "crates/md_buffer" }
+md_editor = { path = "crates/md_editor" }
+md_theme = { path = "crates/md_theme" }
+md_settings = { path = "crates/md_settings" }
+md_assets = { path = "crates/md_assets" }
 svg_preview = { path = "crates/svg_preview" }
 media = { path = "crates/media" }
 menu = { path = "crates/menu" }

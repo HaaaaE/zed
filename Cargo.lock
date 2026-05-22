@@ -10478,6 +10478,11 @@ dependencies = [
  "language",
  "markdown",
  "markdown_wysiwyg",
+ "md_assets",
+ "md_buffer",
+ "md_editor",
+ "md_settings",
+ "md_theme",
  "multi_buffer",
  "settings",
  "smol",
@@ -10607,6 +10612,86 @@ dependencies = [
  "cfg-if",
  "digest",
 ]
+
+[[package]]
+name = "md_assets"
+version = "0.1.0"
+
+[[package]]
+name = "md_buffer"
+version = "0.1.0"
+dependencies = [
+ "clock",
+ "markdown_wysiwyg",
+ "md_text",
+ "rand 0.9.4",
+]
+
+[[package]]
+name = "md_editor"
+version = "0.1.0"
+
+[[package]]
+name = "md_rope"
+version = "0.1.0"
+dependencies = [
+ "ctor",
+ "gpui",
+ "heapless",
+ "log",
+ "md_sum_tree",
+ "rand 0.9.4",
+ "rayon",
+ "tracing",
+ "unicode-segmentation",
+ "util",
+ "zlog",
+ "ztracing",
+]
+
+[[package]]
+name = "md_settings"
+version = "0.1.0"
+
+[[package]]
+name = "md_sum_tree"
+version = "0.1.0"
+dependencies = [
+ "ctor",
+ "heapless",
+ "log",
+ "proptest",
+ "rand 0.9.4",
+ "rayon",
+ "tracing",
+ "zlog",
+ "ztracing",
+]
+
+[[package]]
+name = "md_text"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clock",
+ "collections",
+ "ctor",
+ "gpui",
+ "log",
+ "md_rope",
+ "md_sum_tree",
+ "parking_lot",
+ "postage",
+ "rand 0.9.4",
+ "regex",
+ "smallvec",
+ "util",
+ "zlog",
+]
+
+[[package]]
+name = "md_theme"
+version = "0.1.0"
 
 [[package]]
 name = "mdbook"

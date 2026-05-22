@@ -496,3 +496,27 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
 - 完成情况：补充依赖边界两层门禁、`md_assets`、目标依赖方向、产品代码硬门禁、搬迁记录模板、质量门、R0–R6 阶段验收、双轨迁移要求和风险缓解。
 - 验收结果：无代码变更；文档已明确下一步应从 R0 脚手架、allowlist、extraction log 和 boundary check 开始。
 - 对后续目标的影响：后续实现不能只“能编译”，还必须证明没有直接使用原 Zed 非 GPUI crate，并记录每批搬迁来源与验证结果。
+
+### 2026-05-22 - 阶段 R0：脚手架
+
+- 对应目标：建立 md_* 空壳并纳入编译；设立双轨迁移开关；固定依赖门禁脚本。
+- 完成情况：新建 8 个空壳 crate；根 Cargo.toml 已加入 members 和 workspace.dependencies；markdown_editor 新增 legacy-editor/md-editor features；main.rs 改为双轨 dispatcher，逻辑提取至 legacy_editor.rs；新增 docs/md-extraction.md、docs/md-dependency-allowlist.md、script/check-md-boundary.ps1。
+- 验收结果：cargo check -p md_text ✓；cargo check -p markdown_editor --features legacy-editor ✓；cargo check -p markdown_editor --features md-editor --no-default-features ✓
+- 对后续目标的影响：R1 可直接开始向 md_text/md_rope 移植 crates/text 和 crates/rope。
+
+### 2026-05-22 - 阶段 R1：文本底层
+
+- 对应目标：md_text + md_rope 可独立运行单测（插入、删除、undo、行迭代）。
+- 完成情况：
+  - crates/sum_tree/src/* 整体复制至 crates/md_sum_tree/src/，Cargo.toml 依赖与原版相同（仅外部 crate）。
+  - crates/rope/src/* 整体复制至 crates/md_rope/src/，Cargo.toml 通过 package rename 将 md_sum_tree 别名为 sum_tree，源码零修改。
+  - crates/text/src/* 整体复制至 crates/md_text/src/，Cargo.toml 通过 package rename 将 md_rope 别名为 rope、md_sum_tree 别名为 sum_tree，源码零修改。
+  - md_rope bench harness 暂时移除（待后续阶段补充）。
+  - docs/md-extraction.md 已追加搬迁记录。
+- 验收结果：
+  - cargo check -p md_sum_tree / md_rope / md_text ✓
+  - cargo test -p md_sum_tree: 10/10 ✓
+  - cargo test -p md_rope: 24/24 ✓
+  - cargo test -p md_text: 36/36 ✓
+  - cargo tree -p md_text 无 language / editor / project / workspace ✓
+- 对后续目标的影响：R2 可开始向 md_buffer 移植单文件 Buffer（使用 md_text 而非 language::Buffer）。

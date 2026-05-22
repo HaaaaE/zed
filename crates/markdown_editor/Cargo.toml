@@ -12,24 +12,60 @@ workspace = true
 name = "markdown-editor"
 path = "src/main.rs"
 
+[features]
+default = ["legacy-editor"]
+legacy-editor = [
+    "dep:assets",
+    "dep:clock",
+    "dep:collections",
+    "dep:editor",
+    "dep:language",
+    "dep:markdown",
+    "dep:multi_buffer",
+    "dep:settings",
+    "dep:theme",
+    "dep:theme_settings",
+    "dep:ui",
+    "dep:http_client",
+    "dep:ureq",
+    "dep:smol",
+    "dep:http",
+]
+md-editor = [
+    "dep:md_editor",
+    "dep:md_buffer",
+    "dep:md_theme",
+    "dep:md_settings",
+    "dep:md_assets",
+]
+
 [dependencies]
 anyhow.workspace = true
-assets.workspace = true
-clock.workspace = true
-editor.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true
-language.workspace = true
-markdown.workspace = true
 markdown_wysiwyg.workspace = true
-multi_buffer.workspace = true
-settings.workspace = true
-theme.workspace = true
-theme_settings.workspace = true
-ui.workspace = true
-collections.workspace = true
-http_client.workspace = true
-ureq = { version = "3", default-features = true, features = ["rustls"] }
 futures.workspace = true
-http.workspace = true
-smol.workspace = true
+
+# legacy-editor dependencies (default feature)
+assets = { workspace = true, optional = true }
+clock = { workspace = true, optional = true }
+collections = { workspace = true, optional = true }
+editor = { workspace = true, optional = true }
+language = { workspace = true, optional = true }
+markdown = { workspace = true, optional = true }
+multi_buffer = { workspace = true, optional = true }
+settings = { workspace = true, optional = true }
+theme = { workspace = true, optional = true }
+theme_settings = { workspace = true, optional = true }
+ui = { workspace = true, optional = true }
+http_client = { workspace = true, optional = true }
+ureq = { version = "3", default-features = true, features = ["rustls"], optional = true }
+smol = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+
+# md-editor dependencies (R3+, not default)
+md_editor = { workspace = true, optional = true }
+md_buffer = { workspace = true, optional = true }
+md_theme = { workspace = true, optional = true }
+md_settings = { workspace = true, optional = true }
+md_assets = { workspace = true, optional = true }

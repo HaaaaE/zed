@@ -1,0 +1,40 @@
+[package]
+name = "md_text"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "GPL-3.0-or-later"
+description = "Text buffer primitives for md_* stack; ported from crates/text"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/text.rs"
+doctest = false
+
+[features]
+test-support = ["rand", "util/test-support"]
+
+[dependencies]
+anyhow.workspace = true
+clock.workspace = true
+collections.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+postage.workspace = true
+rand = { workspace = true, optional = true }
+regex.workspace = true
+# alias md_rope as 'rope' and md_sum_tree as 'sum_tree' so copied source needs no edits
+rope = { path = "../md_rope", package = "md_rope" }
+smallvec.workspace = true
+sum_tree = { path = "../md_sum_tree", package = "md_sum_tree" }
+util.workspace = true
+
+[dev-dependencies]
+collections = { workspace = true, features = ["test-support"] }
+ctor.workspace = true
+gpui = { workspace = true, features = ["test-support"] }
+rand.workspace = true
+util = { workspace = true, features = ["test-support"] }
+zlog.workspace = true
