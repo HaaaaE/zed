@@ -1,4 +1,4 @@
-# 重构目标（REACTOR）
+# 重构目标（REFACTOR）
 
 本文档描述 **Markdown 编辑器从 Zed IDE 依赖栈中剥离** 的工程目标、约束和实施计划。
 
@@ -54,7 +54,7 @@
 
 ### 与 `GOAL.md` 的关系
 
-| 阶段 | `GOAL.md` | `REACTOR_GOAL.md` |
+| 阶段 | `GOAL.md` | `REFACTOR_GOAL.md` |
 |------|-----------|-------------------|
 | 已完成（入口、WYSIWYG、工作台） | 产品功能迭代 | 可继续，但新功能优先落在 `md_*` 上 |
 | 当前起 | 功能仍可追加 | **并行**推进依赖剥离 |
@@ -483,10 +483,10 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
 - 对后续目标的影响：
 ```
 
-### 2026-05-22 - 文档：确立 REACTOR 目标
+### 2026-05-22 - 文档：确立 REFACTOR 目标
 
 - 对应目标：明确最终依赖边界（仅 GPUI 栈 + `md_*`）、同仓库抽 crate 策略、阶段 R0–R5。
-- 完成情况：新增 `REACTOR_GOAL.md`；与 `GOAL.md` 分工：产品 vs 架构剥离。
+- 完成情况：新增 `REFACTOR_GOAL.md`；与 `GOAL.md` 分工：产品 vs 架构剥离。
 - 验收结果：无代码变更。
 - 对后续目标的影响：后续 agent/开发以本文档为剥离路线图；新功能开发逐步从 `editor` 转向 `md_*`。
 
