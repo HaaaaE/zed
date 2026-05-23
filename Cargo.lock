@@ -10634,6 +10634,7 @@ dependencies = [
  "markdown_wysiwyg",
  "md_buffer",
  "md_text",
+ "md_theme",
 ]
 
 [[package]]
@@ -10697,6 +10698,9 @@ dependencies = [
 [[package]]
 name = "md_theme"
 version = "0.1.0"
+dependencies = [
+ "gpui",
+]
 
 [[package]]
 name = "mdbook"

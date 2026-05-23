@@ -9,6 +9,9 @@ use gpui::{
 use markdown_wysiwyg::{MarkdownBlockKind, MarkdownInlineKind, MarkdownProjectionMap};
 use md_buffer::{Buffer, BufferSnapshot};
 use md_text::{Bias, Point, Selection, SelectionGoal};
+use md_theme::{
+    EDITOR_FONT_FAMILY, default_row_metrics, editor_palette, gutter_width, heading_row_metrics,
+};
 
 gpui::actions!(
     md_editor,
@@ -108,6 +111,17 @@ struct RowDisplayStyle {
     text_size: gpui::Pixels,
     line_height: gpui::Pixels,
     caret_height: gpui::Pixels,
+}
+
+impl From<md_theme::RowMetrics> for RowDisplayStyle {
+    fn from(metrics: md_theme::RowMetrics) -> Self {
+        Self {
+            min_height: metrics.min_height,
+            text_size: metrics.text_size,
+            line_height: metrics.line_height,
+            caret_height: metrics.caret_height,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -449,6 +463,8 @@ impl Render for MarkdownEditor {
         let row_count = self.row_count() as usize;
         let mode = self.mode;
         let selection = self.selection.clone();
+        let palette = editor_palette();
+        let default_metrics = default_row_metrics();
 
         div()
             .id("md-editor")
@@ -474,11 +490,11 @@ impl Render for MarkdownEditor {
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .on_key_down(cx.listener(Self::key_down))
-            .bg(gpui::rgb(0x181818))
-            .text_color(gpui::rgb(0xd6d6d6))
-            .font_family("Zed Mono")
-            .text_size(px(14.))
-            .line_height(px(22.))
+            .bg(palette.background)
+            .text_color(palette.text)
+            .font_family(EDITOR_FONT_FAMILY)
+            .text_size(default_metrics.text_size)
+            .line_height(default_metrics.line_height)
             .overflow_y_scroll()
             .child(
                 uniform_list(
@@ -500,7 +516,9 @@ impl Render for MarkdownEditor {
                                     .min_h(row_style.min_height)
                                     .flex()
                                     .items_center()
-                                    .when(is_cursor_row, |this| this.bg(gpui::rgba(0xffffff10)))
+                                    .when(is_cursor_row, |this| {
+                                        this.bg(palette.current_row_background)
+                                    })
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         _cx.listener(move |this, event, window, cx| {
@@ -522,13 +540,13 @@ impl Render for MarkdownEditor {
                                     }))
                                     .child(
                                         div()
-                                            .w(px(48.))
+                                            .w(gutter_width())
                                             .pr_2()
                                             .text_align(TextAlign::Right)
                                             .text_color(if is_cursor_row {
-                                                gpui::rgba(0xffffffcc)
+                                                palette.gutter_current_text
                                             } else {
-                                                gpui::rgba(0xffffff66)
+                                                palette.gutter_text
                                             })
                                             .child(SharedString::from(
                                                 (display_row.row + 1).to_string(),
@@ -639,7 +657,8 @@ fn project_row_text(source_text: &str, projection: &MarkdownProjectionMap) -> St
         let end = hidden_range.end.min(visible_source_range.end);
         if cursor < start {
             rendered_text.push_str(
-                &source_text[(cursor - visible_source_range.start)..(start - visible_source_range.start)],
+                &source_text
+                    [(cursor - visible_source_range.start)..(start - visible_source_range.start)],
             );
         }
         cursor = cursor.max(end);
@@ -647,7 +666,8 @@ fn project_row_text(source_text: &str, projection: &MarkdownProjectionMap) -> St
 
     if cursor < visible_source_range.end {
         rendered_text.push_str(
-            &source_text[(cursor - visible_source_range.start)..(visible_source_range.end - visible_source_range.start)],
+            &source_text[(cursor - visible_source_range.start)
+                ..(visible_source_range.end - visible_source_range.start)],
         );
     }
 
@@ -947,15 +967,16 @@ fn point_for_mouse_x(
     window: &mut Window,
     mode: MarkdownEditorMode,
 ) -> Point {
-    let text_x = (x - px(48.)).max(px(0.));
+    let text_x = (x - gutter_width()).max(px(0.));
     let row_style = row_display_style(snapshot, display_row.row, mode);
+    let palette = editor_palette();
     let shaped_line = window.text_system().shape_line(
         SharedString::from(display_row.text.clone()),
         row_style.text_size,
         &[TextRun {
             len: display_row.text.len(),
-            font: font("Zed Mono"),
-            color: gpui::rgb(0xd6d6d6).into(),
+            font: font(EDITOR_FONT_FAMILY),
+            color: palette.text,
             background_color: None,
             underline: None,
             strikethrough: None,
@@ -969,7 +990,10 @@ fn point_for_mouse_x(
         .as_rope()
         .floor_char_boundary(source_offset);
 
-    clip_cursor(snapshot, snapshot.as_text_snapshot().offset_to_point(source_offset))
+    clip_cursor(
+        snapshot,
+        snapshot.as_text_snapshot().offset_to_point(source_offset),
+    )
 }
 
 fn render_row_text(
@@ -1036,7 +1060,10 @@ fn render_styled_segments(
         split_points.dedup();
 
         let mut piece_start = segment.display_range.start;
-        for piece_end in split_points.into_iter().chain(std::iter::once(segment.display_range.end)) {
+        for piece_end in split_points
+            .into_iter()
+            .chain(std::iter::once(segment.display_range.end))
+        {
             if !caret_inserted && caret_column == piece_start {
                 elements.push(caret_element(row_style));
                 caret_inserted = true;
@@ -1070,10 +1097,11 @@ fn render_styled_segments(
 }
 
 fn caret_element(row_style: RowDisplayStyle) -> gpui::AnyElement {
+    let palette = editor_palette();
     div()
         .w(px(1.))
         .h(row_style.caret_height)
-        .bg(gpui::rgb(0xf0f0f0))
+        .bg(palette.caret)
         .into_any_element()
 }
 
@@ -1106,7 +1134,10 @@ fn render_text_piece(
         element = element.line_through();
     }
     if is_selected {
-        element = element.bg(gpui::rgb(0x264f78)).text_color(gpui::rgb(0xf5fbff));
+        let palette = editor_palette();
+        element = element
+            .bg(palette.selection_background)
+            .text_color(palette.selection_text);
     }
 
     element.into_any_element()
@@ -1144,7 +1175,11 @@ fn styled_display_segments(
     let mut segments: Vec<StyledDisplaySegment> = Vec::new();
     for window in breakpoints.windows(2) {
         let interval = window[0]..window[1];
-        if interval.start >= interval.end || hidden_ranges.iter().any(|hidden_range| range_contains(hidden_range, &interval)) {
+        if interval.start >= interval.end
+            || hidden_ranges
+                .iter()
+                .any(|hidden_range| range_contains(hidden_range, &interval))
+        {
             continue;
         }
 
@@ -1195,7 +1230,10 @@ fn markdown_style_ranges_for_row(
     }
 
     let mut style_ranges = Vec::new();
-    for block in snapshot.syntax_tree().blocks_in_source_range(row_source_range.clone()) {
+    for block in snapshot
+        .syntax_tree()
+        .blocks_in_source_range(row_source_range.clone())
+    {
         match block.kind {
             MarkdownBlockKind::AtxHeading { level } => {
                 push_style_range(
@@ -1277,11 +1315,12 @@ fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool {
 }
 
 fn heading_style(level: u8) -> DisplayTextStyle {
+    let palette = editor_palette();
     DisplayTextStyle {
         color: Some(match level {
-            1 | 2 => gpui::rgb(0xf0f0f0).into(),
-            3 => gpui::rgb(0x8fdcff).into(),
-            _ => gpui::rgba(0xffffffb3).into(),
+            1 | 2 => palette.heading_primary,
+            3 => palette.heading_accent,
+            _ => palette.heading_muted,
         }),
         font_weight: Some(match level {
             1 => FontWeight::BLACK,
@@ -1300,41 +1339,11 @@ fn row_display_style(
 ) -> RowDisplayStyle {
     if mode == MarkdownEditorMode::Rendered {
         if let Some(level) = heading_level_for_row(snapshot, display_row) {
-            return match level {
-                1 => RowDisplayStyle {
-                    min_height: px(42.),
-                    text_size: px(28.),
-                    line_height: px(34.),
-                    caret_height: px(28.),
-                },
-                2 => RowDisplayStyle {
-                    min_height: px(34.),
-                    text_size: px(22.),
-                    line_height: px(28.),
-                    caret_height: px(22.),
-                },
-                3 => RowDisplayStyle {
-                    min_height: px(28.),
-                    text_size: px(18.),
-                    line_height: px(24.),
-                    caret_height: px(18.),
-                },
-                _ => RowDisplayStyle {
-                    min_height: px(24.),
-                    text_size: px(16.),
-                    line_height: px(22.),
-                    caret_height: px(17.),
-                },
-            };
+            return heading_row_metrics(level).into();
         }
     }
 
-    RowDisplayStyle {
-        min_height: px(22.),
-        text_size: px(14.),
-        line_height: px(22.),
-        caret_height: px(17.),
-    }
+    default_row_metrics().into()
 }
 
 fn heading_level_for_row(snapshot: &BufferSnapshot, row: u32) -> Option<u8> {
@@ -1350,6 +1359,7 @@ fn heading_level_for_row(snapshot: &BufferSnapshot, row: u32) -> Option<u8> {
 }
 
 fn inline_style(kind: MarkdownInlineKind) -> DisplayTextStyle {
+    let palette = editor_palette();
     match kind {
         MarkdownInlineKind::Strong => DisplayTextStyle {
             font_weight: Some(FontWeight::BOLD),
@@ -1360,23 +1370,23 @@ fn inline_style(kind: MarkdownInlineKind) -> DisplayTextStyle {
             ..Default::default()
         },
         MarkdownInlineKind::InlineCode => DisplayTextStyle {
-            color: Some(gpui::rgb(0x8fdcff).into()),
-            text_background: Some(gpui::rgba(0xffffff14).into()),
+            color: Some(palette.inline_code_text),
+            text_background: Some(palette.inline_code_background),
             font_weight: Some(FontWeight::MEDIUM),
             ..Default::default()
         },
         MarkdownInlineKind::Link | MarkdownInlineKind::Image => DisplayTextStyle {
-            color: Some(gpui::rgb(0x7cc7ff).into()),
+            color: Some(palette.link_text),
             underline: true,
             ..Default::default()
         },
         MarkdownInlineKind::Strikethrough => DisplayTextStyle {
             line_through: true,
-            color: Some(gpui::rgba(0xffffffb3).into()),
+            color: Some(palette.muted_text),
             ..Default::default()
         },
         MarkdownInlineKind::InlineMath => DisplayTextStyle {
-            color: Some(gpui::rgb(0xd2b6ff).into()),
+            color: Some(palette.inline_math_text),
             italic: true,
             ..Default::default()
         },
@@ -1384,16 +1394,18 @@ fn inline_style(kind: MarkdownInlineKind) -> DisplayTextStyle {
 }
 
 fn fenced_code_style() -> DisplayTextStyle {
+    let palette = editor_palette();
     DisplayTextStyle {
-        text_background: Some(gpui::rgba(0xffffff10).into()),
+        text_background: Some(palette.fenced_code_background),
         ..Default::default()
     }
 }
 
 fn pipe_table_style() -> DisplayTextStyle {
+    let palette = editor_palette();
     DisplayTextStyle {
-        color: Some(gpui::rgba(0xffffff99).into()),
-        text_background: Some(gpui::rgba(0xffffff0a).into()),
+        color: Some(palette.pipe_table_text),
+        text_background: Some(palette.pipe_table_background),
         ..Default::default()
     }
 }
@@ -1407,7 +1419,9 @@ impl DisplayTextStyle {
             self.text_background = Some(text_background);
         }
         self.font_weight = match (self.font_weight, overlay.font_weight) {
-            (Some(current), Some(overlay)) => Some(if current >= overlay { current } else { overlay }),
+            (Some(current), Some(overlay)) => {
+                Some(if current >= overlay { current } else { overlay })
+            }
             (None, Some(overlay)) => Some(overlay),
             (current, None) => current,
         };
@@ -1593,7 +1607,10 @@ mod tests {
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].text, "Title");
         assert_eq!(segments[0].style.font_weight, Some(FontWeight::BLACK));
-        assert_eq!(segments[0].style.color, Some(gpui::rgb(0xf0f0f0).into()));
+        assert_eq!(
+            segments[0].style.color,
+            Some(md_theme::editor_palette().heading_primary)
+        );
     }
 
     #[test]
@@ -1619,7 +1636,10 @@ mod tests {
         );
         assert_eq!(segments[1].style.font_weight, Some(FontWeight::BOLD));
         assert!(segments[3].style.text_background.is_some());
-        assert_eq!(segments[3].style.color, Some(gpui::rgb(0x8fdcff).into()));
+        assert_eq!(
+            segments[3].style.color,
+            Some(md_theme::editor_palette().inline_code_text)
+        );
     }
 
     #[test]
@@ -1629,39 +1649,19 @@ mod tests {
 
         assert_eq!(
             row_display_style(&snapshot, 0, MarkdownEditorMode::Rendered),
-            RowDisplayStyle {
-                min_height: px(42.),
-                text_size: px(28.),
-                line_height: px(34.),
-                caret_height: px(28.),
-            }
+            md_theme::heading_row_metrics(1).into()
         );
         assert_eq!(
             row_display_style(&snapshot, 1, MarkdownEditorMode::Rendered),
-            RowDisplayStyle {
-                min_height: px(34.),
-                text_size: px(22.),
-                line_height: px(28.),
-                caret_height: px(22.),
-            }
+            md_theme::heading_row_metrics(2).into()
         );
         assert_eq!(
             row_display_style(&snapshot, 2, MarkdownEditorMode::Rendered),
-            RowDisplayStyle {
-                min_height: px(22.),
-                text_size: px(14.),
-                line_height: px(22.),
-                caret_height: px(17.),
-            }
+            md_theme::default_row_metrics().into()
         );
         assert_eq!(
             row_display_style(&snapshot, 0, MarkdownEditorMode::Source),
-            RowDisplayStyle {
-                min_height: px(22.),
-                text_size: px(14.),
-                line_height: px(22.),
-                caret_height: px(17.),
-            }
+            md_theme::default_row_metrics().into()
         );
     }
 

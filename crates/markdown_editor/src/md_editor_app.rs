@@ -2,16 +2,20 @@ use std::{env, fs, path::PathBuf};
 
 use gpui::{
     Context, Entity, Focusable as _, IntoElement, KeyBinding, PathPromptOptions, Render,
-    SharedString, Subscription, Window, WindowOptions, div, prelude::*, px,
+    SharedString, Subscription, Window, WindowOptions, div, prelude::*,
 };
 use md_editor::{
     Backspace, Delete, InsertNewline, MarkdownEditor, MarkdownEditorEvent, MarkdownEditorMode,
-    MoveDown, MoveLeft, MoveRight, MoveToBeginningOfLine, MoveToEndOfLine, MoveUp, Redo,
-    SelectAll, SelectDown, SelectLeft, SelectRight, SelectToBeginningOfLine, SelectToEndOfLine,
-    SelectUp, Undo,
+    MoveDown, MoveLeft, MoveRight, MoveToBeginningOfLine, MoveToEndOfLine, MoveUp, Redo, SelectAll,
+    SelectDown, SelectLeft, SelectRight, SelectToBeginningOfLine, SelectToEndOfLine, SelectUp,
+    Undo,
 };
+use md_theme::{shell_palette, title_bar_height};
 
-gpui::actions!(markdown_editor, [NewDocument, OpenDocument, Save, SaveAs, ToggleMode]);
+gpui::actions!(
+    markdown_editor,
+    [NewDocument, OpenDocument, Save, SaveAs, ToggleMode]
+);
 
 struct MarkdownEditorShell {
     editor: Entity<MarkdownEditor>,
@@ -144,11 +148,7 @@ impl MarkdownEditorShell {
     }
 
     fn status_label(&self) -> &'static str {
-        if self.is_dirty {
-            "Unsaved"
-        } else {
-            "Saved"
-        }
+        if self.is_dirty { "Unsaved" } else { "Saved" }
     }
 
     fn mode(&self, cx: &Context<Self>) -> MarkdownEditorMode {
@@ -231,16 +231,17 @@ impl MarkdownEditorShell {
 
     fn render_title_bar(&self, cx: &Context<Self>) -> impl IntoElement {
         let mode_label = self.mode(cx).label();
+        let palette = shell_palette();
         div()
-            .h(px(36.))
+            .h(title_bar_height())
             .w_full()
             .flex()
             .items_center()
             .justify_between()
             .px_3()
-            .bg(gpui::rgb(0x202020))
+            .bg(palette.title_bar_background)
             .border_b_1()
-            .border_color(gpui::rgb(0x303030))
+            .border_color(palette.title_bar_border)
             .child(
                 div()
                     .flex()
@@ -250,43 +251,45 @@ impl MarkdownEditorShell {
                         div()
                             .text_sm()
                             .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(gpui::rgb(0xf0f0f0))
+                            .text_color(palette.title_text)
                             .child("Markdown Editor"),
                     )
                     .child(
                         div()
                             .text_xs()
-                            .text_color(gpui::rgba(0xffffff99))
+                            .text_color(palette.secondary_text)
                             .child(SharedString::from(self.path_label())),
                     ),
             )
             .child(
-                div().flex().items_center().gap_3().child(
-                    div()
-                        .text_xs()
-                        .text_color(if self.is_dirty {
-                            gpui::rgb(0xffd38a)
-                        } else {
-                            gpui::rgba(0xffffff99)
-                        })
-                        .child(SharedString::from(self.status_label())),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(gpui::rgba(0xffffff99))
-                        .child(SharedString::from(format!(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(if self.is_dirty {
+                                palette.dirty_text
+                            } else {
+                                palette.secondary_text
+                            })
+                            .child(SharedString::from(self.status_label())),
+                    )
+                    .child(div().text_xs().text_color(palette.secondary_text).child(
+                        SharedString::from(format!(
                             "{} · {} · Ctrl/Cmd+S",
                             self.title(),
                             mode_label
-                        ))),
-                ),
+                        )),
+                    )),
             )
     }
 }
 
 impl Render for MarkdownEditorShell {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = shell_palette();
         div()
             .size_full()
             .flex()
@@ -296,15 +299,15 @@ impl Render for MarkdownEditorShell {
             .on_action(cx.listener(Self::toggle_mode))
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::save_as))
-            .bg(gpui::rgb(0x181818))
+            .bg(palette.window_background)
             .child(self.render_title_bar(cx))
             .when_some(self.error_message.clone(), |this, error_message| {
                 this.child(
                     div()
                         .px_3()
                         .py_2()
-                        .bg(gpui::rgb(0x3a241f))
-                        .text_color(gpui::rgb(0xffc7b8))
+                        .bg(palette.error_background)
+                        .text_color(palette.error_text)
                         .text_xs()
                         .child(SharedString::from(error_message)),
                 )

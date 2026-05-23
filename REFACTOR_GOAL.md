@@ -683,3 +683,16 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
 - 验收结果：
   - not run in this batch
 - 对后续目标的影响：后续继续验证 Rendered / Source、多文档切换和保存行为时，壳层状态更稳定，能减少“模式被重置”或“路径状态虚假有效”造成的伪问题。
+
+### 2026-05-23 - 阶段 R4：`md_theme` 最小 palette 抽离
+
+- 对应目标：启动 R4 的第一小步，把 standalone `md-editor` 和壳层仍内嵌在代码里的配色/行几何常量迁入 `md_theme`，为后续继续去掉 Zed `theme` / `settings` 依赖铺路。
+- 完成情况：
+  - `md_theme` 已从 R0 占位变为可用 crate，现提供 standalone Markdown 编辑器当前所需的最小 palette、gutter/title bar 尺寸和 heading/default row metrics。
+  - `md_editor` 已改为消费 `md_theme`，把正文颜色、选区/caret、gutter、字体族、Rendered heading 几何以及 inline/code/table/fenced-code 的基础样式都从主题 crate 读取，而不是继续把这批常量散落在编辑器实现里。
+  - `markdown_editor` 纯 `md-editor` 壳层现在也消费同一份 `md_theme` shell palette，标题栏、背景、dirty 状态和错误条样式与编辑区保持同源，减少后续 R4 继续接 `md_settings` / `md_assets` 时的壳层重复定义。
+- 验收结果：
+  - cargo test -p md_theme ✓
+  - cargo test -p md_editor ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+- 对后续目标的影响：后续继续推进 R4 时，可以在 `md_theme` 上继续承接更完整的 typography / highlight / assets 配置，而不必先回头拆散 `md_editor` 和 shell 里的硬编码视觉常量。

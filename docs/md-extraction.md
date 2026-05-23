@@ -344,3 +344,29 @@ This file tracks every batch of source files ported from Zed crates into the
   - cargo test -p markdown_wysiwyg
   - cargo check -p markdown_editor --features md-editor --no-default-features
   - cargo check -p markdown_editor --features legacy-editor
+
+### 2026-05-23 — R4: md_theme minimal palette extraction
+
+- **Source files:**
+  - crates/markdown_editor/src/legacy_editor.rs  (standalone shell/editor palette reference)
+  - crates/markdown_editor/src/md_editor_app.rs  (shell chrome colors and sizing)
+  - crates/md_editor/src/lib.rs                  (rendered palette + row metrics owner)
+- **Destination files:**
+  - crates/md_theme/Cargo.toml
+  - crates/md_theme/src/lib.rs
+  - crates/md_editor/Cargo.toml
+  - crates/md_editor/src/lib.rs
+  - crates/markdown_editor/src/md_editor_app.rs
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Source baseline:** fork-HEAD, hand-written R4 bootstrap that extracts standalone theme constants without reintroducing Zed theme/settings crates
+- **Retained capabilities:** standalone md-editor shell, rendered semantic styling, heading row metrics, source/rendered mode toggle, save/new/open flow
+- **Removed capabilities:** hard-coded palette ownership inside `md_editor`
+- **Hand-written replacements:**
+  - `md_theme` now owns the minimal standalone palette, gutter/title-bar sizing, and row metric presets needed by the current md-editor path
+  - `md_editor` now consumes `md_theme` for text colors, selection/caret colors, gutter styling, font family, and rendered heading geometry instead of carrying those constants inline
+  - `markdown_editor` now consumes the same `md_theme` shell palette for title-bar, background, dirty-state, and error styling so the standalone shell and editor stay visually aligned
+- **Verification:**
+  - cargo test -p md_theme
+  - cargo test -p md_editor
+  - cargo check -p markdown_editor --features md-editor --no-default-features
