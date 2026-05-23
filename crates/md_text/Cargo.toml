@@ -19,7 +19,6 @@ test-support = ["rand"]
 [dependencies]
 anyhow.workspace = true
 clock.workspace = true
-collections.workspace = true
 log.workspace = true
 parking_lot.workspace = true
 postage.workspace = true
@@ -27,10 +26,10 @@ rand = { workspace = true, optional = true }
 regex.workspace = true
 # alias md_rope as 'rope' and md_sum_tree as 'sum_tree' so copied source needs no edits
 rope = { path = "../md_rope", package = "md_rope" }
+rustc-hash.workspace = true
 smallvec.workspace = true
 sum_tree = { path = "../md_sum_tree", package = "md_sum_tree" }
 
 [dev-dependencies]
-collections = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 rand.workspace = true

@@ -1,7 +1,8 @@
 use std::fmt::Debug;
+use std::collections::BTreeMap;
 
 use clock::ReplicaId;
-use collections::{BTreeMap, HashSet};
+use rustc_hash::FxHashSet as HashSet;
 
 pub struct Network<T: Clone, R: rand::Rng> {
     inboxes: BTreeMap<ReplicaId, Vec<Envelope<T>>>,

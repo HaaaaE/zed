@@ -29,7 +29,6 @@ These are R6 items — they are infrastructure crates, not IDE business crates.
 | crate | direct user | reason | owner | target stage |
 |-------|------------|--------|-------|--------------|
 | `clock` | `md_text` | Buffer version types (`Global`, `Lamport`, `ReplicaId`) | `md_text` inline or standalone | R6 |
-| `collections` | `md_text` | `HashSet`/`HashMap` used in text operations | stdlib or `md_collections` | R6 |
 
 ## GPUI Closure (transitive — not direct product use)
 
@@ -76,3 +75,4 @@ the R5 legacy-path deletion.
 | `zlog` | removed unused md_* test logger initialization | 2026-05-24 |
 | `util` (`md_rope`) | local UTF-8/debug/test helpers in `md_rope` | 2026-05-24 |
 | `util` (`md_text`) | local debug/test helpers and marked-text parsing in `md_text` | 2026-05-24 |
+| `collections` (`md_text`) | direct `rustc_hash` aliases plus `std::collections::BTreeMap` | 2026-05-24 |

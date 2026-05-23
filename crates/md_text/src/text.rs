@@ -14,7 +14,6 @@ pub use anchor::*;
 pub use anyhow::Result;
 use anyhow::Context as _;
 pub use clock::{Global, Lamport, ReplicaId};
-use collections::{HashMap, HashSet};
 use locator::Locator;
 use operation_queue::OperationQueue;
 pub use patch::Patch;
@@ -22,6 +21,7 @@ use postage::{oneshot, prelude::*};
 
 use regex::Regex;
 pub use rope::*;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet, FxHasher};
 pub use selection::*;
 use smallvec::SmallVec;
 use std::{
@@ -3805,7 +3805,7 @@ pub mod debug {
     impl Key {
         fn new<K: Hash + 'static>(key: &K) -> Self {
             let type_id = TypeId::of::<K>();
-            let mut hasher = collections::FxHasher::default();
+            let mut hasher = FxHasher::default();
             key.hash(&mut hasher);
             Key {
                 type_id,

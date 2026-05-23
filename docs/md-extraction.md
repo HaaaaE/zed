@@ -511,3 +511,32 @@ This file tracks every batch of source files ported from Zed crates into the
   - cargo test -p md_text
   - cargo tree -p md_text --depth 1 -q
   - ./script/check-md-boundary.ps1
+
+### 2026-05-24 — R6: md_text collections dependency trim
+
+- **Source files:**
+  - crates/md_text/Cargo.toml
+  - crates/md_text/src/network.rs
+  - crates/md_text/src/text.rs
+  - docs/md-dependency-allowlist.md
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Destination files:**
+  - crates/md_text/Cargo.toml
+  - crates/md_text/src/network.rs
+  - crates/md_text/src/text.rs
+  - docs/md-dependency-allowlist.md
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Source baseline:** fork-HEAD, fourth R6 slice after utility dependency cleanup
+- **Retained capabilities:** buffer edit semantics, undo/redo maps, deferred replica tracking, test-only network simulation, debug range hashing
+- **Removed capabilities:** direct `collections` normal/dev dependency in `md_text`
+- **Hand-written replacements:**
+  - `md_text` now uses `rustc_hash::FxHashMap` / `FxHashSet` directly, preserving the concrete hash map/set behavior previously reached through Zed's `collections` aliases
+  - the test-support `Network` helper imports `std::collections::BTreeMap` directly for ordered inboxes
+  - debug range key hashing now uses `rustc_hash::FxHasher` directly instead of `collections::FxHasher`
+- **Verification:**
+  - cargo test -p md_text
+  - cargo tree -p md_text --depth 1 -q
+  - cargo check -p markdown_editor
+  - ./script/check-md-boundary.ps1

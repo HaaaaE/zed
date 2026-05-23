@@ -10655,7 +10655,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clock",
- "collections",
  "gpui",
  "log",
  "md_rope",
@@ -10664,6 +10663,7 @@ dependencies = [
  "postage",
  "rand 0.9.4",
  "regex",
+ "rustc-hash 2.1.1",
  "smallvec",
 ]
 

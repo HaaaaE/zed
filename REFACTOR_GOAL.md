@@ -843,3 +843,19 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - cargo tree -p md_text --depth 1 -q ✓
   - ./script/check-md-boundary.ps1 ✓
 - 对后续目标的影响：R6 里所有 `util` / `ztracing` / `zlog` 相关的直接依赖都已经清掉。下一步就可以集中处理剩下最核心、也最值得谨慎推进的两类依赖：`clock` 和 `collections`。
+
+### 2026-05-24 - 阶段 R6：去掉 `md_text -> collections` 直接依赖
+
+- 对应目标：继续清理 `md_text` 的 R6 直接基础设施依赖，把集合类型从 Zed `collections` crate 切换到等价社区/标准库来源。
+- 完成情况：
+  - `md_text/Cargo.toml` 已删除 `collections` normal/dev dependency，并新增直接 `rustc-hash` 依赖。
+  - `md_text/src/text.rs` 中原先来自 `collections` 的 `HashMap` / `HashSet` 已改为直接使用 `rustc_hash::FxHashMap` / `FxHashSet`，保持原 `collections` alias 的哈希实现。
+  - `md_text/src/network.rs` 的 `BTreeMap` 已改为 `std::collections::BTreeMap`，`HashSet` 改为 `rustc_hash::FxHashSet`。
+  - debug range key hashing 已从 `collections::FxHasher` 改为直接使用 `rustc_hash::FxHasher`。
+  - 当前 `cargo tree -p md_text --depth 1 -q` 直接依赖已不再包含 `collections`，仅剩 `clock` 一个原 Zed 非 GPUI 直接依赖。
+- 验收结果：
+  - cargo test -p md_text ✓
+  - cargo tree -p md_text --depth 1 -q ✓
+  - cargo check -p markdown_editor ✓
+  - ./script/check-md-boundary.ps1 ✓
+- 对后续目标的影响：R6 的 md_* 直接依赖清理现在只剩 `md_text -> clock`。下一步应把 `ReplicaId` / `Lamport` / `Global` 版本向量类型下沉到 `md_text`，或抽成产品自有 crate。
