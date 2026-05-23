@@ -23,16 +23,17 @@ struct MarkdownEditorShell {
 
 impl MarkdownEditorShell {
     fn new(path: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let (contents, error_message) = match path.as_ref() {
-            Some(path) => read_markdown_file(path)
-                .map(|contents| (contents, None))
+        let mode = MarkdownEditorMode::Source;
+        let (path, contents, error_message) = match path {
+            Some(path) => read_markdown_file(&path)
+                .map(|contents| (Some(path), contents, None))
                 .unwrap_or_else(|message| {
                     eprintln!("{message}");
-                    (String::new(), Some(message))
+                    (None, String::new(), Some(message))
                 }),
-            None => (String::new(), None),
+            None => (None, String::new(), None),
         };
-        let (editor, editor_subscription) = Self::build_editor(contents, cx);
+        let (editor, editor_subscription) = Self::build_editor(contents, mode, cx);
         window.focus(&editor.focus_handle(cx), cx);
 
         Self {
@@ -46,9 +47,14 @@ impl MarkdownEditorShell {
 
     fn build_editor(
         contents: String,
+        mode: MarkdownEditorMode,
         cx: &mut Context<Self>,
     ) -> (Entity<MarkdownEditor>, Subscription) {
-        let editor = cx.new(|cx| MarkdownEditor::for_text(contents, cx));
+        let editor = cx.new(|cx| {
+            let mut editor = MarkdownEditor::for_text(contents, cx);
+            editor.set_mode(mode, cx);
+            editor
+        });
         let editor_subscription = cx.subscribe(
             &editor,
             |this, _, event: &MarkdownEditorEvent, cx| match event {
@@ -69,7 +75,8 @@ impl MarkdownEditorShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (editor, editor_subscription) = Self::build_editor(contents, cx);
+        let mode = self.mode(cx);
+        let (editor, editor_subscription) = Self::build_editor(contents, mode, cx);
         self.editor = editor;
         self._editor_subscription = editor_subscription;
         self.path = path;

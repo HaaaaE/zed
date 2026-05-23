@@ -306,3 +306,41 @@ This file tracks every batch of source files ported from Zed crates into the
   - cargo test -p markdown_wysiwyg
   - cargo check -p markdown_editor --features md-editor --no-default-features
   - cargo check -p markdown_editor --features legacy-editor
+
+### 2026-05-23 — R3: md_editor shell state consistency follow-up
+
+- **Source files:**
+  - crates/markdown_editor/src/md_editor_app.rs  (standalone shell state hand-off follow-up)
+- **Destination files:**
+  - crates/markdown_editor/src/md_editor_app.rs
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Source baseline:** fork-HEAD, hand-written shell consistency follow-up on top of the rendered-mode and document workflow batches
+- **Retained capabilities:** Source/Rendered toggle, new/open document flow, save/save-as, dirty-state subscription, standalone GPUI shell
+- **Removed capabilities:** none
+- **Hand-written replacements:**
+  - replacing the active `MarkdownEditor` on new/open now preserves the current `MarkdownEditorMode`, so Rendered-mode verification does not silently fall back to Source after document switches
+  - startup file-open failures now clear the shell `path` instead of retaining an invalid current-document path, keeping save state and title-bar path display aligned with the actually loaded buffer
+- **Verification:**
+  - not run in this batch
+
+### 2026-05-23 — R3: md_editor rendered heading row geometry
+
+- **Source files:**
+  - crates/markdown_editor/src/legacy_editor.rs  (Rendered heading typography / row metrics reference)
+  - crates/markdown_wysiwyg/src/markdown_wysiwyg.rs  (heading block metadata reference)
+- **Destination files:**
+  - crates/md_editor/src/lib.rs
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Source baseline:** fork-HEAD, hand-written row-metrics follow-up on top of the rendered semantic styling batch
+- **Retained capabilities:** source/display projection, semantic styling, keyboard editing, mouse hit-testing, save/new/open shell flow
+- **Removed capabilities:** none
+- **Hand-written replacements:**
+  - `md_editor` now resolves a per-row `RowDisplayStyle` in Rendered mode so heading rows can increase text size, line height, minimum row height, and caret height without reintroducing Zed editor row-metrics machinery
+  - mouse hit-testing now uses the active row display style when shaping text, keeping rendered heading clicks aligned with the larger standalone typography instead of assuming the source-mode default size
+- **Verification:**
+  - cargo test -p md_editor
+  - cargo test -p markdown_wysiwyg
+  - cargo check -p markdown_editor --features md-editor --no-default-features
+  - cargo check -p markdown_editor --features legacy-editor

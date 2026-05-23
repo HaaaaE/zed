@@ -658,3 +658,28 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - cargo check -p markdown_editor --features md-editor --no-default-features ✓
   - cargo check -p markdown_editor --features legacy-editor ✓
 - 对后续目标的影响：`md_editor` 现在已经具备“projection + semantic styling + interaction”同路渲染基础，后续可以继续在这一条路径上追加 block replacement、row metrics 和 theme 抽离，而不必退回到 `legacy-editor` 的 custom highlight 体系。
+
+### 2026-05-23 - 阶段 R3：Rendered heading 行几何
+
+- 对应目标：让 `md_editor` 的 Rendered 模式不只给 heading 上色，而是开始让 heading 影响 standalone 行高、字号和 caret 几何。
+- 完成情况：
+  - `md_editor` 新增逐行 `RowDisplayStyle`，在 Rendered 模式下根据 heading level 调整 `min_height`、`text_size`、`line_height` 和 `caret_height`，普通段落与 Source 模式继续保持默认几何。
+  - 行渲染、caret 绘制和鼠标 hit-testing 现在统一消费同一份 row display style，避免 Rendered heading 放大后出现“看起来变大但点击/光标仍按默认字号计算”的偏差。
+  - 新增单测覆盖 H1/H2/default row 的几何缩放行为，确保这一批是独立可回归验证的 R3 row-metrics slice。
+- 验收结果：
+  - cargo test -p md_editor ✓
+  - cargo test -p markdown_wysiwyg ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features
+  - cargo check -p markdown_editor --features legacy-editor
+- 对后续目标的影响：`md_editor` 已经开始承接 `legacy-editor` 的 heading row metrics 责任，下一步可以继续在 standalone 渲染路径里推进 block replacement、theme 抽离和更完整的 Rendered typography，而不必再把行几何留在 Zed `editor` 侧。
+
+### 2026-05-23 - 阶段 R3：shell 状态一致性收口
+
+- 对应目标：让 standalone `md-editor` 壳层在切换文档和启动失败场景下维持与当前 buffer 一致的模式和路径状态。
+- 完成情况：
+  - `markdown_editor` 在 `NewDocument` / `OpenDocument` 替换 `MarkdownEditor` entity 时，现在会保留当前 `MarkdownEditorMode`，避免 Rendered 模式验收过程中因为壳层重建而悄悄退回 Source。
+  - 启动时若命令行传入路径加载失败，shell 会清空 `path` 并保留错误消息，而不是继续把无效路径当作当前文档路径，避免标题栏与后续保存路径状态失真。
+  - 这批没有改动编辑核心、projection 或语义样式逻辑，只是补齐 standalone shell 与已加载文档之间的状态 hand-off。
+- 验收结果：
+  - not run in this batch
+- 对后续目标的影响：后续继续验证 Rendered / Source、多文档切换和保存行为时，壳层状态更稳定，能减少“模式被重置”或“路径状态虚假有效”造成的伪问题。

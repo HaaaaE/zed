@@ -102,6 +102,14 @@ struct StyledDisplaySegment {
     style: DisplayTextStyle,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RowDisplayStyle {
+    min_height: gpui::Pixels,
+    text_size: gpui::Pixels,
+    line_height: gpui::Pixels,
+    caret_height: gpui::Pixels,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MarkdownEditorEvent {
     DirtyChanged(bool),
@@ -399,7 +407,7 @@ impl MarkdownEditor {
         self.is_selecting_with_mouse = true;
 
         let snapshot = self.buffer.snapshot();
-        let point = point_for_mouse_x(&snapshot, display_row, event.position.x, window);
+        let point = point_for_mouse_x(&snapshot, display_row, event.position.x, window, self.mode);
         self.selection = if event.modifiers.shift {
             select_to_point(&snapshot, &self.selection, point)
         } else {
@@ -420,7 +428,7 @@ impl MarkdownEditor {
         }
 
         let snapshot = self.buffer.snapshot();
-        let point = point_for_mouse_x(&snapshot, display_row, event.position.x, window);
+        let point = point_for_mouse_x(&snapshot, display_row, event.position.x, window, self.mode);
         self.selection = select_to_point(&snapshot, &self.selection, point);
         cx.notify();
     }
@@ -486,11 +494,12 @@ impl Render for MarkdownEditor {
                                 let is_cursor_row = display_row.row == cursor.row;
                                 let mouse_row = display_row.clone();
                                 let mouse_move_row = display_row.clone();
+                                let row_style = row_display_style(&snapshot, display_row.row, mode);
                                 div()
                                     .id(display_row.row as usize)
-                                    .min_h(px(22.))
+                                    .min_h(row_style.min_height)
                                     .flex()
-                                    .items_baseline()
+                                    .items_center()
                                     .when(is_cursor_row, |this| this.bg(gpui::rgba(0xffffff10)))
                                     .on_mouse_down(
                                         MouseButton::Left,
@@ -529,13 +538,16 @@ impl Render for MarkdownEditor {
                                         div()
                                             .flex_1()
                                             .flex()
-                                            .items_baseline()
+                                            .items_center()
+                                            .text_size(row_style.text_size)
+                                            .line_height(row_style.line_height)
                                             .whitespace_nowrap()
                                             .children(render_row_text(
                                                 &snapshot,
                                                 &display_row,
                                                 &selection,
                                                 mode,
+                                                row_style,
                                             )),
                                     )
                             })
@@ -933,11 +945,13 @@ fn point_for_mouse_x(
     display_row: &DisplayRow,
     x: gpui::Pixels,
     window: &mut Window,
+    mode: MarkdownEditorMode,
 ) -> Point {
     let text_x = (x - px(48.)).max(px(0.));
+    let row_style = row_display_style(snapshot, display_row.row, mode);
     let shaped_line = window.text_system().shape_line(
         SharedString::from(display_row.text.clone()),
-        px(14.),
+        row_style.text_size,
         &[TextRun {
             len: display_row.text.len(),
             font: font("Zed Mono"),
@@ -963,6 +977,7 @@ fn render_row_text(
     display_row: &DisplayRow,
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
+    row_style: RowDisplayStyle,
 ) -> Vec<gpui::AnyElement> {
     let segments = styled_display_segments(snapshot, display_row, mode);
     let selection = selection.clone();
@@ -977,23 +992,24 @@ fn render_row_text(
         } else {
             None
         };
-        return render_styled_segments(segments, None, caret_column);
+        return render_styled_segments(segments, None, caret_column, row_style);
     }
 
     let Some(selected_range) = selected_range_for_row(snapshot, display_row, &selection) else {
-        return render_styled_segments(segments, None, None);
+        return render_styled_segments(segments, None, None, row_style);
     };
     if selected_range.is_empty() {
-        return render_styled_segments(segments, None, None);
+        return render_styled_segments(segments, None, None, row_style);
     }
 
-    render_styled_segments(segments, Some(selected_range), None)
+    render_styled_segments(segments, Some(selected_range), None, row_style)
 }
 
 fn render_styled_segments(
     segments: Vec<StyledDisplaySegment>,
     selected_range: Option<Range<usize>>,
     caret_column: Option<usize>,
+    row_style: RowDisplayStyle,
 ) -> Vec<gpui::AnyElement> {
     let mut elements = Vec::new();
     let mut caret_inserted = false;
@@ -1022,7 +1038,7 @@ fn render_styled_segments(
         let mut piece_start = segment.display_range.start;
         for piece_end in split_points.into_iter().chain(std::iter::once(segment.display_range.end)) {
             if !caret_inserted && caret_column == piece_start {
-                elements.push(caret_element());
+                elements.push(caret_element(row_style));
                 caret_inserted = true;
             }
 
@@ -1040,12 +1056,12 @@ fn render_styled_segments(
     }
 
     if !caret_inserted && caret_column != usize::MAX {
-        elements.push(caret_element());
+        elements.push(caret_element(row_style));
     }
 
     if elements.is_empty() {
         if caret_column != usize::MAX {
-            return vec![caret_element()];
+            return vec![caret_element(row_style)];
         }
         return vec![SharedString::from(String::new()).into_any_element()];
     }
@@ -1053,10 +1069,10 @@ fn render_styled_segments(
     elements
 }
 
-fn caret_element() -> gpui::AnyElement {
+fn caret_element(row_style: RowDisplayStyle) -> gpui::AnyElement {
     div()
         .w(px(1.))
-        .h(px(17.))
+        .h(row_style.caret_height)
         .bg(gpui::rgb(0xf0f0f0))
         .into_any_element()
 }
@@ -1275,6 +1291,62 @@ fn heading_style(level: u8) -> DisplayTextStyle {
         }),
         ..Default::default()
     }
+}
+
+fn row_display_style(
+    snapshot: &BufferSnapshot,
+    display_row: u32,
+    mode: MarkdownEditorMode,
+) -> RowDisplayStyle {
+    if mode == MarkdownEditorMode::Rendered {
+        if let Some(level) = heading_level_for_row(snapshot, display_row) {
+            return match level {
+                1 => RowDisplayStyle {
+                    min_height: px(42.),
+                    text_size: px(28.),
+                    line_height: px(34.),
+                    caret_height: px(28.),
+                },
+                2 => RowDisplayStyle {
+                    min_height: px(34.),
+                    text_size: px(22.),
+                    line_height: px(28.),
+                    caret_height: px(22.),
+                },
+                3 => RowDisplayStyle {
+                    min_height: px(28.),
+                    text_size: px(18.),
+                    line_height: px(24.),
+                    caret_height: px(18.),
+                },
+                _ => RowDisplayStyle {
+                    min_height: px(24.),
+                    text_size: px(16.),
+                    line_height: px(22.),
+                    caret_height: px(17.),
+                },
+            };
+        }
+    }
+
+    RowDisplayStyle {
+        min_height: px(22.),
+        text_size: px(14.),
+        line_height: px(22.),
+        caret_height: px(17.),
+    }
+}
+
+fn heading_level_for_row(snapshot: &BufferSnapshot, row: u32) -> Option<u8> {
+    let source_range = row_source_range(snapshot, row);
+    let row = row as usize;
+    snapshot
+        .syntax_tree()
+        .blocks_in_source_range(source_range)
+        .find_map(|block| match block.kind {
+            MarkdownBlockKind::AtxHeading { level } if block.row_range.start == row => Some(level),
+            _ => None,
+        })
 }
 
 fn inline_style(kind: MarkdownInlineKind) -> DisplayTextStyle {
@@ -1548,6 +1620,49 @@ mod tests {
         assert_eq!(segments[1].style.font_weight, Some(FontWeight::BOLD));
         assert!(segments[3].style.text_background.is_some());
         assert_eq!(segments[3].style.color, Some(gpui::rgb(0x8fdcff).into()));
+    }
+
+    #[test]
+    fn rendered_row_display_style_scales_headings() {
+        let mut buffer = Buffer::local("# Title\n## Subtitle\nBody\n");
+        let snapshot = buffer.snapshot();
+
+        assert_eq!(
+            row_display_style(&snapshot, 0, MarkdownEditorMode::Rendered),
+            RowDisplayStyle {
+                min_height: px(42.),
+                text_size: px(28.),
+                line_height: px(34.),
+                caret_height: px(28.),
+            }
+        );
+        assert_eq!(
+            row_display_style(&snapshot, 1, MarkdownEditorMode::Rendered),
+            RowDisplayStyle {
+                min_height: px(34.),
+                text_size: px(22.),
+                line_height: px(28.),
+                caret_height: px(22.),
+            }
+        );
+        assert_eq!(
+            row_display_style(&snapshot, 2, MarkdownEditorMode::Rendered),
+            RowDisplayStyle {
+                min_height: px(22.),
+                text_size: px(14.),
+                line_height: px(22.),
+                caret_height: px(17.),
+            }
+        );
+        assert_eq!(
+            row_display_style(&snapshot, 0, MarkdownEditorMode::Source),
+            RowDisplayStyle {
+                min_height: px(22.),
+                text_size: px(14.),
+                line_height: px(22.),
+                caret_height: px(17.),
+            }
+        );
     }
 
     #[test]
