@@ -876,3 +876,24 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - cargo tree -p md_text --depth 1 -q ✓
   - ./script/check-md-boundary.ps1 ✓
 - 对后续目标的影响：R6 的 md_* 直接依赖清理已经完成。剩余非 GPUI workspace crate 均来自 GPUI / gpui_platform 闭包，应继续保留在 `docs/md-dependency-allowlist.md` 的 GPUI Closure 分节中，后续由 GPUI 闭包独立化处理。
+
+### 2026-05-24 - 最终依赖边界审计
+
+- 对应目标：证明当前 `markdown_editor` 产品线已经达到 REFACTOR 计划的依赖边界终点：产品代码和 `md_*` crate 不再直接依赖原 Zed 非 GPUI crate，剩余非 GPUI workspace crate 仅作为 GPUI / gpui_platform 闭包出现并登记在 allowlist。
+- 完成情况：
+  - `markdown_editor` 的直接依赖已收口为 `gpui`、`gpui_platform`、`md_editor`、`md_settings`、`md_theme`。
+  - `markdown_editor` / `md_*` 源码硬门禁扫描无 `editor`、`language`、`multi_buffer`、`project`、`workspace`、`settings`、`theme`、`theme_settings`、`ui`、`assets`、`icons`、`markdown` 直接 import。
+  - `script/check-md-boundary.ps1` 已验证 `markdown_editor` 与所有 `md_*` crate 可编译，`md_editor` / `markdown_wysiwyg` 测试通过，并确认每个 `markdown_editor` / `md_*` crate 的 depth-1 workspace dependency 不含非 GPUI Zed crate。
+  - `cargo tree -p markdown_editor --edges normal -q --prefix none` 当前仍出现的非 GPUI / 非 `md_*` workspace 或 tooling crate 为：`collections`、`derive_refineable`、`http_client`、`perf`、`refineable`、`scheduler`、`sum_tree`、`util`、`util_macros`、`zlog`、`ztracing`、`ztracing_macro`。这些均来自 GPUI / gpui_platform 闭包，且已在 `docs/md-dependency-allowlist.md` 登记；allowlist 缺口为空。
+  - 本轮未执行 `cargo run -p markdown_editor --bin markdown-editor` 或任何 GUI 启动命令，因为用户明确禁止启动该软件。
+- 验收结果：
+  - ./script/check-md-boundary.ps1 ✓
+  - cargo test -p md_sum_tree: 10/10 ✓
+  - cargo test -p md_rope: 24/24 ✓
+  - cargo test -p md_text: 37/37 ✓
+  - cargo test -p md_buffer: 15/15 ✓
+  - cargo test -p md_theme: 2/2 ✓
+  - cargo tree -p markdown_editor --edges normal --depth 1 -q ✓
+  - cargo tree -p md_text --edges normal --depth 1 -q ✓
+  - allowlist closure audit: missing_from_allowlist is empty ✓
+- 对后续目标的影响：依赖架构目标已经自动化验证通过；剩余人工 GUI 验证只能在允许启动软件后补做。

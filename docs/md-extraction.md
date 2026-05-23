@@ -582,3 +582,33 @@ This file tracks every batch of source files ported from Zed crates into the
   - cargo check -p markdown_editor
   - cargo tree -p md_text --depth 1 -q
   - ./script/check-md-boundary.ps1
+
+### 2026-05-24 — Final dependency boundary audit
+
+- **Source files:**
+  - REFACTOR_GOAL.md
+  - docs/md-dependency-allowlist.md
+  - script/check-md-boundary.ps1
+  - crates/markdown_editor/Cargo.toml
+  - crates/md_text/Cargo.toml
+- **Destination files:**
+  - REFACTOR_GOAL.md
+  - docs/md-extraction.md
+- **Source baseline:** fork-HEAD after the R6 direct-dependency cleanup commits
+- **Retained capabilities:** standalone markdown_editor product path, md_editor tests, markdown_wysiwyg tests, md_text/md_buffer text and file model tests
+- **Removed capabilities:** none in this audit; this entry records the verified dependency boundary after prior R6 cleanup
+- **Hand-written replacements:** none
+- **Verification:**
+  - ./script/check-md-boundary.ps1
+  - cargo test -p md_sum_tree
+  - cargo test -p md_rope
+  - cargo test -p md_text
+  - cargo test -p md_buffer
+  - cargo test -p md_theme
+  - cargo tree -p markdown_editor --edges normal --depth 1 -q
+  - cargo tree -p md_text --edges normal --depth 1 -q
+  - cargo tree -p markdown_editor --edges normal -q --prefix none plus allowlist comparison
+- **Notes:**
+  - `markdown_editor` direct dependencies are limited to `gpui`, `gpui_platform`, `md_editor`, `md_settings`, and `md_theme`.
+  - Remaining non-GPUI / non-md workspace or tooling crates in the full `markdown_editor` tree are GPUI / gpui_platform closure entries and are covered by `docs/md-dependency-allowlist.md`.
+  - GUI launch/manual runtime verification was not performed in this audit because the user explicitly forbade starting the software.
