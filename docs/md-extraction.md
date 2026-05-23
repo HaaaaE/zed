@@ -540,3 +540,45 @@ This file tracks every batch of source files ported from Zed crates into the
   - cargo tree -p md_text --depth 1 -q
   - cargo check -p markdown_editor
   - ./script/check-md-boundary.ps1
+
+### 2026-05-24 — R6: md_text clock dependency trim
+
+- **Source files:**
+  - crates/clock/src/clock.rs
+  - crates/md_text/Cargo.toml
+  - crates/md_text/src/anchor.rs
+  - crates/md_text/src/network.rs
+  - crates/md_text/src/operation_queue.rs
+  - crates/md_text/src/tests.rs
+  - crates/md_text/src/text.rs
+  - crates/md_text/src/undo_map.rs
+  - script/check-md-boundary.ps1
+  - docs/md-dependency-allowlist.md
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Destination files:**
+  - crates/md_text/Cargo.toml
+  - crates/md_text/src/clock.rs
+  - crates/md_text/src/anchor.rs
+  - crates/md_text/src/network.rs
+  - crates/md_text/src/operation_queue.rs
+  - crates/md_text/src/tests.rs
+  - crates/md_text/src/text.rs
+  - crates/md_text/src/undo_map.rs
+  - script/check-md-boundary.ps1
+  - docs/md-dependency-allowlist.md
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Source baseline:** fork-HEAD, final R6 direct-dependency slice after `collections` removal
+- **Retained capabilities:** `ReplicaId`, `Lamport`, and `Global` version-vector semantics; public `md_text::{Global, Lamport, ReplicaId}` re-exports; anchor timestamps; undo/redo version checks; wait-for-version behavior
+- **Removed capabilities:** direct `clock` dependency in `md_text`; unused `clock::system_clock` API from the Markdown text stack
+- **Hand-written replacements:**
+  - `md_text/src/clock.rs` ports the version-tracking subset from `crates/clock/src/clock.rs` into the product-owned text crate
+  - internal `clock::` references in `md_text` now resolve to `crate::clock`, while consumers still use the existing `md_text` re-exports
+  - `md_text` depends directly on `serde` because the ported `ReplicaId` and `Lamport` types keep their serialization derives
+  - `script/check-md-boundary.ps1` now checks direct depth-1 workspace dependencies for every `markdown_editor` / `md_*` crate, so future non-GPUI Zed crate reintroductions fail the boundary script instead of relying on manual review
+- **Verification:**
+  - cargo test -p md_text
+  - cargo check -p markdown_editor
+  - cargo tree -p md_text --depth 1 -q
+  - ./script/check-md-boundary.ps1

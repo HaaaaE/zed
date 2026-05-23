@@ -74,7 +74,47 @@ if ($product_dirs) {
     Write-Host "SKIP: no markdown_editor / md_* crates found" -ForegroundColor Yellow
 }
 
-# 6. (Optional/Strict) cargo tree check
+# 6. Direct dependency scan: product crates must not directly depend on
+# non-GPUI Zed workspace crates.
+Write-Host ""
+Write-Host "==> Direct workspace dependency scan (cargo tree --depth 1)" -ForegroundColor Cyan
+$allowed_workspace_pattern = '^(markdown_editor|markdown_wysiwyg|md_.+|gpui($|_.+)|gpui_platform)$'
+$product_crates = @("markdown_editor")
+$product_crates += Get-ChildItem -Directory "crates" | Where-Object { $_.Name -match "^md_" } | ForEach-Object { $_.Name }
+$direct_dependency_violations = @()
+
+foreach ($crate in $product_crates) {
+    $tree = cargo tree -p $crate --edges normal --depth 1 -q 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "FAILED: cargo tree -p $crate --edges normal --depth 1 -q" -ForegroundColor Red
+        $tree | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+        $failed = $true
+        continue
+    }
+
+    foreach ($line in $tree) {
+        if ($line -notmatch "^[\s│]*(├──|└──)\s+") {
+            continue
+        }
+
+        if ($line -match "zed\\crates\\([^\\\)]+)") {
+            $workspace_crate = $Matches[1]
+            if ($workspace_crate -notmatch $allowed_workspace_pattern) {
+                $direct_dependency_violations += "${crate}: $line"
+            }
+        }
+    }
+}
+
+if ($direct_dependency_violations) {
+    Write-Host "FAILED: direct non-GPUI Zed workspace dependencies found:" -ForegroundColor Red
+    $direct_dependency_violations | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+    $failed = $true
+} else {
+    Write-Host "OK: no direct non-GPUI Zed workspace dependencies in markdown_editor / md_* crates" -ForegroundColor Green
+}
+
+# 7. (Optional/Strict) cargo tree check
 if ($Strict) {
     Run-Check "cargo tree -p markdown_editor (check for Zed non-GPUI crates)" {
         $tree = cargo tree -p markdown_editor --edges normal -q 2>&1

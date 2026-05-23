@@ -1,7 +1,7 @@
-use std::fmt::Debug;
 use std::collections::BTreeMap;
+use std::fmt::Debug;
 
-use clock::ReplicaId;
+use crate::clock::ReplicaId;
 use rustc_hash::FxHashSet as HashSet;
 
 pub struct Network<T: Clone, R: rand::Rng> {

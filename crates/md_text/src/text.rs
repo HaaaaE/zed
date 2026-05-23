@@ -1,4 +1,5 @@
 mod anchor;
+mod clock;
 pub mod locator;
 #[cfg(any(test, feature = "test-support"))]
 pub mod network;
@@ -10,10 +11,10 @@ pub mod subscription;
 mod tests;
 mod undo_map;
 
+pub use self::clock::{Global, Lamport, ReplicaId};
 pub use anchor::*;
-pub use anyhow::Result;
 use anyhow::Context as _;
-pub use clock::{Global, Lamport, ReplicaId};
+pub use anyhow::Result;
 use locator::Locator;
 use operation_queue::OperationQueue;
 pub use patch::Patch;
@@ -132,9 +133,9 @@ fn marked_text_ranges(marked_text: &str, ranges_are_directed: bool) -> (String, 
                 current_range_start = Some(unmarked_len);
             }
             "»" => {
-                let current_range_start = current_range_start
-                    .take()
-                    .unwrap_or_else(|| panic!("unexpected range end marker '»' at index {marked_index}"));
+                let current_range_start = current_range_start.take().unwrap_or_else(|| {
+                    panic!("unexpected range end marker '»' at index {marked_index}")
+                });
 
                 let mut reversed = false;
                 if let Some(current_range_cursor) = current_range_cursor.take() {

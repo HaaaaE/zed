@@ -10654,7 +10654,6 @@ name = "md_text"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clock",
  "gpui",
  "log",
  "md_rope",
@@ -10664,6 +10663,7 @@ dependencies = [
  "rand 0.9.4",
  "regex",
  "rustc-hash 2.1.1",
+ "serde",
  "smallvec",
 ]
 

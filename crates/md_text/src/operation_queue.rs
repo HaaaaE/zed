@@ -1,4 +1,4 @@
-use clock::Lamport;
+use crate::clock::{self, Lamport};
 use std::{fmt::Debug, ops::Add};
 use sum_tree::{ContextLessSummary, Dimension, Edit, Item, KeyedItem, SumTree};
 
@@ -127,30 +127,30 @@ impl<T: Operation> KeyedItem for OperationItem<T> {
 
 #[cfg(test)]
 mod tests {
-    use clock::ReplicaId;
+    use crate::clock::ReplicaId;
 
     use super::*;
 
     #[test]
     fn test_len() {
-        let mut clock = clock::Lamport::new(ReplicaId::LOCAL);
+        let mut lamport_clock = Lamport::new(ReplicaId::LOCAL);
 
         let mut queue = OperationQueue::new();
         assert_eq!(queue.len(), 0);
 
         queue.insert(vec![
-            TestOperation(clock.tick()),
-            TestOperation(clock.tick()),
+            TestOperation(lamport_clock.tick()),
+            TestOperation(lamport_clock.tick()),
         ]);
         assert_eq!(queue.len(), 2);
 
-        queue.insert(vec![TestOperation(clock.tick())]);
+        queue.insert(vec![TestOperation(lamport_clock.tick())]);
         assert_eq!(queue.len(), 3);
 
         drop(queue.drain());
         assert_eq!(queue.len(), 0);
 
-        queue.insert(vec![TestOperation(clock.tick())]);
+        queue.insert(vec![TestOperation(lamport_clock.tick())]);
         assert_eq!(queue.len(), 1);
     }
 

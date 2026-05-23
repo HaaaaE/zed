@@ -859,3 +859,20 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - cargo check -p markdown_editor ✓
   - ./script/check-md-boundary.ps1 ✓
 - 对后续目标的影响：R6 的 md_* 直接依赖清理现在只剩 `md_text -> clock`。下一步应把 `ReplicaId` / `Lamport` / `Global` 版本向量类型下沉到 `md_text`，或抽成产品自有 crate。
+
+### 2026-05-24 - 阶段 R6：去掉 `md_text -> clock` 直接依赖
+
+- 对应目标：完成 R6 中最后一个 md_* 直接非 GPUI Zed workspace 依赖清理，让 `markdown_editor` / `md_*` 产品代码不再直接依赖 `clock`。
+- 完成情况：
+  - 新增 `md_text/src/clock.rs`，从 `crates/clock/src/clock.rs` 搬入 `ReplicaId`、`Lamport`、`Global` 和 `Seq` 版本向量子集。
+  - `md_text/Cargo.toml` 已删除 `clock` 依赖，并新增直接 `serde` 依赖以保留 `ReplicaId` / `Lamport` 的序列化 derive。
+  - `md_text` 内部 `clock::` 引用改为解析到本 crate 的 `crate::clock` 模块；对外仍通过 `md_text::{Global, Lamport, ReplicaId}` re-export 暴露，`md_buffer` / `md_editor` 调用面无需变化。
+  - 未搬 `crates/clock/src/system_clock.rs`，因为 Markdown 文本栈不使用系统时钟 trait / fake clock。
+  - `docs/md-dependency-allowlist.md` 的 GPUI Closure 分节已按当前 `cargo tree -p markdown_editor --edges normal -q` 补齐 `derive_refineable`、`util_macros`、`perf`、`ztracing_macro` 等 helper/proc-macro 传递项。
+  - 当前 `cargo tree -p md_text --depth 1 -q` 直接依赖中已不再包含任何原 Zed workspace crate。
+- 验收结果：
+  - cargo test -p md_text ✓
+  - cargo check -p markdown_editor ✓
+  - cargo tree -p md_text --depth 1 -q ✓
+  - ./script/check-md-boundary.ps1 ✓
+- 对后续目标的影响：R6 的 md_* 直接依赖清理已经完成。剩余非 GPUI workspace crate 均来自 GPUI / gpui_platform 闭包，应继续保留在 `docs/md-dependency-allowlist.md` 的 GPUI Closure 分节中，后续由 GPUI 闭包独立化处理。

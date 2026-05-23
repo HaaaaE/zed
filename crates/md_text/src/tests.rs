@@ -1,5 +1,5 @@
 use super::{network::Network, *};
-use clock::ReplicaId;
+use crate::clock::{self, ReplicaId};
 use rand::prelude::*;
 use std::{
     cmp::Ordering,
