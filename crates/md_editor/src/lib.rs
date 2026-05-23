@@ -40,35 +40,49 @@ gpui::actions!(
     ]
 );
 
+/// Construct editor keybindings from the single-source-of-truth in `md_settings`.
+///
+/// This reads `md_settings::DEFAULT_EDITOR_KEYBINDINGS` and dispatches on
+/// the action name to produce typed `gpui::KeyBinding` values.
+fn editor_keybindings() -> Vec<KeyBinding> {
+    md_settings::DEFAULT_EDITOR_KEYBINDINGS
+        .iter()
+        .map(|spec| {
+            let context = Some(spec.context);
+            match spec.action {
+                "MoveLeft" => KeyBinding::new(spec.keystroke, MoveLeft, context),
+                "MoveRight" => KeyBinding::new(spec.keystroke, MoveRight, context),
+                "MoveUp" => KeyBinding::new(spec.keystroke, MoveUp, context),
+                "MoveDown" => KeyBinding::new(spec.keystroke, MoveDown, context),
+                "MoveToBeginningOfLine" => {
+                    KeyBinding::new(spec.keystroke, MoveToBeginningOfLine, context)
+                }
+                "MoveToEndOfLine" => KeyBinding::new(spec.keystroke, MoveToEndOfLine, context),
+                "SelectLeft" => KeyBinding::new(spec.keystroke, SelectLeft, context),
+                "SelectRight" => KeyBinding::new(spec.keystroke, SelectRight, context),
+                "SelectUp" => KeyBinding::new(spec.keystroke, SelectUp, context),
+                "SelectDown" => KeyBinding::new(spec.keystroke, SelectDown, context),
+                "SelectToBeginningOfLine" => {
+                    KeyBinding::new(spec.keystroke, SelectToBeginningOfLine, context)
+                }
+                "SelectToEndOfLine" => {
+                    KeyBinding::new(spec.keystroke, SelectToEndOfLine, context)
+                }
+                "SelectAll" => KeyBinding::new(spec.keystroke, SelectAll, context),
+                "Backspace" => KeyBinding::new(spec.keystroke, Backspace, context),
+                "Delete" => KeyBinding::new(spec.keystroke, Delete, context),
+                "InsertNewline" => KeyBinding::new(spec.keystroke, InsertNewline, context),
+                "Tab" => KeyBinding::new(spec.keystroke, Tab, context),
+                "Undo" => KeyBinding::new(spec.keystroke, Undo, context),
+                "Redo" => KeyBinding::new(spec.keystroke, Redo, context),
+                _ => panic!("unknown editor action in DEFAULT_EDITOR_KEYBINDINGS: {}", spec.action),
+            }
+        })
+        .collect()
+}
+
 pub fn init_standalone(cx: &mut App) {
-    cx.bind_keys([
-        KeyBinding::new("left", MoveLeft, Some("MarkdownEditor")),
-        KeyBinding::new("right", MoveRight, Some("MarkdownEditor")),
-        KeyBinding::new("up", MoveUp, Some("MarkdownEditor")),
-        KeyBinding::new("down", MoveDown, Some("MarkdownEditor")),
-        KeyBinding::new("home", MoveToBeginningOfLine, Some("MarkdownEditor")),
-        KeyBinding::new("end", MoveToEndOfLine, Some("MarkdownEditor")),
-        KeyBinding::new("shift-left", SelectLeft, Some("MarkdownEditor")),
-        KeyBinding::new("shift-right", SelectRight, Some("MarkdownEditor")),
-        KeyBinding::new("shift-up", SelectUp, Some("MarkdownEditor")),
-        KeyBinding::new("shift-down", SelectDown, Some("MarkdownEditor")),
-        KeyBinding::new(
-            "shift-home",
-            SelectToBeginningOfLine,
-            Some("MarkdownEditor"),
-        ),
-        KeyBinding::new("shift-end", SelectToEndOfLine, Some("MarkdownEditor")),
-        KeyBinding::new("ctrl-a", SelectAll, Some("MarkdownEditor")),
-        KeyBinding::new("cmd-a", SelectAll, Some("MarkdownEditor")),
-        KeyBinding::new("backspace", Backspace, Some("MarkdownEditor")),
-        KeyBinding::new("delete", Delete, Some("MarkdownEditor")),
-        KeyBinding::new("enter", InsertNewline, Some("MarkdownEditor")),
-        KeyBinding::new("tab", Tab, Some("MarkdownEditor")),
-        KeyBinding::new("ctrl-z", Undo, Some("MarkdownEditor")),
-        KeyBinding::new("cmd-z", Undo, Some("MarkdownEditor")),
-        KeyBinding::new("ctrl-shift-z", Redo, Some("MarkdownEditor")),
-        KeyBinding::new("cmd-shift-z", Redo, Some("MarkdownEditor")),
-    ]);
+    cx.bind_keys(editor_keybindings());
 }
 
 pub struct MarkdownEditor {

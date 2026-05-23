@@ -311,23 +311,33 @@ impl Render for MarkdownEditorShell {
     }
 }
 
+/// Construct app-level keybindings from the single-source-of-truth in `md_settings`.
+///
+/// This reads `md_settings::DEFAULT_APP_KEYBINDINGS` and dispatches on
+/// the action name to produce typed `gpui::KeyBinding` values.
+fn app_keybindings() -> Vec<KeyBinding> {
+    md_settings::DEFAULT_APP_KEYBINDINGS
+        .iter()
+        .map(|spec| {
+            let context = Some(spec.context);
+            match spec.action {
+                "NewDocument" => KeyBinding::new(spec.keystroke, NewDocument, context),
+                "OpenDocument" => KeyBinding::new(spec.keystroke, OpenDocument, context),
+                "ToggleMode" => KeyBinding::new(spec.keystroke, ToggleMode, context),
+                "Save" => KeyBinding::new(spec.keystroke, Save, context),
+                "SaveAs" => KeyBinding::new(spec.keystroke, SaveAs, context),
+                _ => panic!("unknown app action in DEFAULT_APP_KEYBINDINGS: {}", spec.action),
+            }
+        })
+        .collect()
+}
+
 pub fn run() {
     let path = env::args_os().nth(1).map(PathBuf::from);
 
     gpui_platform::application().run(move |cx| {
         init_standalone(cx);
-        cx.bind_keys([
-            KeyBinding::new("ctrl-n", NewDocument, Some("MarkdownEditor")),
-            KeyBinding::new("cmd-n", NewDocument, Some("MarkdownEditor")),
-            KeyBinding::new("ctrl-o", OpenDocument, Some("MarkdownEditor")),
-            KeyBinding::new("cmd-o", OpenDocument, Some("MarkdownEditor")),
-            KeyBinding::new("ctrl-shift-m", ToggleMode, Some("MarkdownEditor")),
-            KeyBinding::new("cmd-shift-m", ToggleMode, Some("MarkdownEditor")),
-            KeyBinding::new("ctrl-s", Save, Some("MarkdownEditor")),
-            KeyBinding::new("cmd-s", Save, Some("MarkdownEditor")),
-            KeyBinding::new("ctrl-shift-s", SaveAs, Some("MarkdownEditor")),
-            KeyBinding::new("cmd-shift-s", SaveAs, Some("MarkdownEditor")),
-        ]);
+        cx.bind_keys(app_keybindings());
 
         let path = path.clone();
         match cx.open_window(WindowOptions::default(), move |window, cx| {

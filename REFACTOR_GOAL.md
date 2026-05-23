@@ -746,3 +746,18 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - cargo check -p markdown_editor ✓
   - 边界扫描：md_* crate 无直接 Zed 非 GPUI crate import ✓
 - 对后续目标的影响：`md_editor` 现在真正消费 `md_settings` 和 `md_theme` 的常量/配置，行几何和 tab 行为不再是硬编码魔法数字。R4 剩余工作包括：把 `init_standalone` / `md_editor_app.rs` 中的 keybinding 定义迁入 `md_settings` 常量消费、在 `md_assets` 上扩展字体/主题资产加载、以及最终去掉 `markdown_editor` 对 Zed `theme` / `settings` crate 的编译期依赖。
+
+### 2026-05-23 - 阶段 R4：keybinding 定义迁入 `md_settings` 常量消费
+
+- 对应目标：把 `md_editor::init_standalone` 和 `md_editor_app.rs::run()` 中硬编码的 `KeyBinding::new()` 调用迁入 `md_settings` 常量驱动，让按键定义的单一事实来源落在 `md_settings`。
+- 完成情况：
+  - `md_settings` 新增 `KeyBindingSpec` 结构体（`keystroke: &'static str`, `action: &'static str`, `context: &'static str`）和 `DEFAULT_EDITOR_KEYBINDINGS`（22 条）/ `DEFAULT_APP_KEYBINDINGS`（10 条）常量数组，替代原有字符串常量。
+  - `md_editor` 新增 `editor_keybindings()` 辅助函数，逐条读取 `DEFAULT_EDITOR_KEYBINDINGS` 并按 action 名 match 到具体 action 类型（`MoveLeft` 等），构造 `Vec<KeyBinding>`。`init_standalone` 改为调用 `cx.bind_keys(editor_keybindings())`。
+  - `markdown_editor` 新增 `app_keybindings()` 辅助函数，逐条读取 `DEFAULT_APP_KEYBINDINGS` 并按 action 名 match 到具体 action 类型（`NewDocument` 等），构造 `Vec<KeyBinding>`。`run()` 改为调用 `cx.bind_keys(app_keybindings())`。
+  - 设计选择：`KeyBinding::new` 需要具体 `Action` 类型参数，而 action 类型定义在 `md_editor` / `markdown_editor`，`md_settings` 不能反向依赖。因此采用「数据在 `md_settings`，构造在使用方」模式：`KeyBindingSpec` 存纯字符串数据，消费方按 action 名 match 到具体类型来构建 `KeyBinding`。这避免了循环依赖，同时保证按键映射的单一事实来源在 `md_settings`。
+- 验收结果：
+  - cargo check -p md_editor -p markdown_editor ✓
+  - cargo test -p md_editor: 27/27 ✓
+  - cargo test -p markdown_wysiwyg: 11/11 ✓
+  - 边界扫描：md_* crate 无直接 Zed 非 GPUI crate import ✓
+- 对后续目标的影响：keybinding 定义现在已从硬编码 `KeyBinding::new()` 调用迁入 `md_settings` 常量驱动。R4 剩余工作包括：在 `md_assets` 上扩展字体/主题资产加载、以及最终去掉 `markdown_editor` 对 Zed `theme` / `settings` crate 的编译期依赖。
