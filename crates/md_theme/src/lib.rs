@@ -1,6 +1,5 @@
 use gpui::{Hsla, Pixels, px};
-
-pub const EDITOR_FONT_FAMILY: &str = "Zed Mono";
+use md_settings::{DEFAULT_CARET_HEIGHT, DEFAULT_LINE_HEIGHT, DEFAULT_MIN_ROW_HEIGHT, DEFAULT_TEXT_SIZE};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RowMetrics {
@@ -92,10 +91,10 @@ pub fn title_bar_height() -> Pixels {
 
 pub fn default_row_metrics() -> RowMetrics {
     RowMetrics {
-        min_height: px(22.),
-        text_size: px(14.),
-        line_height: px(22.),
-        caret_height: px(17.),
+        min_height: px(DEFAULT_MIN_ROW_HEIGHT),
+        text_size: px(DEFAULT_TEXT_SIZE),
+        line_height: px(DEFAULT_LINE_HEIGHT),
+        caret_height: px(DEFAULT_CARET_HEIGHT),
     }
 }
 

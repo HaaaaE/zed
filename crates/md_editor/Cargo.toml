@@ -18,3 +18,5 @@ md_buffer.workspace = true
 md_text.workspace = true
 markdown_wysiwyg.workspace = true
 md_theme.workspace = true
+md_assets.workspace = true
+md_settings.workspace = true

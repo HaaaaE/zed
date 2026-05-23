@@ -9,8 +9,10 @@ use gpui::{
 use markdown_wysiwyg::{MarkdownBlockKind, MarkdownInlineKind, MarkdownProjectionMap};
 use md_buffer::{Buffer, BufferSnapshot};
 use md_text::{Bias, Point, Selection, SelectionGoal};
+use md_assets::EDITOR_FONT_FAMILY;
+use md_settings::EditorSettings;
 use md_theme::{
-    EDITOR_FONT_FAMILY, default_row_metrics, editor_palette, gutter_width, heading_row_metrics,
+    default_row_metrics, editor_palette, gutter_width, heading_row_metrics,
 };
 
 gpui::actions!(
@@ -32,6 +34,7 @@ gpui::actions!(
         Backspace,
         Delete,
         InsertNewline,
+        Tab,
         Undo,
         Redo,
     ]
@@ -60,6 +63,7 @@ pub fn init_standalone(cx: &mut App) {
         KeyBinding::new("backspace", Backspace, Some("MarkdownEditor")),
         KeyBinding::new("delete", Delete, Some("MarkdownEditor")),
         KeyBinding::new("enter", InsertNewline, Some("MarkdownEditor")),
+        KeyBinding::new("tab", Tab, Some("MarkdownEditor")),
         KeyBinding::new("ctrl-z", Undo, Some("MarkdownEditor")),
         KeyBinding::new("cmd-z", Undo, Some("MarkdownEditor")),
         KeyBinding::new("ctrl-shift-z", Redo, Some("MarkdownEditor")),
@@ -74,6 +78,7 @@ pub struct MarkdownEditor {
     selection: Selection<Point>,
     is_selecting_with_mouse: bool,
     selection_history: HashMap<md_text::TransactionId, TransactionSelectionState>,
+    settings: EditorSettings,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -176,6 +181,7 @@ impl MarkdownEditor {
             selection: collapsed_selection(Point::zero()),
             is_selecting_with_mouse: false,
             selection_history: HashMap::default(),
+            settings: EditorSettings::default(),
         }
     }
 
@@ -358,12 +364,39 @@ impl MarkdownEditor {
 
     pub fn insert_newline(&mut self, _: &InsertNewline, _: &mut Window, cx: &mut Context<Self>) {
         let selection_before = self.selection.clone();
+        let current_line_indent = current_line_indent(&self.buffer.snapshot(), self.cursor());
+        let insert_text = format!("\n{current_line_indent}");
         let (selection, transaction_id) =
-            replace_selection(&mut self.buffer, &self.selection, "\n");
+            replace_selection(&mut self.buffer, &self.selection, &insert_text);
         let changed = transaction_id.is_some();
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(changed, cx);
+    }
+
+    pub fn tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
+        let selection_before = self.selection.clone();
+        let tab_text = if self.settings.use_soft_tabs {
+            " ".repeat(self.settings.tab_size)
+        } else {
+            "\t".to_string()
+        };
+        let (selection, transaction_id) =
+            replace_selection(&mut self.buffer, &self.selection, &tab_text);
+        let changed = transaction_id.is_some();
+        self.selection = selection;
+        self.record_selection_history(transaction_id, selection_before, self.selection.clone());
+        self.notify_after_edit(changed, cx);
+    }
+
+    /// Update editor settings at runtime.
+    pub fn set_settings(&mut self, settings: EditorSettings, _cx: &mut Context<Self>) {
+        self.settings = settings;
+    }
+
+    /// Get a reference to the current editor settings.
+    pub fn settings(&self) -> &EditorSettings {
+        &self.settings
     }
 
     pub fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
@@ -523,6 +556,7 @@ impl Render for MarkdownEditor {
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::insert_newline))
+            .on_action(cx.listener(Self::tab))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .on_key_down(cx.listener(Self::key_down))
@@ -994,6 +1028,16 @@ fn point_for_row_and_column(snapshot: &BufferSnapshot, row: u32, column: u32) ->
         .max(row_start);
 
     text_snapshot.offset_to_point(target)
+}
+
+/// Compute the leading whitespace (indent) of the line containing the given cursor position.
+/// Returns a string of spaces and/or tabs from the start of the line up to the first
+/// non-whitespace character.
+pub fn current_line_indent(snapshot: &BufferSnapshot, cursor: Point) -> String {
+    let text = row_text(snapshot, cursor.row);
+    text.chars()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .collect()
 }
 
 fn point_for_mouse_x(
@@ -2058,5 +2102,63 @@ mod tests {
         assert_eq!(buffer.text(), "aef");
         assert_eq!(selection, collapsed_selection(Point::new(0, 1)));
         assert!(transaction_id.is_some());
+    }
+
+    #[test]
+    fn tab_inserts_soft_tab_spaces() {
+        let mut buffer = Buffer::local("ab");
+        let selection = collapsed_selection(Point::new(0, 1));
+
+        // Soft tabs: tab_size=4 → insert 4 spaces
+        let tab_text = "    "; // 4 spaces
+        let (selection, transaction_id) =
+            replace_selection(&mut buffer, &selection, tab_text);
+
+        assert_eq!(buffer.text(), "a    b");
+        assert_eq!(selection, collapsed_selection(Point::new(0, 5)));
+        assert!(transaction_id.is_some());
+    }
+
+    #[test]
+    fn tab_inserts_hard_tab_character() {
+        let mut buffer = Buffer::local("ab");
+        let selection = collapsed_selection(Point::new(0, 1));
+
+        let (_selection, transaction_id) =
+            replace_selection(&mut buffer, &selection, "\t");
+
+        assert_eq!(buffer.text(), "a\tb");
+        assert!(transaction_id.is_some());
+    }
+
+    #[test]
+    fn auto_indent_preserves_current_line_indent_on_newline() {
+        let mut buffer = Buffer::local("    hello");
+        let cursor = Point::new(0, 7); // after 'l' in 'hello'
+        let indent = current_line_indent(&buffer.snapshot(), cursor);
+
+        assert_eq!(indent, "    "); // 4 spaces preserved
+
+        // Simulating InsertNewline: "\n" + indent
+        let selection = collapsed_selection(cursor);
+        let insert_text = format!("\n{indent}");
+        let (selection, _) = replace_selection(&mut buffer, &selection, &insert_text);
+
+        assert_eq!(buffer.text(), "    hel\n    lo");
+        assert_eq!(selection, collapsed_selection(Point::new(1, 4)));
+    }
+
+    #[test]
+    fn auto_indent_no_indent_for_unindented_line() {
+        let mut buffer = Buffer::local("hello");
+        let cursor = Point::new(0, 3);
+        let indent = current_line_indent(&buffer.snapshot(), cursor);
+
+        assert_eq!(indent, "");
+
+        let selection = collapsed_selection(cursor);
+        let (_selection, _) = replace_selection(&mut buffer, &selection, "\n");
+
+        assert_eq!(buffer.text(), "hel\nlo");
     }
 }

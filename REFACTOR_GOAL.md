@@ -711,3 +711,38 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - cargo test -p md_editor ✓
   - cargo check -p markdown_editor --features md-editor --no-default-features ✓
 - 对后续目标的影响：后续继续推进 R4 时，可以在 `md_theme` 上继续承接更完整的 typography / highlight / assets 配置，而不必先回头拆散 `md_editor` 和 shell 里的硬编码视觉常量。
+
+### 2026-05-23 - 阶段 R4：`md_settings` / `md_assets` 最小填充 + 默认 feature 切换
+
+- 对应目标：继续推进 R4，给 `md_settings` 和 `md_assets` 填入最小产品常量，并把 `markdown_editor` 的默认 feature 从 `legacy-editor` 切换为 `md-editor`，让 standalone 路径成为默认编译目标。
+- 完成情况：
+  - `md_settings` 已填充最小 `EditorSettings`（tab_size=4, use_soft_tabs=true）和 `MarkdownSettings::load_defaults()`，后续可扩展 JSON 配置加载。
+  - `md_assets` 已填充最小常量：`EDITOR_FONT_FAMILY`（Zed Mono）、`UI_FONT_FAMILY`（Zed Sans）、`DEFAULT_THEME_NAME`（One Dark），后续可扩展实际字体/主题资产加载。
+  - `markdown_editor/Cargo.toml` 的 `default` feature 从 `["legacy-editor"]` 改为 `["md-editor"]`；`legacy-editor` 仍保留为可选 feature。
+- 验收结果：
+  - cargo check -p md_settings ✓
+  - cargo check -p md_assets ✓
+  - cargo test -p md_editor: 23/23 ✓
+  - cargo test -p markdown_wysiwyg: 11/11 ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+  - cargo check -p markdown_editor --features legacy-editor --no-default-features ✓
+- 对后续目标的影响：R4 基础基础设施（`md_theme`、`md_settings`、`md_assets`）已就位，默认编译路径已切换到 standalone `md-editor`。`md_editor` 已接入 `md_assets` 常量作为字体来源。下一步可以继续做 `md_editor` 接入 `md_settings`（如 tab/soft-tab 行为），或在 `md_assets` 上扩展字体/主题加载，同时保持 `legacy-editor` 作为对照路径可用。
+
+### 2026-05-23 - 阶段 R4：`md_editor` 消费 `md_settings` — Tab / auto-indent / 行几何常量收口
+
+- 对应目标：让 `md_editor` 真正消费 `md_settings::EditorSettings`（tab/soft-tab 行为、auto-indent on newline），同时把 `md_theme` 中残留的硬编码行几何常量迁入 `md_settings`。
+- 完成情况：
+  - `md_settings` 新增 `DEFAULT_TAB_SIZE=4`、`DEFAULT_TEXT_SIZE=14.0`、`DEFAULT_LINE_HEIGHT=22.0`、`DEFAULT_CARET_HEIGHT=17.0`、`DEFAULT_MIN_ROW_HEIGHT=22.0` 常量，以及 `DEFAULT_EDITOR_KEYMAP` / `DEFAULT_APP_KEYMAP` 文档字符串常量。
+  - `md_settings::EditorSettings::default()` 现在用 `DEFAULT_TAB_SIZE` 而非硬编码 `4`。
+  - `md_theme` 新增 `md_settings` 依赖；`default_row_metrics()` 改为从 `md_settings` 读取 `DEFAULT_MIN_ROW_HEIGHT` / `DEFAULT_TEXT_SIZE` / `DEFAULT_LINE_HEIGHT` / `DEFAULT_CARET_HEIGHT`，而非内嵌 `px(22.)` / `px(14.)` 等魔法数字。
+  - `md_editor` 新增 `Tab` action + `tab` keybinding；`tab()` 方法根据 `settings.use_soft_tabs` 决定插入空格或 `\t`，空格数由 `settings.tab_size` 控制。
+  - `md_editor::insert_newline()` 现在调用 `current_line_indent()` 实现 auto-indent：新行会自动保留当前行的前导空白缩进。
+  - `md_editor` struct 新增 `settings: EditorSettings` 字段，`new()` 初始化为 `EditorSettings::default()`，新增 `set_settings()` / `settings()` 方法支持运行时更新。
+  - 新增 `current_line_indent()` free function（取 BufferSnapshot 当前行前导空白），附 4 个单测覆盖 soft-tab / hard-tab / auto-indent / no-indent 场景。
+- 验收结果：
+  - cargo check -p md_settings / md_theme / md_editor ✓
+  - cargo test -p md_editor: 27/27 ✓
+  - cargo test -p markdown_wysiwyg: 11/11 ✓
+  - cargo check -p markdown_editor ✓
+  - 边界扫描：md_* crate 无直接 Zed 非 GPUI crate import ✓
+- 对后续目标的影响：`md_editor` 现在真正消费 `md_settings` 和 `md_theme` 的常量/配置，行几何和 tab 行为不再是硬编码魔法数字。R4 剩余工作包括：把 `init_standalone` / `md_editor_app.rs` 中的 keybinding 定义迁入 `md_settings` 常量消费、在 `md_assets` 上扩展字体/主题资产加载、以及最终去掉 `markdown_editor` 对 Zed `theme` / `settings` crate 的编译期依赖。

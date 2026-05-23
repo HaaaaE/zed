@@ -13,7 +13,7 @@ name = "markdown-editor"
 path = "src/main.rs"
 
 [features]
-default = ["legacy-editor"]
+default = ["md-editor"]
 legacy-editor = [
     "dep:assets",
     "dep:clock",

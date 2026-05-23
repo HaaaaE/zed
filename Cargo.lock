@@ -10632,7 +10632,9 @@ version = "0.1.0"
 dependencies = [
  "gpui",
  "markdown_wysiwyg",
+ "md_assets",
  "md_buffer",
+ "md_settings",
  "md_text",
  "md_theme",
 ]
@@ -10700,6 +10702,7 @@ name = "md_theme"
 version = "0.1.0"
 dependencies = [
  "gpui",
+ "md_settings",
 ]
 
 [[package]]
