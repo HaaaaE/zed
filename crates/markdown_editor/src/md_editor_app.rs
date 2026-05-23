@@ -155,6 +155,12 @@ impl MarkdownEditorShell {
         cx.notify();
     }
 
+    fn set_mode(&mut self, mode: MarkdownEditorMode, cx: &mut Context<Self>) {
+        self.editor
+            .update(cx, |editor, cx| editor.set_mode(mode, cx));
+        cx.notify();
+    }
+
     fn save(&mut self, _: &Save, window: &mut Window, cx: &mut Context<Self>) {
         if self.path.is_none() {
             self.save_as(&SaveAs, window, cx);
@@ -225,7 +231,7 @@ impl MarkdownEditorShell {
     }
 
     fn render_title_bar(&self, cx: &Context<Self>) -> impl IntoElement {
-        let mode_label = self.mode(cx).label();
+        let mode = self.mode(cx);
         let palette = shell_palette();
         div()
             .h(title_bar_height())
@@ -271,15 +277,69 @@ impl MarkdownEditorShell {
                             })
                             .child(SharedString::from(self.status_label())),
                     )
-                    .child(div().text_xs().text_color(palette.secondary_text).child(
-                        SharedString::from(format!(
-                            "{} · {} · Ctrl/Cmd+S",
-                            self.title(),
-                            mode_label
-                        )),
-                    )),
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(palette.secondary_text)
+                            .child(SharedString::from(format!("{} · Ctrl/Cmd+S", self.title()))),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .border_1()
+                            .border_color(palette.title_bar_border)
+                            .rounded_md()
+                            .overflow_hidden()
+                            .child(mode_button(
+                                "Source",
+                                mode == MarkdownEditorMode::Source,
+                                palette,
+                                MarkdownEditorMode::Source,
+                                cx,
+                            ))
+                            .child(mode_button(
+                                "Rendered",
+                                mode == MarkdownEditorMode::Rendered,
+                                palette,
+                                MarkdownEditorMode::Rendered,
+                                cx,
+                            )),
+                    ),
             )
     }
+}
+
+fn mode_button(
+    label: &'static str,
+    is_active: bool,
+    palette: md_theme::ShellPalette,
+    mode: MarkdownEditorMode,
+    cx: &Context<MarkdownEditorShell>,
+) -> impl IntoElement {
+    div()
+        .id(match mode {
+            MarkdownEditorMode::Source => "markdown-mode-source-button",
+            MarkdownEditorMode::Rendered => "markdown-mode-rendered-button",
+        })
+        .px_2()
+        .py_1()
+        .text_xs()
+        .cursor_pointer()
+        .bg(if is_active {
+            gpui::rgba(0xffffff1c)
+        } else {
+            gpui::rgba(0xffffff00)
+        })
+        .text_color(if is_active {
+            palette.title_text
+        } else {
+            palette.secondary_text
+        })
+        .child(label)
+        .on_click(cx.listener(move |this, _, _window, cx| {
+            this.set_mode(mode, cx);
+        }))
 }
 
 impl Render for MarkdownEditorShell {
@@ -326,7 +386,10 @@ fn app_keybindings() -> Vec<KeyBinding> {
                 "ToggleMode" => KeyBinding::new(spec.keystroke, ToggleMode, context),
                 "Save" => KeyBinding::new(spec.keystroke, Save, context),
                 "SaveAs" => KeyBinding::new(spec.keystroke, SaveAs, context),
-                _ => panic!("unknown app action in DEFAULT_APP_KEYBINDINGS: {}", spec.action),
+                _ => panic!(
+                    "unknown app action in DEFAULT_APP_KEYBINDINGS: {}",
+                    spec.action
+                ),
             }
         })
         .collect()
