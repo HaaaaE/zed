@@ -19,16 +19,8 @@ rayon.workspace = true
 # alias md_sum_tree as 'sum_tree' so copied source needs no edits
 sum_tree = { path = "../md_sum_tree", package = "md_sum_tree" }
 unicode-segmentation.workspace = true
-util.workspace = true
-ztracing.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-ctor.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 rand.workspace = true
-util = { workspace = true, features = ["test-support"] }
-zlog.workspace = true
-
-[package.metadata.cargo-machete]
-ignored = ["tracing"]

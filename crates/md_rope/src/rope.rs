@@ -12,7 +12,7 @@ use std::{
     str,
 };
 use sum_tree::{Bias, Dimension, Dimensions, SumTree};
-use ztracing::instrument;
+use tracing::instrument;
 
 pub use chunk::{Chunk, ChunkSlice};
 pub use offset_utf16::OffsetUtf16;
@@ -21,6 +21,49 @@ pub use point_utf16::PointUtf16;
 pub use unclipped::Unclipped;
 
 use crate::chunk::Bitmap;
+
+#[cfg(test)]
+pub(crate) struct RandomCharIter<T: rand::Rng> {
+    rng: T,
+    simple_text: bool,
+}
+
+#[cfg(test)]
+impl<T: rand::Rng> RandomCharIter<T> {
+    pub(crate) fn new(rng: T) -> Self {
+        Self {
+            rng,
+            simple_text: std::env::var("SIMPLE_TEXT").is_ok_and(|value| !value.is_empty()),
+        }
+    }
+}
+
+#[cfg(test)]
+impl<T: rand::Rng> Iterator for RandomCharIter<T> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        use rand::prelude::IndexedRandom;
+
+        if self.simple_text {
+            return if self.rng.random_range(0..100) < 5 {
+                Some('\n')
+            } else {
+                Some(self.rng.random_range(b'a'..b'z' + 1).into())
+            };
+        }
+
+        match self.rng.random_range(0..100) {
+            0..=19 => [' ', '\n', '\r', '\t'].choose(&mut self.rng).copied(),
+            20..=32 => char::from_u32(self.rng.random_range(('α' as u32)..('ω' as u32 + 1))),
+            33..=45 => ['✋', '✅', '❌', '❎', '⭐']
+                .choose(&mut self.rng)
+                .copied(),
+            46..=58 => ['🍐', '🏀', '🍗', '🎉'].choose(&mut self.rng).copied(),
+            _ => Some(self.rng.random_range(b'a'..b'z' + 1).into()),
+        }
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct Rope {
@@ -1730,12 +1773,6 @@ mod tests {
     use Bias::{Left, Right};
     use rand::prelude::*;
     use std::{cmp::Ordering, env, io::Read};
-    use util::RandomCharIter;
-
-    #[ctor::ctor]
-    fn init_logger() {
-        zlog::init_test();
-    }
 
     #[test]
     fn test_all_4_byte_chars() {

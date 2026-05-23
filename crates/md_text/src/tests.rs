@@ -10,12 +10,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(test)]
-#[ctor::ctor]
-fn init_logger() {
-    zlog::init_test();
-}
-
 #[test]
 fn test_edit() {
     let mut buffer = Buffer::new(ReplicaId::LOCAL, BufferId::new(1).unwrap(), "abc");

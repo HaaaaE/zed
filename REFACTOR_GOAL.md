@@ -761,3 +761,85 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - cargo test -p markdown_wysiwyg: 11/11 ✓
   - 边界扫描：md_* crate 无直接 Zed 非 GPUI crate import ✓
 - 对后续目标的影响：keybinding 定义现在已从硬编码 `KeyBinding::new()` 调用迁入 `md_settings` 常量驱动。R4 剩余工作包括：在 `md_assets` 上扩展字体/主题资产加载、以及最终去掉 `markdown_editor` 对 Zed `theme` / `settings` crate 的编译期依赖。
+
+### 2026-05-23 - 阶段 R4：md-editor feature 对 Zed theme/settings 编译期依赖审计与清除验收
+
+- 对应目标：确认并切断 `markdown_editor` md-editor feature 对 Zed `theme`/`settings`/`theme_settings` 的编译期依赖——这是 R4 的核心验收条件。
+- 完成情况：
+  - 运行 `cargo tree -p markdown_editor --features md-editor --no-default-features --edges normal` 确认 md-editor feature path **不再包含** `editor`、`language`、`multi_buffer`、`project`、`workspace`、`settings`、`theme`、`theme_settings`、`ui`、`assets`、`icons`、`markdown`——R4 硬门禁全部通过。
+  - 直接依赖层已完全切换为 `md_*` + `gpui` + `gpui_platform` + `markdown_wysiwyg` + `anyhow` + `futures`，无任何原 Zed 业务 crate。
+  - 产品代码硬门禁 `rg` 扫描确认 `md_*` crate 和 `md_editor_app.rs` 无直接 Zed 非 GPUI crate import。
+  - `md_*` 底层 crate（`md_text`、`md_rope`、`md_sum_tree`）仍直接依赖 `clock`、`collections`、`util`、`ztracing`/`zlog`——这些是从 Zed 搬来的源码的编译依赖，属于基础设施 crate（不是 IDE 业务 crate），已登记在 `docs/md-dependency-allowlist.md` 的 `md_* Direct Dependencies` 和 `GPUI Closure` 两节，R6 处理。
+  - `docs/md-dependency-allowlist.md` 已更新：新增 `md_* Direct Dependencies` 分节区分 md_* 直接拉入与 GPUI 闭包传递；新增 `Cleared from md-editor feature path` 分节记录已从 md-editor 路径清除的 12 个原 Zed IDE crate；`GPUI Closure` 分节补充了 `util`、`refineable`、`ztracing`、`zlog` 等此前遗漏的条目。
+- 验收结果：
+  - cargo tree -p markdown_editor --features md-editor --no-default-features 无 `editor` / `language` / `project` / `workspace` / `settings` / `theme` / `theme_settings` ✓
+  - 产品代码硬门禁 rg 无结果 ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+  - docs/md-dependency-allowlist.md 已更新 ✓
+- 对后续目标的影响：R4 硬门禁已通过——md-editor feature path 无 Zed IDE 业务 crate 编译期依赖。R4 剩余工作（`md_assets` 扩展字体/主题资产加载）不再是验收阻塞项。R5 可开始删除 `legacy-editor` feature 路径及相关依赖。R6 处理 `clock`/`collections`/`util`/`ztracing` 等 md_* 底层基础设施依赖的独立化。
+
+### 2026-05-24 - 阶段 R5：删除 `legacy-editor` 路径并收口默认入口
+
+- 对应目标：完成 R5 的核心收口，把 `markdown_editor` 从“默认走 standalone、但仍保留 legacy 对照路径”推进到“只保留 standalone `md_editor` 产品线”。
+- 完成情况：
+  - `crates/markdown_editor/Cargo.toml` 已删除 `legacy-editor` / `md-editor` feature gate，以及 `assets`、`editor`、`language`、`multi_buffer`、`settings`、`theme`、`theme_settings`、`ui`、`markdown`、`http_client`、`smol`、`ureq`、`http` 等迁移期遗留直接依赖。
+  - `markdown_editor` 现在只保留 `gpui`、`gpui_platform`、`md_editor`、`md_settings`、`md_theme` 五个直接依赖；`src/main.rs` 也从双轨 dispatcher 收口为无条件启动 `md_editor_app::run()`。
+  - `crates/markdown_editor/src/legacy_editor.rs` 已删除，legacy Zed editor shell 不再参与编译。
+  - `script/check-md-boundary.ps1` 已改为验证当前默认产品路径：`cargo check -p markdown_editor`、`cargo test -p md_editor`，并把 import 边界扫描范围扩展到 `crates/markdown_editor` + `crates/md_*`，不再继续编译已删除的 legacy feature path。
+  - `docs/md-dependency-allowlist.md` 的作用域已更新为默认 `cargo tree -p markdown_editor --edges normal -q` 路径，并明确 `legacy-editor` 仅保留历史记录、不再存在于当前编译图中。
+- 验收结果：
+  - cargo check -p markdown_editor ✓
+  - cargo test -p md_editor ✓
+  - cargo test -p markdown_wysiwyg ✓
+  - ./script/check-md-boundary.ps1 ✓
+- 对后续目标的影响：R5 的“删除 `legacy-editor` 路径与无用依赖”已经完成；后续主线可以集中到 R6，把 `md_text` / `md_rope` / `md_sum_tree` 仍保留的 `clock`、`collections`、`util`、`ztracing`、`zlog` 等基础设施依赖继续独立化。
+
+### 2026-05-24 - 阶段 R6：去掉 `ztracing` / `zlog` 基础设施依赖
+
+- 对应目标：从最小风险的基础设施依赖开始继续 R6，先移除不影响文本/版本语义的 tracing 和测试日志包装层。
+- 完成情况：
+  - `md_sum_tree` 与 `md_rope` 已从 `ztracing::instrument` 切换到直接使用 `tracing::instrument`，对应 `Cargo.toml` 里的 `ztracing` 直接依赖已删除。
+  - `md_sum_tree`、`md_rope`、`md_text` 测试里原有的 `zlog::init_test()` + `#[ctor::ctor]` 初始化钩子已删除；三个 crate 的 dev-dependencies 里不再保留 `zlog` 或 `ctor`。
+  - `cargo tree --depth 1` 现状：
+    - `md_sum_tree` 直接依赖只剩 `heapless`、`rayon`、`log`、`tracing`
+    - `md_rope` 直接依赖不再包含 `ztracing`
+    - `md_text` 的 dev-dependencies 不再包含 `zlog`
+  - `docs/md-dependency-allowlist.md` 已更新：`md_* Direct Dependencies` 分节删除 `ztracing` / `zlog`，并在 cleared 记录里补上 2026-05-24 的移除项。
+- 验收结果：
+  - cargo test -p md_sum_tree ✓
+  - cargo test -p md_rope ✓
+  - cargo test -p md_text ✓
+  - ./script/check-md-boundary.ps1 ✓
+- 对后续目标的影响：R6 的最外层包装依赖已经先收掉，下一步可以继续聚焦真正还在承载逻辑的数据结构依赖：`util`（`md_rope` / `md_text`）以及 `clock` / `collections`（`md_text`）。
+
+### 2026-05-24 - 阶段 R6：去掉 `md_rope -> util` 直接依赖
+
+- 对应目标：继续 R6，先把 `md_rope` 这层相对独立的工具依赖切掉，为后续只剩 `md_text -> util` 收尾。
+- 完成情况：
+  - `md_rope/Cargo.toml` 已删除 `util` 的 normal/dev dependency。
+  - `md_rope::chunk` 里原先来自 `util` 的两类能力已就地替换：
+    - `debug_panic!` 改为本地宏，保持“debug panic / release log”语义；
+    - `is_utf8_char_boundary` 改为本地 `const fn`，沿用原先的位运算实现。
+  - `md_rope` 测试原先依赖的 `util::RandomCharIter` 已下沉为本 crate 的 test-only helper，覆盖 rope/chunk 随机测试需要的字符分布。
+  - 当前 `cargo tree -p md_rope --depth 1 -q` 直接依赖已收口为 `heapless`、`log`、`md_sum_tree`、`rayon`、`tracing`、`unicode-segmentation`，不再包含 `util`。
+- 验收结果：
+  - cargo test -p md_rope ✓
+  - cargo test -p md_text ✓
+- 对后续目标的影响：`util` 现在只剩 `md_text` 还在直接依赖。下一步可以更聚焦地处理 `md_text` 中的 `debug_panic!`、`RandomCharIter` 和 `util::test::marked_text_ranges`，然后再进入 `clock` / `collections` 这批真正影响文本版本模型的依赖。
+
+### 2026-05-24 - 阶段 R6：去掉 `md_text -> util` 直接依赖
+
+- 对应目标：完成当前 R6 中所有 `util` 直接依赖的清理，把底层数据结构链收口到只剩 `clock` / `collections` 这类真正承载版本与集合语义的依赖。
+- 完成情况：
+  - `md_text/Cargo.toml` 已删除 `util` normal/dev dependency；`test-support` feature 从 `["rand", "util/test-support"]` 收口为 `["rand"]`。
+  - `md_text/src/text.rs` 里原先来自 `util` 的三类能力已本地下沉：
+    - `debug_panic!`
+    - `RandomCharIter`
+    - `marked_text_ranges`
+  - `edit_via_marked_text` / `edits_for_marked_text` 继续保留原语义，但不再通过 `util::test::marked_text_ranges` 间接获取测试辅助逻辑。
+  - 当前 `cargo tree -p md_text --depth 1 -q` 直接依赖已收口为 `anyhow`、`clock`、`collections`、`log`、`md_rope`、`md_sum_tree`、`parking_lot`、`postage`、`regex`、`smallvec`，不再包含 `util`。
+- 验收结果：
+  - cargo test -p md_text ✓
+  - cargo tree -p md_text --depth 1 -q ✓
+  - ./script/check-md-boundary.ps1 ✓
+- 对后续目标的影响：R6 里所有 `util` / `ztracing` / `zlog` 相关的直接依赖都已经清掉。下一步就可以集中处理剩下最核心、也最值得谨慎推进的两类依赖：`clock` 和 `collections`。

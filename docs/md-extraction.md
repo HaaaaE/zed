@@ -394,3 +394,120 @@ This file tracks every batch of source files ported from Zed crates into the
   - cargo test -p md_theme
   - cargo test -p md_editor
   - cargo check -p markdown_editor --features md-editor --no-default-features
+
+### 2026-05-24 — R5: legacy-editor path removal
+
+- **Source files:**
+  - crates/markdown_editor/Cargo.toml
+  - crates/markdown_editor/src/main.rs
+  - crates/markdown_editor/src/legacy_editor.rs
+  - script/check-md-boundary.ps1
+  - docs/md-dependency-allowlist.md
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Destination files:**
+  - crates/markdown_editor/Cargo.toml
+  - crates/markdown_editor/src/main.rs
+  - script/check-md-boundary.ps1
+  - docs/md-dependency-allowlist.md
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Source baseline:** fork-HEAD, remove the migration-only dual-track after the R4 boundary audit passed
+- **Retained capabilities:** standalone md_editor shell, single-file open/save flow, Source/Rendered toggle, rendered projection/styling/image blocks, md_settings-driven keybindings
+- **Removed capabilities:** `legacy-editor` feature gate, legacy Zed editor shell, and all `markdown_editor` direct dependencies on original Zed IDE crates
+- **Hand-written replacements:**
+  - `markdown_editor` now unconditionally boots `md_editor_app` and depends only on `gpui`, `gpui_platform`, `md_editor`, `md_settings`, and `md_theme`
+  - `script/check-md-boundary.ps1` now validates the default standalone path and scans both `crates/markdown_editor` and `crates/md_*` for direct Zed IDE imports, instead of compiling the deleted legacy path
+- **Verification:**
+  - cargo check -p markdown_editor
+  - cargo test -p md_editor
+  - cargo test -p markdown_wysiwyg
+  - ./script/check-md-boundary.ps1
+
+### 2026-05-24 — R6: tracing/logging dependency trim
+
+- **Source files:**
+  - crates/md_sum_tree/Cargo.toml
+  - crates/md_sum_tree/src/cursor.rs
+  - crates/md_sum_tree/src/sum_tree.rs
+  - crates/md_rope/Cargo.toml
+  - crates/md_rope/src/rope.rs
+  - crates/md_text/Cargo.toml
+  - crates/md_text/src/tests.rs
+  - docs/md-dependency-allowlist.md
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Destination files:**
+  - crates/md_sum_tree/Cargo.toml
+  - crates/md_sum_tree/src/cursor.rs
+  - crates/md_sum_tree/src/sum_tree.rs
+  - crates/md_rope/Cargo.toml
+  - crates/md_rope/src/rope.rs
+  - crates/md_text/Cargo.toml
+  - crates/md_text/src/tests.rs
+  - docs/md-dependency-allowlist.md
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Source baseline:** fork-HEAD, first R6 slice focused on low-risk infrastructure deps before touching `clock` / `collections` / `util`
+- **Retained capabilities:** all md_sum_tree / md_rope / md_text behavior, existing tracing instrumentation, full standalone markdown_editor path
+- **Removed capabilities:** direct `ztracing` dependencies in `md_sum_tree` / `md_rope`, and unused `zlog` / `ctor` test-only initialization in `md_sum_tree` / `md_rope` / `md_text`
+- **Hand-written replacements:**
+  - `md_sum_tree` and `md_rope` now import `tracing::instrument` directly instead of going through the Zed-local `ztracing` crate
+  - the `zlog::init_test()` hooks were dropped because the md_* tests do not require a custom logger backend to validate behavior
+- **Verification:**
+  - cargo test -p md_sum_tree
+  - cargo test -p md_rope
+  - cargo test -p md_text
+  - ./script/check-md-boundary.ps1
+
+### 2026-05-24 — R6: md_rope utility dependency trim
+
+- **Source files:**
+  - crates/md_rope/Cargo.toml
+  - crates/md_rope/src/chunk.rs
+  - crates/md_rope/src/rope.rs
+  - docs/md-dependency-allowlist.md
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Destination files:**
+  - crates/md_rope/Cargo.toml
+  - crates/md_rope/src/chunk.rs
+  - crates/md_rope/src/rope.rs
+  - docs/md-dependency-allowlist.md
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Source baseline:** fork-HEAD, second R6 slice after tracing/logging cleanup
+- **Retained capabilities:** full rope behavior, random rope/chunk property-style tests, debug-only panic behavior for invalid chunk boundaries
+- **Removed capabilities:** direct `util` dependency in `md_rope` (including test-only `util::RandomCharIter`)
+- **Hand-written replacements:**
+  - `md_rope::chunk` now carries local `debug_panic!` and `is_utf8_char_boundary` helpers instead of importing them from `util`
+  - `md_rope` now carries its own test-only `RandomCharIter`, copied down to the minimum behavior needed by rope/chunk tests
+- **Verification:**
+  - cargo test -p md_rope
+  - cargo test -p md_text
+  - ./script/check-md-boundary.ps1
+
+### 2026-05-24 — R6: md_text utility dependency trim
+
+- **Source files:**
+  - crates/md_text/Cargo.toml
+  - crates/md_text/src/text.rs
+  - docs/md-dependency-allowlist.md
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Destination files:**
+  - crates/md_text/Cargo.toml
+  - crates/md_text/src/text.rs
+  - docs/md-dependency-allowlist.md
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Source baseline:** fork-HEAD, third R6 slice after `ztracing` / `zlog` and `md_rope -> util` cleanup
+- **Retained capabilities:** buffer edit semantics, random/concurrent edit tests, marked-text edit helpers under test-support, debug-only panic fallback in anchor resolution
+- **Removed capabilities:** direct `util` normal/dev dependency in `md_text`
+- **Hand-written replacements:**
+  - `md_text` now carries local `debug_panic!`, `RandomCharIter`, and `marked_text_ranges` helpers instead of importing them from `util`
+  - the `test-support` feature now only enables `rand`, because marked-text parsing and random test generation no longer rely on `util/test-support`
+- **Verification:**
+  - cargo test -p md_text
+  - cargo tree -p md_text --depth 1 -q
+  - ./script/check-md-boundary.ps1

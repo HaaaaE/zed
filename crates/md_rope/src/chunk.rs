@@ -3,7 +3,17 @@ use heapless::String as ArrayString;
 use std::{cmp, ops::Range};
 use sum_tree::Bias;
 use unicode_segmentation::GraphemeCursor;
-use util::debug_panic;
+
+macro_rules! debug_panic {
+    ($($fmt_arg:tt)*) => {
+        if cfg!(debug_assertions) {
+            panic!($($fmt_arg)*);
+        } else {
+            let backtrace = std::backtrace::Backtrace::capture();
+            log::error!("{}\n{:?}", format_args!($($fmt_arg)*), backtrace);
+        }
+    };
+}
 
 #[cfg(not(all(test, not(rust_analyzer))))]
 pub(crate) type Bitmap = u128;
@@ -42,6 +52,11 @@ const fn saturating_shr_mask(offset: u32) -> Bitmap {
     !Bitmap::MAX.unbounded_shr(offset)
 }
 
+#[inline]
+const fn is_utf8_char_boundary(byte: u8) -> bool {
+    (byte as i8) >= -0x40
+}
+
 impl Chunk {
     pub const MASK_BITS: usize = Bitmap::BITS as usize;
 
@@ -73,7 +88,7 @@ impl Chunk {
             let mut chars_utf16 = 0;
 
             for (ix, &b) in chunk.iter().enumerate() {
-                chars |= (util::is_utf8_char_boundary(b) as u8) << ix;
+                chars |= (is_utf8_char_boundary(b) as u8) << ix;
                 newlines |= ((b == b'\n') as u8) << ix;
                 tabs |= ((b == b'\t') as u8) << ix;
                 // b >= 240 when we are at the first byte of the 4 byte encoded
@@ -189,7 +204,7 @@ impl Chunk {
         } else {
             let mut i = index;
             while i > 0 {
-                if util::is_utf8_char_boundary(self.text.as_bytes()[i]) {
+                if is_utf8_char_boundary(self.text.as_bytes()[i]) {
                     break;
                 }
                 i -= 1;
@@ -821,8 +836,8 @@ fn nth_set_bit_u64(v: u64, mut n: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RandomCharIter;
     use rand::prelude::*;
-    use util::RandomCharIter;
 
     #[gpui::test(iterations = 100)]
     fn test_random_chunks(mut rng: StdRng) {

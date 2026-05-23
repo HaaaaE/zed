@@ -40,13 +40,126 @@ pub use subscription::*;
 pub use sum_tree::Bias;
 use sum_tree::{Dimensions, FilterCursor, SumTree, Summary, TreeMap, TreeSet};
 use undo_map::UndoMap;
-use util::debug_panic;
-
-#[cfg(any(test, feature = "test-support"))]
-use util::RandomCharIter;
 
 static LINE_SEPARATORS_REGEX: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\r\n|\r").expect("Failed to create LINE_SEPARATORS_REGEX"));
+
+macro_rules! debug_panic {
+    ($($fmt_arg:tt)*) => {
+        if cfg!(debug_assertions) {
+            panic!($($fmt_arg)*);
+        } else {
+            let backtrace = std::backtrace::Backtrace::capture();
+            log::error!("{}\n{:?}", format_args!($($fmt_arg)*), backtrace);
+        }
+    };
+}
+
+#[cfg(any(test, feature = "test-support"))]
+struct RandomCharIter<T: rand::Rng> {
+    rng: T,
+    simple_text: bool,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl<T: rand::Rng> RandomCharIter<T> {
+    fn new(rng: T) -> Self {
+        Self {
+            rng,
+            simple_text: std::env::var("SIMPLE_TEXT").is_ok_and(|value| !value.is_empty()),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl<T: rand::Rng> Iterator for RandomCharIter<T> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        use rand::prelude::IndexedRandom;
+
+        if self.simple_text {
+            return if self.rng.random_range(0..100) < 5 {
+                Some('\n')
+            } else {
+                Some(self.rng.random_range(b'a'..b'z' + 1).into())
+            };
+        }
+
+        match self.rng.random_range(0..100) {
+            0..=19 => [' ', '\n', '\r', '\t'].choose(&mut self.rng).copied(),
+            20..=32 => char::from_u32(self.rng.random_range(('α' as u32)..('ω' as u32 + 1))),
+            33..=45 => ['✋', '✅', '❌', '❎', '⭐']
+                .choose(&mut self.rng)
+                .copied(),
+            46..=58 => ['🍐', '🏀', '🍗', '🎉'].choose(&mut self.rng).copied(),
+            _ => Some(self.rng.random_range(b'a'..b'z' + 1).into()),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+#[track_caller]
+fn marked_text_ranges(marked_text: &str, ranges_are_directed: bool) -> (String, Vec<Range<usize>>) {
+    let mut unmarked_text = String::with_capacity(marked_text.len());
+    let mut ranges = Vec::new();
+    let mut previous_marked_index = 0;
+    let mut current_range_start = None;
+    let mut current_range_cursor = None;
+
+    let marked_text = marked_text.replace('•', " ");
+    for (marked_index, marker) in marked_text.match_indices(&['«', '»', 'ˇ']) {
+        unmarked_text.push_str(&marked_text[previous_marked_index..marked_index]);
+        let unmarked_len = unmarked_text.len();
+        previous_marked_index = marked_index + marker.len();
+
+        match marker {
+            "ˇ" => {
+                if current_range_start.is_some() {
+                    if current_range_cursor.is_some() {
+                        panic!("duplicate point marker 'ˇ' at index {marked_index}");
+                    }
+
+                    current_range_cursor = Some(unmarked_len);
+                } else {
+                    ranges.push(unmarked_len..unmarked_len);
+                }
+            }
+            "«" => {
+                if current_range_start.is_some() {
+                    panic!("unexpected range start marker '«' at index {marked_index}");
+                }
+                current_range_start = Some(unmarked_len);
+            }
+            "»" => {
+                let current_range_start = current_range_start
+                    .take()
+                    .unwrap_or_else(|| panic!("unexpected range end marker '»' at index {marked_index}"));
+
+                let mut reversed = false;
+                if let Some(current_range_cursor) = current_range_cursor.take() {
+                    if current_range_cursor == current_range_start {
+                        reversed = true;
+                    } else if current_range_cursor != unmarked_len {
+                        panic!("unexpected 'ˇ' marker in the middle of a range");
+                    }
+                } else if ranges_are_directed {
+                    panic!("missing 'ˇ' marker to indicate range direction");
+                }
+
+                ranges.push(if reversed {
+                    unmarked_len..current_range_start
+                } else {
+                    current_range_start..unmarked_len
+                });
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    unmarked_text.push_str(&marked_text[previous_marked_index..]);
+    (unmarked_text, ranges)
+}
 
 /// The maximum length of a single insertion operation.
 /// Fragments larger than this will be split into multiple smaller
@@ -1851,7 +1964,7 @@ impl Buffer {
     #[track_caller]
     pub fn edits_for_marked_text(&self, marked_string: &str) -> Vec<(Range<usize>, String)> {
         let old_text = self.text();
-        let (new_text, mut ranges) = util::test::marked_text_ranges(marked_string, false);
+        let (new_text, mut ranges) = marked_text_ranges(marked_string, false);
         if ranges.is_empty() {
             ranges.push(0..new_text.len());
         }

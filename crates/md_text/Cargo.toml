@@ -14,7 +14,7 @@ path = "src/text.rs"
 doctest = false
 
 [features]
-test-support = ["rand", "util/test-support"]
+test-support = ["rand"]
 
 [dependencies]
 anyhow.workspace = true
@@ -29,12 +29,8 @@ regex.workspace = true
 rope = { path = "../md_rope", package = "md_rope" }
 smallvec.workspace = true
 sum_tree = { path = "../md_sum_tree", package = "md_sum_tree" }
-util.workspace = true
 
 [dev-dependencies]
 collections = { workspace = true, features = ["test-support"] }
-ctor.workspace = true
 gpui = { workspace = true, features = ["test-support"] }
 rand.workspace = true
-util = { workspace = true, features = ["test-support"] }
-zlog.workspace = true

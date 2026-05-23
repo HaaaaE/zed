@@ -30,21 +30,21 @@ function Run-Check {
     }
 }
 
-# 1. legacy-editor path must compile
-Run-Check "cargo check -p markdown_editor (legacy-editor, default)" {
-    cargo check -p markdown_editor --features legacy-editor 2>&1
+# 1. standalone markdown_editor path must compile
+Run-Check "cargo check -p markdown_editor" {
+    cargo check -p markdown_editor 2>&1
 }
 
-# 2. md-editor stub path must compile (no legacy deps)
-Run-Check "cargo check -p markdown_editor (md-editor, no-default-features)" {
-    cargo check -p markdown_editor --features md-editor --no-default-features 2>&1
-}
-
-# 3. md_* empty shells must compile
+# 2. md_* crates must compile
 foreach ($crate in @("md_text", "md_rope", "md_sum_tree", "md_buffer", "md_editor", "md_theme", "md_settings", "md_assets")) {
     Run-Check "cargo check -p $crate" {
         cargo check -p $crate 2>&1
     }
+}
+
+# 3. md_editor tests must still pass
+Run-Check "cargo test -p md_editor" {
+    cargo test -p md_editor 2>&1
 }
 
 # 4. markdown_wysiwyg tests must still pass
@@ -52,23 +52,26 @@ Run-Check "cargo test -p markdown_wysiwyg" {
     cargo test -p markdown_wysiwyg 2>&1
 }
 
-# 5. Dependency boundary scan: md_* crates must not directly use Zed IDE crates
+# 5. Dependency boundary scan: product crates must not directly use Zed IDE crates
 Write-Host ""
 Write-Host "==> Dependency boundary scan (rg)" -ForegroundColor Cyan
-$boundary_pattern = 'use (editor|language|multi_buffer|text|rope|sum_tree|project|workspace|settings|theme|theme_settings|ui|assets|icons|markdown)::'
-$md_dirs = Get-ChildItem -Directory "crates" | Where-Object { $_.Name -match "^md_" } | ForEach-Object { $_.FullName }
+# The ported md_* crates intentionally rename md_rope/md_sum_tree packages to
+# `rope` / `sum_tree`, so this scan targets only higher-level Zed product crates.
+$boundary_pattern = 'use (editor|language|multi_buffer|project|workspace|settings|theme|theme_settings|ui|assets|icons|markdown)::|from (editor|language|multi_buffer|project|workspace)'
+$product_dirs = @((Resolve-Path "crates/markdown_editor").Path)
+$product_dirs += Get-ChildItem -Directory "crates" | Where-Object { $_.Name -match "^md_" } | ForEach-Object { $_.FullName }
 
-if ($md_dirs) {
-    $violations = rg $boundary_pattern $md_dirs --glob "*.rs" 2>&1
+if ($product_dirs) {
+    $violations = rg $boundary_pattern $product_dirs --glob "*.rs" 2>&1
     if ($violations) {
-        Write-Host "FAILED: boundary violations found in md_* crates:" -ForegroundColor Red
+        Write-Host "FAILED: boundary violations found in markdown_editor / md_* crates:" -ForegroundColor Red
         $violations | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
         $failed = $true
     } else {
-        Write-Host "OK: no boundary violations in md_* crates" -ForegroundColor Green
+        Write-Host "OK: no boundary violations in markdown_editor / md_* crates" -ForegroundColor Green
     }
 } else {
-    Write-Host "SKIP: no md_* crates found yet" -ForegroundColor Yellow
+    Write-Host "SKIP: no markdown_editor / md_* crates found" -ForegroundColor Yellow
 }
 
 # 6. (Optional/Strict) cargo tree check
