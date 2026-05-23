@@ -684,6 +684,21 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
   - not run in this batch
 - 对后续目标的影响：后续继续验证 Rendered / Source、多文档切换和保存行为时，壳层状态更稳定，能减少“模式被重置”或“路径状态虚假有效”造成的伪问题。
 
+### 2026-05-23 - 阶段 R3：图片块与初始化收口
+
+- 对应目标：补齐 `md_editor` 核心阶段剩余的 standalone 图片块和初始化入口，让 R3 范围内的显示/编辑/保存/WYSIWYG 基础能力闭环。
+- 完成情况：
+  - `md_editor` 新增 `init_standalone`，standalone 编辑器自己的移动、选区、输入和 undo/redo keybindings 不再散落在 `markdown_editor` 壳层。
+  - Rendered 模式现在会把“整行只有远程图片语法且当前不在活动编辑范围内”的行渲染成实际图片块；当 caret / 选区进入图片语法时，会自动退回 source reveal，继续以源码为唯一编辑真相。
+  - 补充单测覆盖 inactive image block 检测、active image reveal，以及含前后正文的 inline image 不误判为块替换的情况。
+- 验收结果：
+  - cargo test -p md_editor: 23/23 ✓
+  - cargo test -p markdown_wysiwyg: 11/11 ✓
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+  - cargo check -p markdown_editor --features legacy-editor ✓
+  - cargo tree -p md_editor --edges normal -q 无 `editor` / `language` / `multi_buffer` / `project` / `workspace` ✓
+- 对后续目标的影响：R3 目标里的打开单文件、输入、保存、source/display 映射、marker reveal、heading 行几何和图片块现在都已有 standalone 承载路径；后续主线可以转入 R4 的 `md_settings` / `md_assets` / 应用壳继续收口。
+
 ### 2026-05-23 - 阶段 R4：`md_theme` 最小 palette 抽离
 
 - 对应目标：启动 R4 的第一小步，把 standalone `md-editor` 和壳层仍内嵌在代码里的配色/行几何常量迁入 `md_theme`，为后续继续去掉 Zed `theme` / `settings` 依赖铺路。

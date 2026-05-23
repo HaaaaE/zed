@@ -1,9 +1,9 @@
 use std::{collections::HashMap, ops::Range};
 
 use gpui::{
-    App, Context, EventEmitter, FocusHandle, Focusable, FontWeight, IntoElement, KeyDownEvent,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, SharedString,
-    StatefulInteractiveElement, TextAlign, TextRun, Window, div, font, prelude::*, px,
+    App, Context, EventEmitter, FocusHandle, Focusable, FontWeight, IntoElement, KeyBinding,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, SharedString,
+    StatefulInteractiveElement, TextAlign, TextRun, Window, div, font, img, prelude::*, px,
     uniform_list,
 };
 use markdown_wysiwyg::{MarkdownBlockKind, MarkdownInlineKind, MarkdownProjectionMap};
@@ -36,6 +36,36 @@ gpui::actions!(
         Redo,
     ]
 );
+
+pub fn init_standalone(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("left", MoveLeft, Some("MarkdownEditor")),
+        KeyBinding::new("right", MoveRight, Some("MarkdownEditor")),
+        KeyBinding::new("up", MoveUp, Some("MarkdownEditor")),
+        KeyBinding::new("down", MoveDown, Some("MarkdownEditor")),
+        KeyBinding::new("home", MoveToBeginningOfLine, Some("MarkdownEditor")),
+        KeyBinding::new("end", MoveToEndOfLine, Some("MarkdownEditor")),
+        KeyBinding::new("shift-left", SelectLeft, Some("MarkdownEditor")),
+        KeyBinding::new("shift-right", SelectRight, Some("MarkdownEditor")),
+        KeyBinding::new("shift-up", SelectUp, Some("MarkdownEditor")),
+        KeyBinding::new("shift-down", SelectDown, Some("MarkdownEditor")),
+        KeyBinding::new(
+            "shift-home",
+            SelectToBeginningOfLine,
+            Some("MarkdownEditor"),
+        ),
+        KeyBinding::new("shift-end", SelectToEndOfLine, Some("MarkdownEditor")),
+        KeyBinding::new("ctrl-a", SelectAll, Some("MarkdownEditor")),
+        KeyBinding::new("cmd-a", SelectAll, Some("MarkdownEditor")),
+        KeyBinding::new("backspace", Backspace, Some("MarkdownEditor")),
+        KeyBinding::new("delete", Delete, Some("MarkdownEditor")),
+        KeyBinding::new("enter", InsertNewline, Some("MarkdownEditor")),
+        KeyBinding::new("ctrl-z", Undo, Some("MarkdownEditor")),
+        KeyBinding::new("cmd-z", Undo, Some("MarkdownEditor")),
+        KeyBinding::new("ctrl-shift-z", Redo, Some("MarkdownEditor")),
+        KeyBinding::new("cmd-shift-z", Redo, Some("MarkdownEditor")),
+    ]);
+}
 
 pub struct MarkdownEditor {
     buffer: Buffer,
@@ -103,6 +133,12 @@ struct StyledDisplaySegment {
     display_range: Range<usize>,
     text: String,
     style: DisplayTextStyle,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RenderedImageBlock {
+    url: String,
+    alt_text: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -560,7 +596,7 @@ impl Render for MarkdownEditor {
                                             .text_size(row_style.text_size)
                                             .line_height(row_style.line_height)
                                             .whitespace_nowrap()
-                                            .children(render_row_text(
+                                            .children(render_row_contents(
                                                 &snapshot,
                                                 &display_row,
                                                 &selection,
@@ -1029,6 +1065,66 @@ fn render_row_text(
     render_styled_segments(segments, Some(selected_range), None, row_style)
 }
 
+fn render_row_contents(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+    row_style: RowDisplayStyle,
+) -> Vec<gpui::AnyElement> {
+    if let Some(image_block) = rendered_image_block_for_row(snapshot, display_row, selection, mode)
+    {
+        return vec![render_image_block(image_block)];
+    }
+
+    render_row_text(snapshot, display_row, selection, mode, row_style)
+}
+
+fn render_image_block(image_block: RenderedImageBlock) -> gpui::AnyElement {
+    let palette = editor_palette();
+    let fallback_label = if image_block.alt_text.trim().is_empty() {
+        image_block
+            .url
+            .split('?')
+            .next()
+            .unwrap_or(&image_block.url)
+            .to_string()
+    } else {
+        image_block.alt_text
+    };
+
+    div()
+        .w_full()
+        .py_1()
+        .child(
+            div()
+                .max_w(px(600.))
+                .h(px(120.))
+                .rounded_md()
+                .border_1()
+                .border_color(palette.gutter_text)
+                .bg(palette.fenced_code_background)
+                .overflow_hidden()
+                .child(
+                    img(image_block.url)
+                        .size_full()
+                        .object_fit(gpui::ObjectFit::Contain)
+                        .with_fallback(move || {
+                            div()
+                                .size_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .px_3()
+                                .text_color(palette.muted_text)
+                                .child(SharedString::from(fallback_label.clone()))
+                                .into_any_element()
+                        }),
+                ),
+        )
+        .into_any_element()
+}
+
 fn render_styled_segments(
     segments: Vec<StyledDisplaySegment>,
     selected_range: Option<Range<usize>>,
@@ -1103,6 +1199,53 @@ fn caret_element(row_style: RowDisplayStyle) -> gpui::AnyElement {
         .h(row_style.caret_height)
         .bg(palette.caret)
         .into_any_element()
+}
+
+fn rendered_image_block_for_row(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+) -> Option<RenderedImageBlock> {
+    if mode != MarkdownEditorMode::Rendered {
+        return None;
+    }
+
+    let active_source_range = active_source_range_for_selection(snapshot, selection);
+    let row_source_range = row_source_range(snapshot, display_row.row);
+    let source_text = row_text(snapshot, display_row.row);
+    let mut matching_spans = snapshot.syntax_tree().inline_spans().iter().filter(|span| {
+        span.kind == MarkdownInlineKind::Image
+            && span
+                .url
+                .as_ref()
+                .is_some_and(|url| is_remote_image_url(url))
+            && span.source_range.start >= row_source_range.start
+            && span.source_range.end <= row_source_range.end
+    });
+
+    let span = matching_spans.next()?;
+    if matching_spans.next().is_some() {
+        return None;
+    }
+    if active_source_range
+        .as_ref()
+        .is_some_and(|active_source_range| ranges_overlap(&span.source_range, active_source_range))
+    {
+        return None;
+    }
+
+    let local_start = span.source_range.start - row_source_range.start;
+    let local_end = span.source_range.end - row_source_range.start;
+    if !source_text[..local_start].trim().is_empty() || !source_text[local_end..].trim().is_empty()
+    {
+        return None;
+    }
+
+    Some(RenderedImageBlock {
+        url: span.url.clone()?,
+        alt_text: display_row.text.trim().to_string(),
+    })
 }
 
 fn render_text_piece(
@@ -1310,6 +1453,11 @@ fn combined_style_for_range(
 fn range_contains(container: &Range<usize>, candidate: &Range<usize>) -> bool {
     container.start <= candidate.start && container.end >= candidate.end
 }
+
+fn is_remote_image_url(url: &str) -> bool {
+    url.starts_with("http://") || url.starts_with("https://")
+}
+
 fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool {
     left.start < right.end && right.start < left.end
 }
@@ -1662,6 +1810,68 @@ mod tests {
         assert_eq!(
             row_display_style(&snapshot, 0, MarkdownEditorMode::Source),
             md_theme::default_row_metrics().into()
+        );
+    }
+
+    #[test]
+    fn rendered_image_block_detects_inactive_remote_image_row() {
+        let mut buffer = Buffer::local("![alt](https://example.com/cat.png)\nnext\n");
+        let snapshot = buffer.snapshot();
+        let selection = collapsed_selection(Point::new(1, 0));
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        assert_eq!(row.text, "alt");
+        assert_eq!(
+            rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+            Some(RenderedImageBlock {
+                url: "https://example.com/cat.png".to_string(),
+                alt_text: "alt".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn rendered_image_block_reveals_active_image_source() {
+        let mut buffer = Buffer::local("![alt](https://example.com/cat.png)\n");
+        let snapshot = buffer.snapshot();
+        let selection = collapsed_selection(Point::new(0, 2));
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        assert_eq!(row.text, "![alt](https://example.com/cat.png)");
+        assert_eq!(
+            rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+            None
+        );
+    }
+
+    #[test]
+    fn rendered_image_block_skips_inline_images_with_surrounding_text() {
+        let mut buffer = Buffer::local("before ![alt](https://example.com/cat.png) after\n");
+        let snapshot = buffer.snapshot();
+        let selection = collapsed_selection(Point::new(0, 0));
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        assert_eq!(
+            rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+            None
         );
     }
 

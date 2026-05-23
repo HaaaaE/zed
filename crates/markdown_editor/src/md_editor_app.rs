@@ -4,12 +4,7 @@ use gpui::{
     Context, Entity, Focusable as _, IntoElement, KeyBinding, PathPromptOptions, Render,
     SharedString, Subscription, Window, WindowOptions, div, prelude::*,
 };
-use md_editor::{
-    Backspace, Delete, InsertNewline, MarkdownEditor, MarkdownEditorEvent, MarkdownEditorMode,
-    MoveDown, MoveLeft, MoveRight, MoveToBeginningOfLine, MoveToEndOfLine, MoveUp, Redo, SelectAll,
-    SelectDown, SelectLeft, SelectRight, SelectToBeginningOfLine, SelectToEndOfLine, SelectUp,
-    Undo,
-};
+use md_editor::{MarkdownEditor, MarkdownEditorEvent, MarkdownEditorMode, init_standalone};
 use md_theme::{shell_palette, title_bar_height};
 
 gpui::actions!(
@@ -320,6 +315,7 @@ pub fn run() {
     let path = env::args_os().nth(1).map(PathBuf::from);
 
     gpui_platform::application().run(move |cx| {
+        init_standalone(cx);
         cx.bind_keys([
             KeyBinding::new("ctrl-n", NewDocument, Some("MarkdownEditor")),
             KeyBinding::new("cmd-n", NewDocument, Some("MarkdownEditor")),
@@ -327,31 +323,6 @@ pub fn run() {
             KeyBinding::new("cmd-o", OpenDocument, Some("MarkdownEditor")),
             KeyBinding::new("ctrl-shift-m", ToggleMode, Some("MarkdownEditor")),
             KeyBinding::new("cmd-shift-m", ToggleMode, Some("MarkdownEditor")),
-            KeyBinding::new("left", MoveLeft, Some("MarkdownEditor")),
-            KeyBinding::new("right", MoveRight, Some("MarkdownEditor")),
-            KeyBinding::new("up", MoveUp, Some("MarkdownEditor")),
-            KeyBinding::new("down", MoveDown, Some("MarkdownEditor")),
-            KeyBinding::new("home", MoveToBeginningOfLine, Some("MarkdownEditor")),
-            KeyBinding::new("end", MoveToEndOfLine, Some("MarkdownEditor")),
-            KeyBinding::new("shift-left", SelectLeft, Some("MarkdownEditor")),
-            KeyBinding::new("shift-right", SelectRight, Some("MarkdownEditor")),
-            KeyBinding::new("shift-up", SelectUp, Some("MarkdownEditor")),
-            KeyBinding::new("shift-down", SelectDown, Some("MarkdownEditor")),
-            KeyBinding::new(
-                "shift-home",
-                SelectToBeginningOfLine,
-                Some("MarkdownEditor"),
-            ),
-            KeyBinding::new("shift-end", SelectToEndOfLine, Some("MarkdownEditor")),
-            KeyBinding::new("ctrl-a", SelectAll, Some("MarkdownEditor")),
-            KeyBinding::new("cmd-a", SelectAll, Some("MarkdownEditor")),
-            KeyBinding::new("backspace", Backspace, Some("MarkdownEditor")),
-            KeyBinding::new("delete", Delete, Some("MarkdownEditor")),
-            KeyBinding::new("enter", InsertNewline, Some("MarkdownEditor")),
-            KeyBinding::new("ctrl-z", Undo, Some("MarkdownEditor")),
-            KeyBinding::new("cmd-z", Undo, Some("MarkdownEditor")),
-            KeyBinding::new("ctrl-shift-z", Redo, Some("MarkdownEditor")),
-            KeyBinding::new("cmd-shift-z", Redo, Some("MarkdownEditor")),
             KeyBinding::new("ctrl-s", Save, Some("MarkdownEditor")),
             KeyBinding::new("cmd-s", Save, Some("MarkdownEditor")),
             KeyBinding::new("ctrl-shift-s", SaveAs, Some("MarkdownEditor")),

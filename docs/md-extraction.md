@@ -345,6 +345,30 @@ This file tracks every batch of source files ported from Zed crates into the
   - cargo check -p markdown_editor --features md-editor --no-default-features
   - cargo check -p markdown_editor --features legacy-editor
 
+### 2026-05-23 — R3: md_editor image block + standalone init closeout
+
+- **Source files:**
+  - crates/markdown_editor/src/legacy_editor.rs  (Rendered remote image block replacement reference)
+  - crates/markdown_editor/src/md_editor_app.rs  (standalone keybinding owner before extraction)
+- **Destination files:**
+  - crates/md_editor/src/lib.rs
+  - crates/markdown_editor/src/md_editor_app.rs
+  - docs/md-extraction.md
+  - REFACTOR_GOAL.md
+- **Source baseline:** fork-HEAD, hand-written R3 closeout batch on top of the rendered-mode and shell follow-up slices
+- **Retained capabilities:** standalone md-editor open/edit/save flow, source/display projection, marker reveal, rendered semantic styling, heading row geometry
+- **Removed capabilities:** shell-owned md_editor keybinding registration in `markdown_editor`
+- **Hand-written replacements:**
+  - `md_editor::init_standalone` now owns the standalone editor keybindings for movement, selection, text input, and undo/redo, so the app shell only keeps document-level actions
+  - Rendered mode now recognizes inactive image-only rows backed by remote URLs and renders them as image blocks, while still revealing the raw Markdown source whenever the caret or selection enters the image span
+  - added md_editor tests for inactive image block detection, active-image reveal, and skipping inline images with surrounding paragraph text
+- **Verification:**
+  - cargo test -p md_editor                              23/23 passed
+  - cargo test -p markdown_wysiwyg                       11/11 passed
+  - cargo check -p markdown_editor --features md-editor --no-default-features ✓
+  - cargo check -p markdown_editor --features legacy-editor ✓
+  - cargo tree -p md_editor --edges normal -q           no editor / language / multi_buffer / project / workspace matches
+
 ### 2026-05-23 — R4: md_theme minimal palette extraction
 
 - **Source files:**
