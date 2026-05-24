@@ -210,6 +210,7 @@ impl DisplayRowTextLayout {
 
 const RENDERED_IMAGE_BLOCK_MAX_WIDTH: gpui::Pixels = px(600.);
 const RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT: gpui::Pixels = px(120.);
+const RENDERED_IMAGE_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(4.);
 const INLINE_MATH_ATOM_EXTRA_HEIGHT: gpui::Pixels = px(4.);
 const INLINE_MATH_ATOM_HORIZONTAL_PADDING: gpui::Pixels = px(4.);
 
@@ -259,12 +260,16 @@ struct RenderedImageBlock {
 struct RenderedImageBlockLayout {
     image_block: RenderedImageBlock,
     width: gpui::Pixels,
-    height: gpui::Pixels,
+    image_height: gpui::Pixels,
 }
 
 impl RenderedImageBlockLayout {
+    fn image_height(&self) -> gpui::Pixels {
+        self.image_height
+    }
+
     fn height(&self) -> gpui::Pixels {
-        self.height
+        self.image_height() + RENDERED_IMAGE_BLOCK_VERTICAL_PADDING * 2.
     }
 }
 
@@ -2097,7 +2102,7 @@ fn rendered_image_block_layout(
     RenderedImageBlockLayout {
         image_block,
         width,
-        height,
+        image_height: height,
     }
 }
 
@@ -3062,10 +3067,11 @@ fn render_image_block(
     cx: &mut Context<MarkdownEditor>,
 ) -> gpui::AnyElement {
     let palette = editor_palette();
+    let image_width = image_layout.width;
+    let image_height = image_layout.image_height();
     let image_block = image_layout.image_block;
     let mouse_down_image_block = image_block.clone();
     let mouse_move_image_block = image_block.clone();
-    let image_width = image_layout.width;
     let fallback_label = if image_block.alt_text.trim().is_empty() {
         image_block
             .url
@@ -3079,7 +3085,7 @@ fn render_image_block(
 
     div()
         .w_full()
-        .py_1()
+        .py(RENDERED_IMAGE_BLOCK_VERTICAL_PADDING)
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event, window, cx| {
@@ -3098,7 +3104,7 @@ fn render_image_block(
         .child(
             div()
                 .w(image_layout.width)
-                .h(image_layout.height)
+                .h(image_height)
                 .rounded_md()
                 .border_1()
                 .border_color(palette.gutter_text)
@@ -4453,12 +4459,31 @@ mod tests {
                 source_range: 4..39,
             },
             width: px(200.),
-            height: px(120.),
+            image_height: px(120.),
         };
 
         assert_eq!(image_block_x_for_source_offset(&image_layout, 4), px(0.));
         assert_eq!(image_block_x_for_source_offset(&image_layout, 20), px(100.));
         assert_eq!(image_block_x_for_source_offset(&image_layout, 39), px(200.));
+    }
+
+    #[test]
+    fn image_block_layout_height_includes_vertical_padding() {
+        let image_layout = RenderedImageBlockLayout {
+            image_block: RenderedImageBlock {
+                url: "https://example.com/cat.png".to_string(),
+                alt_text: "alt".to_string(),
+                source_range: 4..39,
+            },
+            width: px(200.),
+            image_height: px(120.),
+        };
+
+        assert_eq!(image_layout.image_height(), px(120.));
+        assert_eq!(
+            image_layout.height(),
+            px(120.) + RENDERED_IMAGE_BLOCK_VERTICAL_PADDING * 2.
+        );
     }
 
     #[test]

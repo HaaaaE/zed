@@ -249,11 +249,18 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - This generalizes the previous inline math boundary behavior to remote image block elements, so clicking the left or right edge of a rendered image block keeps the block rendered while still placing the cursor at the source range edge.
 - Added coverage for remote image block source-boundary cursors and for inline images with surrounding text staying source-editable at their boundaries.
 
+### 2026-05-25 - Image block layout height includes padding
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Remote image block layout now distinguishes the inner rendered image height from the full block height.
+- The block height now includes the same vertical padding used by the rendered element, keeping list measurement, scroll geometry, and block hit area aligned with the actual GPUI element.
+- Added coverage for the padded block-height calculation.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 61/61 tests.
+- `cargo test -p md_editor` passed: 62/62 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work
