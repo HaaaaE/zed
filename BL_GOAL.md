@@ -264,11 +264,20 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Inline images with surrounding text still reveal source when selected, so only true standalone block images use the rendered block selection behavior.
 - Added coverage for whole image-block selection and for the inline-image whole-selection guard.
 
+### 2026-05-25 - Image block boundaries delete atomically
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Reused a single rendered-element source-range helper for whole-element selection, source-boundary inactivity, and Rendered-mode boundary deletion.
+- Backspace at the source end of a standalone rendered remote image block now deletes the whole image source range.
+- Delete at the source start of a standalone rendered remote image block now deletes the whole image source range.
+- Inline images with surrounding text still use source character deletion, preserving the source-editing path for non-block images.
+- Added coverage for image-block Backspace/Delete and for inline-image character deletion.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 64/64 tests.
+- `cargo test -p md_editor` passed: 67/67 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work

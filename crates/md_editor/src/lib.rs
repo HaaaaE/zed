@@ -1765,31 +1765,29 @@ fn rendered_inline_atom_horizontal_target(
     }
 }
 
-fn rendered_inline_atom_boundary_range(
-    atom: &DisplayInlineAtom,
-    source_offset: usize,
-    direction: HorizontalDirection,
-) -> Option<Range<usize>> {
-    match direction {
-        HorizontalDirection::Left if source_offset == atom.source_range.end => {
-            Some(atom.source_range.clone())
-        }
-        HorizontalDirection::Right if source_offset == atom.source_range.start => {
-            Some(atom.source_range.clone())
-        }
-        _ => None,
-    }
-}
-
-fn rendered_inline_atom_range_at_cursor(
+fn rendered_element_range_at_cursor(
     snapshot: &BufferSnapshot,
     cursor: Point,
     direction: HorizontalDirection,
 ) -> Option<Range<usize>> {
-    let (source_offset, atoms) = rendered_inline_atoms_at_cursor(snapshot, cursor)?;
-    atoms
+    let cursor = clip_cursor(snapshot, cursor);
+    let source_offset = snapshot.as_text_snapshot().point_to_offset(cursor);
+    snapshot
+        .syntax_tree()
+        .inline_spans()
         .iter()
-        .find_map(|atom| rendered_inline_atom_boundary_range(atom, source_offset, direction))
+        .find_map(|span| {
+            let source_range = rendered_element_source_range_for_span(snapshot, span)?;
+            match direction {
+                HorizontalDirection::Left if source_offset == source_range.end => {
+                    Some(source_range)
+                }
+                HorizontalDirection::Right if source_offset == source_range.start => {
+                    Some(source_range)
+                }
+                _ => None,
+            }
+        })
 }
 
 pub fn selection_byte_range(
@@ -1833,11 +1831,9 @@ fn backspace_selection_in_mode(
     let snapshot = buffer.snapshot();
     let selection = clip_selection(&snapshot, selection);
     if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
-        if let Some(range) = rendered_inline_atom_range_at_cursor(
-            &snapshot,
-            selection.head(),
-            HorizontalDirection::Left,
-        ) {
+        if let Some(range) =
+            rendered_element_range_at_cursor(&snapshot, selection.head(), HorizontalDirection::Left)
+        {
             return replace_selection(
                 buffer,
                 &selection_for_source_range(&snapshot, selection.id, range),
@@ -1889,7 +1885,7 @@ fn delete_selection_in_mode(
     let snapshot = buffer.snapshot();
     let selection = clip_selection(&snapshot, selection);
     if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
-        if let Some(range) = rendered_inline_atom_range_at_cursor(
+        if let Some(range) = rendered_element_range_at_cursor(
             &snapshot,
             selection.head(),
             HorizontalDirection::Right,
@@ -3743,19 +3739,8 @@ fn selection_range_is_whole_rendered_element(
     selection_range: &Range<usize>,
 ) -> bool {
     snapshot.syntax_tree().inline_spans().iter().any(|span| {
-        if &span.source_range != selection_range || span.marker_ranges.is_empty() {
-            return false;
-        }
-
-        match span.kind {
-            MarkdownInlineKind::InlineMath => true,
-            MarkdownInlineKind::Image => rendered_remote_image_span_is_block(snapshot, span),
-            MarkdownInlineKind::Emphasis
-            | MarkdownInlineKind::Strong
-            | MarkdownInlineKind::InlineCode
-            | MarkdownInlineKind::Link
-            | MarkdownInlineKind::Strikethrough => false,
-        }
+        rendered_element_source_range_for_span(snapshot, span)
+            .is_some_and(|source_range| &source_range == selection_range)
     })
 }
 
@@ -3764,22 +3749,32 @@ fn source_offset_is_rendered_element_boundary(
     source_offset: usize,
 ) -> bool {
     snapshot.syntax_tree().inline_spans().iter().any(|span| {
-        if span.marker_ranges.is_empty()
-            || (span.source_range.start != source_offset && span.source_range.end != source_offset)
-        {
-            return false;
-        }
-
-        match span.kind {
-            MarkdownInlineKind::InlineMath => true,
-            MarkdownInlineKind::Image => rendered_remote_image_span_is_block(snapshot, span),
-            MarkdownInlineKind::Emphasis
-            | MarkdownInlineKind::Strong
-            | MarkdownInlineKind::InlineCode
-            | MarkdownInlineKind::Link
-            | MarkdownInlineKind::Strikethrough => false,
-        }
+        rendered_element_source_range_for_span(snapshot, span).is_some_and(|source_range| {
+            source_range.start == source_offset || source_range.end == source_offset
+        })
     })
+}
+
+fn rendered_element_source_range_for_span(
+    snapshot: &BufferSnapshot,
+    span: &markdown_wysiwyg::MarkdownInlineSpan,
+) -> Option<Range<usize>> {
+    if span.marker_ranges.is_empty() {
+        return None;
+    }
+
+    match span.kind {
+        MarkdownInlineKind::InlineMath => Some(span.source_range.clone()),
+        MarkdownInlineKind::Image if rendered_remote_image_span_is_block(snapshot, span) => {
+            Some(span.source_range.clone())
+        }
+        MarkdownInlineKind::Image
+        | MarkdownInlineKind::Emphasis
+        | MarkdownInlineKind::Strong
+        | MarkdownInlineKind::InlineCode
+        | MarkdownInlineKind::Link
+        | MarkdownInlineKind::Strikethrough => None,
+    }
 }
 
 fn rendered_remote_image_span_is_block(
@@ -5128,6 +5123,54 @@ mod tests {
         assert_eq!(
             selection,
             collapsed_selection(Point::new(0, atom_start as u32))
+        );
+        assert!(transaction_id.is_some());
+    }
+
+    #[test]
+    fn rendered_backspace_deletes_previous_image_block() {
+        let image_source = "![alt](https://example.com/cat.png)";
+        let mut buffer = Buffer::local(&format!("{image_source}\nnext\n"));
+        let selection = collapsed_selection(Point::new(0, image_source.len() as u32));
+
+        let (selection, transaction_id) =
+            backspace_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+        assert_eq!(buffer.text(), "\nnext\n");
+        assert_eq!(selection, collapsed_selection(Point::new(0, 0)));
+        assert!(transaction_id.is_some());
+    }
+
+    #[test]
+    fn rendered_delete_deletes_next_image_block() {
+        let image_source = "![alt](https://example.com/cat.png)";
+        let mut buffer = Buffer::local(&format!("{image_source}\nnext\n"));
+        let selection = collapsed_selection(Point::new(0, 0));
+
+        let (selection, transaction_id) =
+            delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+        assert_eq!(buffer.text(), "\nnext\n");
+        assert_eq!(selection, collapsed_selection(Point::new(0, 0)));
+        assert!(transaction_id.is_some());
+    }
+
+    #[test]
+    fn rendered_delete_keeps_inline_image_source_character_movement() {
+        let mut buffer = Buffer::local("before ![alt](https://example.com/cat.png) after\n");
+        let image_start = "before ".len();
+        let selection = collapsed_selection(Point::new(0, image_start as u32));
+
+        let (selection, transaction_id) =
+            delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+        assert_eq!(
+            buffer.text(),
+            "before [alt](https://example.com/cat.png) after\n"
+        );
+        assert_eq!(
+            selection,
+            collapsed_selection(Point::new(0, image_start as u32))
         );
         assert!(transaction_id.is_some());
     }
