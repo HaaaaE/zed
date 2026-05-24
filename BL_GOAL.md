@@ -273,11 +273,21 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Inline images with surrounding text still use source character deletion, preserving the source-editing path for non-block images.
 - Added coverage for image-block Backspace/Delete and for inline-image character deletion.
 
+### 2026-05-25 - Image block boundaries move atomically
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Rendered-mode horizontal movement now reuses the same rendered-element boundary helper used by selection display and deletion.
+- MoveRight from the source start of a standalone rendered remote image block jumps to the image source range end.
+- MoveLeft from the source end of a standalone rendered remote image block jumps to the image source range start.
+- Shift+Left and Shift+Right extend selection across the same full image source range.
+- Inline images with surrounding text still use source character movement, preserving non-block image editing behavior.
+- Added coverage for image-block horizontal movement, image-block horizontal selection, and inline-image character movement.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 67/67 tests.
+- `cargo test -p md_editor` passed: 70/70 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work

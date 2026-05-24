@@ -1699,7 +1699,7 @@ fn move_horizontal_in_mode(
     direction: HorizontalDirection,
 ) -> Point {
     if mode == MarkdownEditorMode::Rendered
-        && let Some(point) = move_across_rendered_inline_atom(snapshot, cursor, direction)
+        && let Some(point) = move_across_rendered_element(snapshot, cursor, direction)
     {
         return point;
     }
@@ -1710,59 +1710,18 @@ fn move_horizontal_in_mode(
     }
 }
 
-fn move_across_rendered_inline_atom(
+fn move_across_rendered_element(
     snapshot: &BufferSnapshot,
     cursor: Point,
     direction: HorizontalDirection,
 ) -> Option<Point> {
     let text_snapshot = snapshot.as_text_snapshot();
-    let (source_offset, atoms) = rendered_inline_atoms_at_cursor(snapshot, cursor)?;
-
-    let target_offset = atoms
-        .iter()
-        .find_map(|atom| rendered_inline_atom_horizontal_target(atom, source_offset, direction))?;
+    let source_range = rendered_element_range_at_cursor(snapshot, cursor, direction)?;
+    let target_offset = match direction {
+        HorizontalDirection::Left => source_range.start,
+        HorizontalDirection::Right => source_range.end,
+    };
     Some(text_snapshot.offset_to_point(target_offset))
-}
-
-fn rendered_inline_atoms_at_cursor(
-    snapshot: &BufferSnapshot,
-    cursor: Point,
-) -> Option<(usize, Vec<DisplayInlineAtom>)> {
-    let cursor = clip_cursor(snapshot, cursor);
-    let source_offset = snapshot.as_text_snapshot().point_to_offset(cursor);
-    let display_row = display_rows_in_mode(
-        snapshot,
-        cursor.row as usize..cursor.row as usize + 1,
-        None,
-        MarkdownEditorMode::Rendered,
-    )
-    .into_iter()
-    .next()?;
-    let row_style = row_display_style(snapshot, display_row.row, MarkdownEditorMode::Rendered);
-    let atoms = inline_atom_ranges_for_row(
-        snapshot,
-        &display_row,
-        MarkdownEditorMode::Rendered,
-        row_style,
-    );
-
-    Some((source_offset, atoms))
-}
-
-fn rendered_inline_atom_horizontal_target(
-    atom: &DisplayInlineAtom,
-    source_offset: usize,
-    direction: HorizontalDirection,
-) -> Option<usize> {
-    match direction {
-        HorizontalDirection::Left if source_offset == atom.source_range.end => {
-            Some(atom.source_range.start)
-        }
-        HorizontalDirection::Right if source_offset == atom.source_range.start => {
-            Some(atom.source_range.end)
-        }
-        _ => None,
-    }
 }
 
 fn rendered_element_range_at_cursor(
@@ -4716,6 +4675,70 @@ mod tests {
     }
 
     #[test]
+    fn rendered_horizontal_movement_skips_inactive_image_block() {
+        let image_source = "![alt](https://example.com/cat.png)";
+        let mut buffer = Buffer::local(&format!("{image_source}\nnext\n"));
+        let snapshot = buffer.snapshot();
+        let image_end = image_source.len();
+
+        assert_eq!(
+            move_horizontal_in_mode(
+                &snapshot,
+                Point::new(0, 0),
+                MarkdownEditorMode::Rendered,
+                HorizontalDirection::Right,
+            ),
+            Point::new(0, image_end as u32)
+        );
+        assert_eq!(
+            move_horizontal_in_mode(
+                &snapshot,
+                Point::new(0, image_end as u32),
+                MarkdownEditorMode::Rendered,
+                HorizontalDirection::Left,
+            ),
+            Point::new(0, 0)
+        );
+    }
+
+    #[test]
+    fn rendered_select_horizontal_extends_across_inactive_image_block() {
+        let image_source = "![alt](https://example.com/cat.png)";
+        let mut buffer = Buffer::local(&format!("{image_source}\nnext\n"));
+        let snapshot = buffer.snapshot();
+        let image_end = image_source.len();
+
+        assert_eq!(
+            select_right_in_mode(
+                &snapshot,
+                &collapsed_selection(Point::new(0, 0)),
+                MarkdownEditorMode::Rendered,
+            ),
+            Selection {
+                id: 0,
+                start: Point::new(0, 0),
+                end: Point::new(0, image_end as u32),
+                reversed: false,
+                goal: SelectionGoal::None,
+            }
+        );
+        assert_eq!(
+            select_left_in_mode(
+                &snapshot,
+                &collapsed_selection(Point::new(0, image_end as u32)),
+                MarkdownEditorMode::Rendered,
+            ),
+            Selection {
+                id: 0,
+                start: Point::new(0, 0),
+                end: Point::new(0, image_end as u32),
+                reversed: true,
+                goal: SelectionGoal::None,
+            }
+        );
+    }
+
+    #[test]
     fn rendered_horizontal_movement_keeps_active_inline_atom_character_movement() {
         let mut buffer = Buffer::local("Before $x + y$ after\n");
         let snapshot = buffer.snapshot();
@@ -4738,6 +4761,23 @@ mod tests {
                 HorizontalDirection::Left,
             ),
             Point::new(0, atom_content_start as u32)
+        );
+    }
+
+    #[test]
+    fn rendered_horizontal_movement_keeps_inline_image_source_editable() {
+        let mut buffer = Buffer::local("before ![alt](https://example.com/cat.png) after\n");
+        let snapshot = buffer.snapshot();
+        let image_start = "before ".len();
+
+        assert_eq!(
+            move_horizontal_in_mode(
+                &snapshot,
+                Point::new(0, image_start as u32),
+                MarkdownEditorMode::Rendered,
+                HorizontalDirection::Right,
+            ),
+            Point::new(0, image_start as u32 + 1)
         );
     }
 
