@@ -299,11 +299,20 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Non-empty selections and cursors inside the image source range do not draw a block caret.
 - Added coverage for image-block boundary caret x calculation.
 
+### 2026-05-25 - Whole inline atom selection has visible state
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Rendered inline atom rendering now receives the current selected display range for visual-row rendering.
+- When a selection fully covers an inline math atom's rendered display range, the atom keeps its rendered layout and applies the editor selection background and selection text color.
+- Partial selections and empty selections do not trigger the atom selected styling, preserving the active source-editing path for partial math selections.
+- Measurement rendering still uses the unselected atom style, so selected styling does not affect cached atom dimensions.
+- Added coverage for the inline-atom selected-state helper.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 72/72 tests.
+- `cargo test -p md_editor` passed: 73/73 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work

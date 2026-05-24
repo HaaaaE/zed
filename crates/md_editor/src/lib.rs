@@ -2527,6 +2527,7 @@ fn render_visual_text_row(
         .children(render_fragments_for_visual_row(
             &text_layout.fragments,
             &visual_row,
+            selected_range,
             row_style,
         ))
         .when_some(
@@ -2580,6 +2581,7 @@ fn selection_elements_for_visual_row(
 fn render_fragments_for_visual_row(
     fragments: &[DisplayInlineFragment],
     visual_row: &VisualDisplayRow,
+    selected_range: Option<&Range<usize>>,
     row_style: RowDisplayStyle,
 ) -> Vec<gpui::AnyElement> {
     let mut elements = Vec::new();
@@ -2604,7 +2606,12 @@ fn render_fragments_for_visual_row(
                 ) else {
                     continue;
                 };
-                elements.push(render_inline_atom_piece(atom, text, row_style));
+                elements.push(render_inline_atom_piece(
+                    atom,
+                    text,
+                    row_style,
+                    inline_atom_is_selected(atom, selected_range),
+                ));
             }
         }
     }
@@ -3230,12 +3237,14 @@ fn render_inline_atom_piece(
     atom: &DisplayInlineAtom,
     text: String,
     row_style: RowDisplayStyle,
+    selected: bool,
 ) -> gpui::AnyElement {
     render_inline_atom_element(
         atom,
         text,
         row_style,
         Some(gpui::size(atom.width, atom.height)),
+        selected,
     )
 }
 
@@ -3244,7 +3253,7 @@ fn render_inline_atom_measurement_piece(
     text: String,
     row_style: RowDisplayStyle,
 ) -> gpui::AnyElement {
-    render_inline_atom_element(atom, text, row_style, None)
+    render_inline_atom_element(atom, text, row_style, None, false)
 }
 
 fn render_inline_atom_element(
@@ -3252,10 +3261,15 @@ fn render_inline_atom_element(
     text: String,
     row_style: RowDisplayStyle,
     size: Option<gpui::Size<gpui::Pixels>>,
+    selected: bool,
 ) -> gpui::AnyElement {
     match atom.kind {
         DisplayInlineAtomKind::InlineMath => {
             let palette = editor_palette();
+            let mut style = atom.style.clone();
+            if selected {
+                style.color = Some(palette.selection_text);
+            }
             let mut element = div()
                 .min_h(atom.height)
                 .px(inline_atom_horizontal_padding(atom.kind))
@@ -3266,14 +3280,28 @@ fn render_inline_atom_element(
                 .line_height(row_style.line_height)
                 .whitespace_nowrap()
                 .rounded_sm()
-                .bg(palette.inline_math_text.opacity(0.08))
-                .child(render_text_piece(text, &atom.style));
+                .bg(if selected {
+                    palette.selection_background
+                } else {
+                    palette.inline_math_text.opacity(0.08)
+                })
+                .child(render_text_piece(text, &style));
             if let Some(size) = size {
                 element = element.w(size.width).h(size.height);
             }
             element.into_any_element()
         }
     }
+}
+
+fn inline_atom_is_selected(
+    atom: &DisplayInlineAtom,
+    selected_range: Option<&Range<usize>>,
+) -> bool {
+    selected_range.is_some_and(|selected_range| {
+        selected_range.start <= atom.display_range.start
+            && selected_range.end >= atom.display_range.end
+    })
 }
 
 fn display_inline_fragments(
@@ -4188,6 +4216,26 @@ mod tests {
             visual_row_height_for_range(&fragments, &(12..18), row_style),
             row_style.line_height
         );
+    }
+
+    #[test]
+    fn inline_atom_selected_state_requires_full_display_range() {
+        let row_style: RowDisplayStyle = md_theme::default_row_metrics().into();
+        let atom = DisplayInlineAtom {
+            kind: DisplayInlineAtomKind::InlineMath,
+            source_range: 8..15,
+            display_range: 7..12,
+            fallback_text: "x + y".to_string(),
+            style: inline_style(MarkdownInlineKind::InlineMath),
+            height: row_style.line_height + INLINE_MATH_ATOM_EXTRA_HEIGHT,
+            width: px(50.),
+        };
+
+        assert!(inline_atom_is_selected(&atom, Some(&(7..12))));
+        assert!(inline_atom_is_selected(&atom, Some(&(0..18))));
+        assert!(!inline_atom_is_selected(&atom, Some(&(7..11))));
+        assert!(!inline_atom_is_selected(&atom, Some(&(8..12))));
+        assert!(!inline_atom_is_selected(&atom, None));
     }
 
     #[test]
