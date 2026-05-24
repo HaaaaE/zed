@@ -1807,9 +1807,21 @@ fn visual_rows_for_wrapped_line(
             return fallback_visual_rows(wrapped_line.len(), fragments, row_style);
         };
         if glyph.index < start {
+            if atom_range_containing_display_index(fragments, glyph.index)
+                .is_some_and(|atom_range| atom_range.end <= start)
+            {
+                continue;
+            }
             return fallback_visual_rows(wrapped_line.len(), fragments, row_style);
         }
-        let display_range = start..glyph.index;
+        let boundary_index = atomic_wrap_boundary_index(fragments, glyph.index, start);
+        if boundary_index < start {
+            return fallback_visual_rows(wrapped_line.len(), fragments, row_style);
+        }
+        if boundary_index == start {
+            continue;
+        }
+        let display_range = start..boundary_index;
         let height = visual_row_height_for_range(fragments, &display_range, row_style);
         rows.push(VisualDisplayRow {
             display_range,
@@ -1817,8 +1829,8 @@ fn visual_rows_for_wrapped_line(
             top,
             height,
         });
-        start = glyph.index;
-        start_x = glyph.position.x;
+        start = boundary_index;
+        start_x = wrapped_line.unwrapped_layout.x_for_index(boundary_index);
         top += height;
     }
 
@@ -1830,6 +1842,38 @@ fn visual_rows_for_wrapped_line(
         top,
     });
     rows
+}
+
+fn atomic_wrap_boundary_index(
+    fragments: &[DisplayInlineFragment],
+    boundary_index: usize,
+    row_start: usize,
+) -> usize {
+    let Some(atom_range) = atom_range_containing_display_index(fragments, boundary_index) else {
+        return boundary_index;
+    };
+
+    if atom_range.start > row_start {
+        atom_range.start
+    } else {
+        atom_range.end
+    }
+}
+
+fn atom_range_containing_display_index(
+    fragments: &[DisplayInlineFragment],
+    display_index: usize,
+) -> Option<Range<usize>> {
+    fragments.iter().find_map(|fragment| match fragment {
+        DisplayInlineFragment::Text(_) => None,
+        DisplayInlineFragment::Atom(atom)
+            if atom.display_range.start < display_index
+                && display_index < atom.display_range.end =>
+        {
+            Some(atom.display_range.clone())
+        }
+        DisplayInlineFragment::Atom(_) => None,
+    })
 }
 
 fn wrap_boundary_glyph(
@@ -3153,6 +3197,28 @@ mod tests {
             visual_row_height_for_range(&fragments, &(12..18), row_style),
             row_style.line_height
         );
+    }
+
+    #[test]
+    fn atomic_wrap_boundary_keeps_inline_atom_on_one_visual_row() {
+        let fragments = vec![DisplayInlineFragment::Atom(DisplayInlineAtom {
+            kind: DisplayInlineAtomKind::InlineMath,
+            source_range: 8..15,
+            display_range: 7..12,
+            fallback_text: "x + y".to_string(),
+            style: inline_style(MarkdownInlineKind::InlineMath),
+            height: px(24.),
+        })];
+
+        assert_eq!(atom_range_containing_display_index(&fragments, 7), None);
+        assert_eq!(
+            atom_range_containing_display_index(&fragments, 9),
+            Some(7..12)
+        );
+        assert_eq!(atom_range_containing_display_index(&fragments, 12), None);
+        assert_eq!(atomic_wrap_boundary_index(&fragments, 9, 0), 7);
+        assert_eq!(atomic_wrap_boundary_index(&fragments, 9, 7), 12);
+        assert_eq!(atomic_wrap_boundary_index(&fragments, 15, 12), 15);
     }
 
     #[test]

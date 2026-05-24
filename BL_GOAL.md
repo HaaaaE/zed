@@ -131,11 +131,21 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Added a focused pure helper test for clipping fragment text to the active visual row.
 - This creates a real replacement point for future measured inline GPUI elements, but atom width is still fallback-text-shaped and atom-aware line breaking/hit testing remain open.
 
+### 2026-05-25 - Inline atoms stay atomic across soft wraps
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Visual-row construction now adjusts GPUI wrap boundaries that land inside an inline atom:
+  - if the atom can fit after previous content, the boundary moves before the atom,
+  - if the atom starts the current visual row, the boundary moves after the atom instead of splitting it.
+- The next visual row's `line_start_x` is recomputed from the adjusted display boundary, keeping caret and selection geometry aligned with the adjusted row ranges.
+- Added a focused pure helper test for atom range detection and atomic wrap-boundary adjustment.
+- This prevents inline atom render fragments from being split across two visual rows, but cursor and mouse mapping inside atom bounds still need an atom-aware snap policy.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 39/39 tests.
+- `cargo test -p md_editor` passed: 40/40 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work
