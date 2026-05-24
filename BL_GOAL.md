@@ -291,11 +291,19 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Partial selections and collapsed cursors do not trigger the selected block styling.
 - Added coverage for the image-block whole-selection state helper.
 
+### 2026-05-25 - Image block boundary cursors are visible
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Rendered image block rendering now receives an optional caret x position derived from the collapsed selection.
+- Collapsed cursors at the source start or source end of a standalone rendered remote image block now draw the existing caret element at the block's left or right edge.
+- Non-empty selections and cursors inside the image source range do not draw a block caret.
+- Added coverage for image-block boundary caret x calculation.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 71/71 tests.
+- `cargo test -p md_editor` passed: 72/72 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work

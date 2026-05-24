@@ -2000,7 +2000,14 @@ fn render_display_row_layout(
         DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(image_layout)) => {
             let selected =
                 image_block_is_whole_selected(snapshot, &image_layout.image_block, selection);
-            vec![render_image_block(image_layout, selected, cx)]
+            let caret_x = image_block_caret_x(snapshot, &image_layout, selection);
+            vec![render_image_block(
+                image_layout,
+                selected,
+                caret_x,
+                row_style,
+                cx,
+            )]
         }
     }
 }
@@ -3022,6 +3029,8 @@ fn image_block_x_for_source_offset(
 fn render_image_block(
     image_layout: RenderedImageBlockLayout,
     selected: bool,
+    caret_x: Option<gpui::Pixels>,
+    row_style: RowDisplayStyle,
     cx: &mut Context<MarkdownEditor>,
 ) -> gpui::AnyElement {
     let palette = editor_palette();
@@ -3044,6 +3053,7 @@ fn render_image_block(
     div()
         .w_full()
         .py(RENDERED_IMAGE_BLOCK_VERTICAL_PADDING)
+        .relative()
         .when(selected, |this| {
             this.bg(palette.selection_background.opacity(0.20))
         })
@@ -3092,7 +3102,30 @@ fn render_image_block(
                         }),
                 ),
         )
+        .when_some(caret_x, |this, caret_x| {
+            this.child(caret_element(caret_x, row_style))
+        })
         .into_any_element()
+}
+
+fn image_block_caret_x(
+    snapshot: &BufferSnapshot,
+    image_layout: &RenderedImageBlockLayout,
+    selection: &Selection<Point>,
+) -> Option<gpui::Pixels> {
+    if !selection.is_empty() {
+        return None;
+    }
+
+    let source_offset = snapshot
+        .as_text_snapshot()
+        .point_to_offset(clip_cursor(snapshot, selection.head()));
+    let source_range = &image_layout.image_block.source_range;
+    if source_offset == source_range.start || source_offset == source_range.end {
+        Some(image_block_x_for_source_offset(image_layout, source_offset))
+    } else {
+        None
+    }
 }
 
 fn image_block_is_whole_selected(
@@ -4520,6 +4553,58 @@ mod tests {
         assert_eq!(image_block_x_for_source_offset(&image_layout, 4), px(0.));
         assert_eq!(image_block_x_for_source_offset(&image_layout, 20), px(100.));
         assert_eq!(image_block_x_for_source_offset(&image_layout, 39), px(200.));
+    }
+
+    #[test]
+    fn image_block_caret_x_tracks_collapsed_source_boundaries() {
+        let image_source = "![alt](https://example.com/cat.png)";
+        let mut buffer = Buffer::local(&format!("{image_source}\n"));
+        let snapshot = buffer.snapshot();
+        let image_layout = RenderedImageBlockLayout {
+            image_block: RenderedImageBlock {
+                url: "https://example.com/cat.png".to_string(),
+                alt_text: "alt".to_string(),
+                source_range: 0..image_source.len(),
+            },
+            width: px(200.),
+            image_height: px(120.),
+        };
+        let selection = Selection {
+            id: 0,
+            start: Point::new(0, 0),
+            end: Point::new(0, image_source.len() as u32),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+
+        assert_eq!(
+            image_block_caret_x(
+                &snapshot,
+                &image_layout,
+                &collapsed_selection(Point::new(0, 0))
+            ),
+            Some(px(0.))
+        );
+        assert_eq!(
+            image_block_caret_x(
+                &snapshot,
+                &image_layout,
+                &collapsed_selection(Point::new(0, image_source.len() as u32))
+            ),
+            Some(px(200.))
+        );
+        assert_eq!(
+            image_block_caret_x(
+                &snapshot,
+                &image_layout,
+                &collapsed_selection(Point::new(0, 1))
+            ),
+            None
+        );
+        assert_eq!(
+            image_block_caret_x(&snapshot, &image_layout, &selection),
+            None
+        );
     }
 
     #[test]
