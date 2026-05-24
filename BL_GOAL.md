@@ -210,11 +210,20 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Current atom width is still derived from the fallback shaped text width; replacing that with actual GPUI element measurement remains open.
 - Added focused helper tests for inline atom `LineFragment::element` conversion and invalid fragment range fallback.
 
+### 2026-05-25 - Inline atom box width includes padding
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Inline math atom width now represents the whole rendered element box instead of only the fallback text content width.
+- The width helper adds the atom's horizontal padding to the shaped fallback content width, and the render path applies the same padding inside the fixed-width atom container.
+- Wrapping, caret x mapping, selection bounds, hit testing, and rendered atom width now all consume the same padded atom geometry.
+- Added a focused helper test for the padded inline atom width formula.
+- The content width is still derived from fallback text shaping; measuring real GPUI inline element content remains open.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 58/58 tests.
+- `cargo test -p md_editor` passed: 59/59 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work

@@ -211,6 +211,7 @@ impl DisplayRowTextLayout {
 const RENDERED_IMAGE_BLOCK_MAX_WIDTH: gpui::Pixels = px(600.);
 const RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT: gpui::Pixels = px(120.);
 const INLINE_MATH_ATOM_EXTRA_HEIGHT: gpui::Pixels = px(4.);
+const INLINE_MATH_ATOM_HORIZONTAL_PADDING: gpui::Pixels = px(4.);
 
 #[derive(Clone, Debug, PartialEq)]
 enum DisplayBlockLayout {
@@ -2168,7 +2169,7 @@ fn assign_inline_atom_widths(
         };
         let start_x = shaped_line.x_for_index(atom.display_range.start);
         let end_x = shaped_line.x_for_index(atom.display_range.end);
-        atom.width = (end_x - start_x).max(px(1.));
+        atom.width = inline_atom_width(atom.kind, (end_x - start_x).max(px(1.)));
     }
 }
 
@@ -3145,6 +3146,7 @@ fn render_inline_atom_piece(atom: &DisplayInlineAtom, text: String) -> gpui::Any
             div()
                 .h(atom.height)
                 .w(atom.width)
+                .px(inline_atom_horizontal_padding(atom.kind))
                 .flex()
                 .items_center()
                 .rounded_sm()
@@ -3335,6 +3337,16 @@ fn inline_math_atom_for_span(
 fn inline_atom_height(kind: DisplayInlineAtomKind, row_style: RowDisplayStyle) -> gpui::Pixels {
     match kind {
         DisplayInlineAtomKind::InlineMath => row_style.line_height + INLINE_MATH_ATOM_EXTRA_HEIGHT,
+    }
+}
+
+fn inline_atom_width(kind: DisplayInlineAtomKind, content_width: gpui::Pixels) -> gpui::Pixels {
+    content_width + inline_atom_horizontal_padding(kind) * 2.
+}
+
+fn inline_atom_horizontal_padding(kind: DisplayInlineAtomKind) -> gpui::Pixels {
+    match kind {
+        DisplayInlineAtomKind::InlineMath => INLINE_MATH_ATOM_HORIZONTAL_PADDING,
     }
 }
 
@@ -3998,6 +4010,14 @@ mod tests {
         assert_eq!(
             visual_row_height_for_range(&fragments, &(12..18), row_style),
             row_style.line_height
+        );
+    }
+
+    #[test]
+    fn inline_atom_width_includes_horizontal_padding() {
+        assert_eq!(
+            inline_atom_width(DisplayInlineAtomKind::InlineMath, px(30.)),
+            px(30.) + INLINE_MATH_ATOM_HORIZONTAL_PADDING * 2.
         );
     }
 
