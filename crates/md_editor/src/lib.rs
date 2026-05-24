@@ -1997,8 +1997,10 @@ fn render_display_row_layout(
         DisplayRowLayout::Text(text_layout) => {
             render_row_text(snapshot, display_row, text_layout, selection, row_style, cx)
         }
-        DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(image_block)) => {
-            vec![render_image_block(image_block, cx)]
+        DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(image_layout)) => {
+            let selected =
+                image_block_is_whole_selected(snapshot, &image_layout.image_block, selection);
+            vec![render_image_block(image_layout, selected, cx)]
         }
     }
 }
@@ -3019,6 +3021,7 @@ fn image_block_x_for_source_offset(
 
 fn render_image_block(
     image_layout: RenderedImageBlockLayout,
+    selected: bool,
     cx: &mut Context<MarkdownEditor>,
 ) -> gpui::AnyElement {
     let palette = editor_palette();
@@ -3041,6 +3044,9 @@ fn render_image_block(
     div()
         .w_full()
         .py(RENDERED_IMAGE_BLOCK_VERTICAL_PADDING)
+        .when(selected, |this| {
+            this.bg(palette.selection_background.opacity(0.20))
+        })
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event, window, cx| {
@@ -3062,7 +3068,11 @@ fn render_image_block(
                 .h(image_height)
                 .rounded_md()
                 .border_1()
-                .border_color(palette.gutter_text)
+                .border_color(if selected {
+                    palette.selection_background
+                } else {
+                    palette.gutter_text
+                })
                 .bg(palette.fenced_code_background)
                 .overflow_hidden()
                 .child(
@@ -3083,6 +3093,14 @@ fn render_image_block(
                 ),
         )
         .into_any_element()
+}
+
+fn image_block_is_whole_selected(
+    snapshot: &BufferSnapshot,
+    image_block: &RenderedImageBlock,
+    selection: &Selection<Point>,
+) -> bool {
+    !selection.is_empty() && selection_byte_range(snapshot, selection) == image_block.source_range
 }
 
 fn caret_element(caret_x: gpui::Pixels, row_style: RowDisplayStyle) -> gpui::AnyElement {
@@ -4383,6 +4401,48 @@ mod tests {
                 source_range: 0..image_source_end,
             })
         );
+    }
+
+    #[test]
+    fn image_block_whole_selection_is_selected_state() {
+        let image_source = "![alt](https://example.com/cat.png)";
+        let mut buffer = Buffer::local(&format!("{image_source}\nnext\n"));
+        let snapshot = buffer.snapshot();
+        let image_block = RenderedImageBlock {
+            url: "https://example.com/cat.png".to_string(),
+            alt_text: "alt".to_string(),
+            source_range: 0..image_source.len(),
+        };
+        let whole_selection = Selection {
+            id: 0,
+            start: Point::new(0, 0),
+            end: Point::new(0, image_source.len() as u32),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        let partial_selection = Selection {
+            id: 0,
+            start: Point::new(0, 0),
+            end: Point::new(0, 1),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+
+        assert!(image_block_is_whole_selected(
+            &snapshot,
+            &image_block,
+            &whole_selection
+        ));
+        assert!(!image_block_is_whole_selected(
+            &snapshot,
+            &image_block,
+            &partial_selection
+        ));
+        assert!(!image_block_is_whole_selected(
+            &snapshot,
+            &image_block,
+            &collapsed_selection(Point::new(0, 0))
+        ));
     }
 
     #[test]

@@ -283,11 +283,19 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Inline images with surrounding text still use source character movement, preserving non-block image editing behavior.
 - Added coverage for image-block horizontal movement, image-block horizontal selection, and inline-image character movement.
 
+### 2026-05-25 - Whole image block selection has visible state
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Rendered image block rendering now receives a selected state derived from the selection source range.
+- When the full standalone image source range is selected, the rendered block keeps its image layout and applies a selection-tinted row background plus selected border color.
+- Partial selections and collapsed cursors do not trigger the selected block styling.
+- Added coverage for the image-block whole-selection state helper.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 70/70 tests.
+- `cargo test -p md_editor` passed: 71/71 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work
