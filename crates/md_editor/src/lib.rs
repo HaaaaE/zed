@@ -222,6 +222,7 @@ impl DisplayRowLayout {
 struct RenderedImageBlock {
     url: String,
     alt_text: String,
+    source_range: Range<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -976,6 +977,49 @@ impl MarkdownEditor {
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
+    fn mouse_left_down_on_image_block(
+        &mut self,
+        image_block: &RenderedImageBlock,
+        image_width: gpui::Pixels,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.focus(&self.focus_handle.clone(), cx);
+        self.is_selecting_with_mouse = true;
+
+        let snapshot = self.buffer.snapshot();
+        let point =
+            point_for_image_block_mouse_x(&snapshot, image_block, image_width, event.position.x);
+        let previous_selection = self.selection.clone();
+        self.selection = if event.modifiers.shift {
+            select_to_point(&snapshot, &self.selection, point)
+        } else {
+            collapsed_selection(point)
+        };
+        self.notify_after_selection_change(&previous_selection, cx);
+    }
+
+    fn mouse_move_on_image_block(
+        &mut self,
+        image_block: &RenderedImageBlock,
+        image_width: gpui::Pixels,
+        event: &MouseMoveEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.is_selecting_with_mouse || event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+
+        let snapshot = self.buffer.snapshot();
+        let point =
+            point_for_image_block_mouse_x(&snapshot, image_block, image_width, event.position.x);
+        let previous_selection = self.selection.clone();
+        self.selection = select_to_point(&snapshot, &self.selection, point);
+        self.notify_after_selection_change(&previous_selection, cx);
+    }
+
     fn mouse_left_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.is_selecting_with_mouse = false;
     }
@@ -1587,7 +1631,7 @@ fn render_display_row_layout(
             render_row_text(snapshot, display_row, text_layout, selection, row_style, cx)
         }
         DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(image_block)) => {
-            vec![render_image_block(image_block)]
+            vec![render_image_block(image_block, cx)]
         }
     }
 }
@@ -2039,9 +2083,38 @@ fn display_offset_for_visual_row_x(
     display_offset
 }
 
-fn render_image_block(image_layout: RenderedImageBlockLayout) -> gpui::AnyElement {
+fn point_for_image_block_mouse_x(
+    snapshot: &BufferSnapshot,
+    image_block: &RenderedImageBlock,
+    image_width: gpui::Pixels,
+    x: gpui::Pixels,
+) -> Point {
+    let image_x = (x - gutter_width()).max(px(0.));
+    let offset = if image_x < image_width * 0.5 {
+        image_block.source_range.start
+    } else {
+        image_block.source_range.end
+    };
+    let offset = snapshot
+        .as_text_snapshot()
+        .as_rope()
+        .floor_char_boundary(offset);
+
+    clip_cursor(
+        snapshot,
+        snapshot.as_text_snapshot().offset_to_point(offset),
+    )
+}
+
+fn render_image_block(
+    image_layout: RenderedImageBlockLayout,
+    cx: &mut Context<MarkdownEditor>,
+) -> gpui::AnyElement {
     let palette = editor_palette();
     let image_block = image_layout.image_block;
+    let mouse_down_image_block = image_block.clone();
+    let mouse_move_image_block = image_block.clone();
+    let image_width = image_layout.width;
     let fallback_label = if image_block.alt_text.trim().is_empty() {
         image_block
             .url
@@ -2060,6 +2133,27 @@ fn render_image_block(image_layout: RenderedImageBlockLayout) -> gpui::AnyElemen
             div()
                 .w(image_layout.width)
                 .h(image_layout.height)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event, window, cx| {
+                        this.mouse_left_down_on_image_block(
+                            &mouse_down_image_block,
+                            image_width,
+                            event,
+                            window,
+                            cx,
+                        )
+                    }),
+                )
+                .on_mouse_move(cx.listener(move |this, event, window, cx| {
+                    this.mouse_move_on_image_block(
+                        &mouse_move_image_block,
+                        image_width,
+                        event,
+                        window,
+                        cx,
+                    )
+                }))
                 .rounded_md()
                 .border_1()
                 .border_color(palette.gutter_text)
@@ -2143,6 +2237,7 @@ fn rendered_image_block_for_row(
     Some(RenderedImageBlock {
         url: span.url.clone()?,
         alt_text: display_row.text.trim().to_string(),
+        source_range: span.source_range.clone(),
     })
 }
 
@@ -2757,7 +2852,33 @@ mod tests {
             Some(RenderedImageBlock {
                 url: "https://example.com/cat.png".to_string(),
                 alt_text: "alt".to_string(),
+                source_range: 0..35,
             })
+        );
+    }
+
+    #[test]
+    fn image_block_mouse_x_maps_to_source_range_edges() {
+        let mut buffer = Buffer::local("![alt](https://example.com/cat.png)\n");
+        let snapshot = buffer.snapshot();
+        let image_block = RenderedImageBlock {
+            url: "https://example.com/cat.png".to_string(),
+            alt_text: "alt".to_string(),
+            source_range: 0..35,
+        };
+
+        assert_eq!(
+            point_for_image_block_mouse_x(&snapshot, &image_block, px(200.), gutter_width()),
+            Point::new(0, 0)
+        );
+        assert_eq!(
+            point_for_image_block_mouse_x(
+                &snapshot,
+                &image_block,
+                px(200.),
+                gutter_width() + px(160.)
+            ),
+            Point::new(0, 35)
         );
     }
 

@@ -76,10 +76,21 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Added pure helper tests for aspect-ratio height calculation and invalid zero-size image dimensions.
 - This is still only the remote-image block path. General Rendered-mode GPUI block measurement and inline GPUI element layout remain open.
 
+### 2026-05-25 - Remote image block mouse hit testing
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Remote image block rows now retain the source range for the Markdown image syntax.
+- The rendered image element now handles left mouse down and drag events:
+  - clicking or dragging on the left half maps to the image source range start,
+  - clicking or dragging on the right half maps to the image source range end,
+  - shift-click and drag selection use the same selection update paths as text rows.
+- Added a pure helper test for image block mouse x-position mapping.
+- This improves block row cursor/selection consistency, but does not replace the need for a general fragment hit-test model for arbitrary GPUI inline and block elements.
+
 ## Verification
 
 - `cargo fmt -p md_editor -p markdown_editor` passed.
-- `cargo test -p md_editor` passed: 33/33 tests.
+- `cargo test -p md_editor` passed: 34/34 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work
