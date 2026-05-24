@@ -368,11 +368,18 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - This prevents a `WrappedHorizontalPosition` visual-row index captured before a resize from influencing caret ownership, Home/End, or subsequent vertical movement after soft-wrap rows are recomputed.
 - Added coverage that width changes clear the goal once while preserving selection shape, and unchanged widths leave newly established goals intact.
 
+### 2026-05-25 - Undo/redo history drops stale visual-row goals
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Selection history stored for edit transactions now strips layout-specific goals from both the before and after selections.
+- This prevents undo/redo from restoring a `WrappedHorizontalPosition` captured under an older visual-row layout while preserving selection id, range, and direction.
+- Added coverage that transaction selection state keeps the selection shape but stores `SelectionGoal::None` for both sides.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 81/81 tests.
+- `cargo test -p md_editor` passed: 82/82 tests.
 - `cargo check -p markdown_editor` passed.
 - `git diff --check` passed with only the existing LF/CRLF warning for `crates/md_editor/src/lib.rs`.
 

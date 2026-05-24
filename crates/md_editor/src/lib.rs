@@ -940,8 +940,10 @@ impl MarkdownEditor {
         let Some(transaction_id) = transaction_id else {
             return;
         };
-        self.selection_history
-            .insert(transaction_id, TransactionSelectionState { before, after });
+        self.selection_history.insert(
+            transaction_id,
+            transaction_selection_state_without_goals(before, after),
+        );
     }
 
     fn notify_after_edit(
@@ -1514,6 +1516,16 @@ fn selection_without_goal(selection: &Selection<Point>) -> Selection<Point> {
     let mut selection = selection.clone();
     selection.goal = SelectionGoal::None;
     selection
+}
+
+fn transaction_selection_state_without_goals(
+    before: Selection<Point>,
+    after: Selection<Point>,
+) -> TransactionSelectionState {
+    TransactionSelectionState {
+        before: selection_without_goal(&before),
+        after: selection_without_goal(&after),
+    }
 }
 
 fn apply_text_wrap_width_change(
@@ -5675,6 +5687,44 @@ mod tests {
                 end: Point::new(3, 1),
                 reversed: true,
                 goal: SelectionGoal::None,
+            }
+        );
+    }
+
+    #[test]
+    fn transaction_selection_history_drops_layout_goals() {
+        let before = Selection {
+            id: 7,
+            start: Point::new(0, 2),
+            end: Point::new(3, 1),
+            reversed: true,
+            goal: SelectionGoal::WrappedHorizontalPosition((2, 48.)),
+        };
+        let after = Selection {
+            id: 8,
+            start: Point::new(1, 0),
+            end: Point::new(1, 4),
+            reversed: false,
+            goal: SelectionGoal::WrappedHorizontalPosition((1, 24.)),
+        };
+
+        assert_eq!(
+            transaction_selection_state_without_goals(before, after),
+            TransactionSelectionState {
+                before: Selection {
+                    id: 7,
+                    start: Point::new(0, 2),
+                    end: Point::new(3, 1),
+                    reversed: true,
+                    goal: SelectionGoal::None,
+                },
+                after: Selection {
+                    id: 8,
+                    start: Point::new(1, 0),
+                    end: Point::new(1, 4),
+                    reversed: false,
+                    goal: SelectionGoal::None,
+                },
             }
         );
     }
