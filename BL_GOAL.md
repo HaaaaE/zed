@@ -173,11 +173,20 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Added focused tests for rendered Backspace/Delete atom deletion, active inline math character deletion, and Source-mode character deletion.
 - This keeps keyboard deletion consistent with Rendered-mode horizontal atom navigation, while richer atom-specific selection visuals remain open.
 
+### 2026-05-25 - Whole-atom selection keeps rendered atom display
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Rendered-mode projection now treats a non-empty selection that exactly matches an inline math atom's source range as an atom selection rather than an active editing range.
+- Selecting a whole inline math atom now keeps marker ranges hidden, so the row continues to display the atom fallback text and the selected display range maps to the rendered atom content.
+- Partial selections inside inline math still reveal the source markers, preserving the existing editing path for active math content.
+- Added focused tests for whole-atom selection staying inactive and partial atom selection still revealing source syntax.
+- This keeps keyboard selection display consistent with atom-aware horizontal movement, while richer atom-specific selection visuals remain open.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 50/50 tests.
+- `cargo test -p md_editor` passed: 52/52 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work

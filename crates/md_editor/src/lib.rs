@@ -3195,7 +3195,11 @@ fn active_source_range_for_selection(
 ) -> Option<Range<usize>> {
     let selection = clip_selection(snapshot, selection);
     if !selection.is_empty() {
-        return Some(selection_byte_range(snapshot, &selection));
+        let selection_range = selection_byte_range(snapshot, &selection);
+        if selection_range_is_whole_inline_atom(snapshot, &selection_range) {
+            return None;
+        }
+        return Some(selection_range);
     }
 
     let text_snapshot = snapshot.as_text_snapshot();
@@ -3215,6 +3219,17 @@ fn active_source_range_for_selection(
             .floor_char_boundary(offset.saturating_sub(1));
         Some(start..offset)
     }
+}
+
+fn selection_range_is_whole_inline_atom(
+    snapshot: &BufferSnapshot,
+    selection_range: &Range<usize>,
+) -> bool {
+    snapshot.syntax_tree().inline_spans().iter().any(|span| {
+        span.kind == MarkdownInlineKind::InlineMath
+            && &span.source_range == selection_range
+            && !span.marker_ranges.is_empty()
+    })
 }
 
 fn source_range_to_row_range(
@@ -3359,6 +3374,57 @@ mod tests {
         );
 
         assert_eq!(rows[0].text, "Before **bold** after");
+    }
+
+    #[test]
+    fn rendered_display_rows_keep_whole_inline_atom_inactive_when_selected() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let snapshot = buffer.snapshot();
+        let atom_start = "Before ".len();
+        let atom_end = "Before $x + y$".len();
+        let selection = Selection {
+            id: 0,
+            start: Point::new(0, atom_start as u32),
+            end: Point::new(0, atom_end as u32),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+
+        let rows = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        );
+
+        assert_eq!(rows[0].text, "Before x + y after");
+        assert_eq!(
+            selected_range_for_row(&snapshot, &rows[0], &selection),
+            Some(7..12)
+        );
+    }
+
+    #[test]
+    fn rendered_display_rows_reveal_partially_selected_inline_atom() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let snapshot = buffer.snapshot();
+        let content_start = "Before $".len();
+        let selection = Selection {
+            id: 0,
+            start: Point::new(0, content_start as u32),
+            end: Point::new(0, content_start as u32 + 1),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+
+        let rows = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        );
+
+        assert_eq!(rows[0].text, "Before $x + y$ after");
     }
 
     #[test]
