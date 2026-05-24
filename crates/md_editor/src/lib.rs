@@ -355,6 +355,7 @@ impl MarkdownEditor {
         }
 
         self.mode = mode;
+        self.selection = selection_without_goal(&self.selection);
         self.clear_row_layout_cache();
         self.display_list_state.remeasure();
         cx.notify();
@@ -1504,6 +1505,12 @@ fn collapsed_selection_with_goal(point: Point, goal: SelectionGoal) -> Selection
         reversed: false,
         goal,
     }
+}
+
+fn selection_without_goal(selection: &Selection<Point>) -> Selection<Point> {
+    let mut selection = selection.clone();
+    selection.goal = SelectionGoal::None;
+    selection
 }
 
 pub fn move_left(snapshot: &BufferSnapshot, cursor: Point) -> Point {
@@ -5630,6 +5637,28 @@ mod tests {
                 SelectionGoal::WrappedHorizontalPosition((1, 0.))
             ),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn selection_without_goal_preserves_selection_shape() {
+        let selection = Selection {
+            id: 7,
+            start: Point::new(0, 2),
+            end: Point::new(3, 1),
+            reversed: true,
+            goal: SelectionGoal::WrappedHorizontalPosition((2, 48.)),
+        };
+
+        assert_eq!(
+            selection_without_goal(&selection),
+            Selection {
+                id: 7,
+                start: Point::new(0, 2),
+                end: Point::new(3, 1),
+                reversed: true,
+                goal: SelectionGoal::None,
+            }
         );
     }
 

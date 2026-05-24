@@ -354,11 +354,18 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - The empty-row intersection check preserves half-open selection semantics, so a selection ending at the empty row's start does not mark that row selected.
 - Added coverage for selected empty rows and for non-empty visual-row boundary touches that should not produce a zero-width selection marker.
 
+### 2026-05-25 - Mode switches drop stale visual-row goals
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Switching between Source and Rendered modes now clears the current selection goal while preserving the selection shape.
+- This prevents a `WrappedHorizontalPosition` visual-row index captured in one layout mode from influencing caret ownership, Home/End, or subsequent vertical movement after the mode's projected row layout changes.
+- Added coverage that clearing the goal preserves selection id, range, and direction.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 79/79 tests.
+- `cargo test -p md_editor` passed: 80/80 tests.
 - `cargo check -p markdown_editor` passed.
 - `git diff --check` passed with only the existing LF/CRLF warning for `crates/md_editor/src/lib.rs`.
 
