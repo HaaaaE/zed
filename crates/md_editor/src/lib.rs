@@ -417,23 +417,24 @@ impl MarkdownEditor {
     pub fn move_to_beginning_of_line(
         &mut self,
         _: &MoveToBeginningOfLine,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let previous_selection = self.selection.clone();
         self.selection =
-            move_selection_to_beginning_of_line(&self.buffer.snapshot(), &self.selection);
+            self.move_selection_visual_line_boundary(window, cx, VisualLineBoundary::Start, false);
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn move_to_end_of_line(
         &mut self,
         _: &MoveToEndOfLine,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let previous_selection = self.selection.clone();
-        self.selection = move_selection_to_end_of_line(&self.buffer.snapshot(), &self.selection);
+        self.selection =
+            self.move_selection_visual_line_boundary(window, cx, VisualLineBoundary::End, false);
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
@@ -493,6 +494,111 @@ impl MarkdownEditor {
         }
     }
 
+    fn move_selection_visual_line_boundary(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        boundary: VisualLineBoundary,
+        extend_selection: bool,
+    ) -> Selection<Point> {
+        let snapshot = self.buffer.snapshot();
+        let selection = clip_selection(&snapshot, &self.selection);
+        let fallback = if extend_selection {
+            match boundary {
+                VisualLineBoundary::Start => select_to_beginning_of_line(&snapshot, &selection),
+                VisualLineBoundary::End => select_to_end_of_line(&snapshot, &selection),
+            }
+        } else {
+            match boundary {
+                VisualLineBoundary::Start => {
+                    move_selection_to_beginning_of_line(&snapshot, &selection)
+                }
+                VisualLineBoundary::End => move_selection_to_end_of_line(&snapshot, &selection),
+            }
+        };
+
+        let Some((target, goal)) =
+            self.visual_line_boundary_target_point(&snapshot, &selection, boundary, window, cx)
+        else {
+            return fallback;
+        };
+
+        if extend_selection {
+            let mut updated = selection.clone();
+            updated.set_head(target, goal);
+            updated
+        } else {
+            let mut updated = selection.clone();
+            updated.collapse_to(target, goal);
+            updated
+        }
+    }
+
+    fn visual_line_boundary_target_point(
+        &mut self,
+        snapshot: &BufferSnapshot,
+        selection: &Selection<Point>,
+        boundary: VisualLineBoundary,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<(Point, SelectionGoal)> {
+        let cursor = clip_cursor(snapshot, selection.head());
+        let display_row = display_rows_in_mode(
+            snapshot,
+            cursor.row as usize..cursor.row as usize + 1,
+            Some(selection),
+            self.mode,
+        )
+        .into_iter()
+        .next()?;
+        let row_style = row_display_style(snapshot, display_row.row, self.mode);
+        let wrap_width = text_wrap_width(window);
+        let layout = self.cached_row_layout(
+            snapshot,
+            &display_row,
+            selection,
+            self.mode,
+            row_style,
+            wrap_width,
+            window,
+            cx,
+        );
+
+        match layout {
+            DisplayRowLayout::Text(text_layout) => {
+                let source_offset = snapshot.as_text_snapshot().point_to_offset(cursor);
+                let display_offset = display_row
+                    .projection
+                    .source_to_display(source_offset)
+                    .min(text_layout.text_len);
+                let (visual_row_index, target_display_offset) = visual_line_boundary_for_caret(
+                    &text_layout.visual_rows,
+                    display_offset,
+                    text_layout.text_len,
+                    selection.goal,
+                    boundary,
+                )?;
+                let visual_row = &text_layout.visual_rows[visual_row_index];
+                let point = point_for_display_offset(snapshot, &display_row, target_display_offset);
+                let target_x = text_layout.shaped_line.x_for_index(target_display_offset)
+                    - visual_row.line_start_x;
+                Some((point, visual_horizontal_goal(visual_row_index, target_x)))
+            }
+            DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(image_layout)) => {
+                let source_offset = match boundary {
+                    VisualLineBoundary::Start => image_layout.image_block.source_range.start,
+                    VisualLineBoundary::End => image_layout.image_block.source_range.end,
+                };
+                let x = match boundary {
+                    VisualLineBoundary::Start => px(0.),
+                    VisualLineBoundary::End => image_layout.width,
+                };
+                let point = snapshot.as_text_snapshot().offset_to_point(source_offset);
+                Some((point, visual_horizontal_goal(0, x)))
+            }
+        }
+    }
+
     fn visual_vertical_target_point(
         &mut self,
         snapshot: &BufferSnapshot,
@@ -534,10 +640,11 @@ impl MarkdownEditor {
                     .projection
                     .source_to_display(source_offset)
                     .min(text_layout.text_len);
-                let visual_row_index = visual_row_index_containing_caret(
+                let visual_row_index = visual_row_index_for_caret(
                     &text_layout.visual_rows,
                     display_offset,
                     text_layout.text_len,
+                    selection.goal,
                 )?;
                 let visual_row = &text_layout.visual_rows[visual_row_index];
                 let cursor_x =
@@ -643,22 +750,24 @@ impl MarkdownEditor {
     pub fn select_to_beginning_of_line(
         &mut self,
         _: &SelectToBeginningOfLine,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let previous_selection = self.selection.clone();
-        self.selection = select_to_beginning_of_line(&self.buffer.snapshot(), &self.selection);
+        self.selection =
+            self.move_selection_visual_line_boundary(window, cx, VisualLineBoundary::Start, true);
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn select_to_end_of_line(
         &mut self,
         _: &SelectToEndOfLine,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let previous_selection = self.selection.clone();
-        self.selection = select_to_end_of_line(&self.buffer.snapshot(), &self.selection);
+        self.selection =
+            self.move_selection_visual_line_boundary(window, cx, VisualLineBoundary::End, true);
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
@@ -1884,11 +1993,12 @@ fn render_row_text(
     };
 
     let mut elements = Vec::new();
-    for visual_row in text_layout.visual_rows.clone() {
+    for (visual_row_index, visual_row) in text_layout.visual_rows.clone().into_iter().enumerate() {
         elements.push(render_visual_text_row(
             snapshot,
             display_row,
             &text_layout,
+            visual_row_index,
             visual_row,
             selection,
             selected_range.as_ref(),
@@ -2206,6 +2316,7 @@ fn render_visual_text_row(
     snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
     text_layout: &DisplayRowTextLayout,
+    visual_row_index: usize,
     visual_row: VisualDisplayRow,
     selection: &Selection<Point>,
     selected_range: Option<&Range<usize>>,
@@ -2254,6 +2365,7 @@ fn render_visual_text_row(
                 display_row,
                 selection,
                 text_layout,
+                visual_row_index,
                 &visual_row,
             ),
             |this, caret_x| this.child(caret_element(caret_x, row_style)),
@@ -2363,6 +2475,7 @@ fn caret_position_for_visual_row(
     display_row: &DisplayRow,
     selection: &Selection<Point>,
     text_layout: &DisplayRowTextLayout,
+    visual_row_index: usize,
     visual_row: &VisualDisplayRow,
 ) -> Option<gpui::Pixels> {
     if !selection.is_empty() {
@@ -2381,7 +2494,13 @@ fn caret_position_for_visual_row(
         .projection
         .source_to_display(cursor_offset)
         .min(text_layout.text_len);
-    if !visual_row_contains_caret(visual_row, display_offset, text_layout.text_len) {
+    if visual_row_index_for_caret(
+        &text_layout.visual_rows,
+        display_offset,
+        text_layout.text_len,
+        selection.goal,
+    )? != visual_row_index
+    {
         return None;
     }
 
@@ -2409,6 +2528,54 @@ fn visual_row_index_containing_caret(
     visual_rows
         .iter()
         .position(|visual_row| visual_row_contains_caret(visual_row, display_offset, text_len))
+}
+
+fn visual_row_index_for_caret(
+    visual_rows: &[VisualDisplayRow],
+    display_offset: usize,
+    text_len: usize,
+    goal: SelectionGoal,
+) -> Option<usize> {
+    if let SelectionGoal::WrappedHorizontalPosition((visual_row_index, _)) = goal
+        && let Ok(visual_row_index) = usize::try_from(visual_row_index)
+        && let Some(visual_row) = visual_rows.get(visual_row_index)
+        && visual_row_contains_display_offset(visual_row, display_offset)
+    {
+        return Some(visual_row_index);
+    }
+
+    visual_row_index_containing_caret(visual_rows, display_offset, text_len)
+}
+
+fn visual_row_contains_display_offset(
+    visual_row: &VisualDisplayRow,
+    display_offset: usize,
+) -> bool {
+    visual_row.display_range.start <= display_offset
+        && display_offset <= visual_row.display_range.end
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VisualLineBoundary {
+    Start,
+    End,
+}
+
+fn visual_line_boundary_for_caret(
+    visual_rows: &[VisualDisplayRow],
+    display_offset: usize,
+    text_len: usize,
+    goal: SelectionGoal,
+    boundary: VisualLineBoundary,
+) -> Option<(usize, usize)> {
+    let visual_row_index = visual_row_index_for_caret(visual_rows, display_offset, text_len, goal)?;
+    let visual_row = visual_rows.get(visual_row_index)?;
+    let target = match boundary {
+        VisualLineBoundary::Start => visual_row.display_range.start,
+        VisualLineBoundary::End => visual_row.display_range.end,
+    };
+
+    Some((visual_row_index, target))
 }
 
 fn desired_visual_x(goal: SelectionGoal, cursor_x: gpui::Pixels) -> gpui::Pixels {
@@ -2441,6 +2608,19 @@ fn point_for_visual_row_x(
         .as_rope()
         .floor_char_boundary(source_offset);
     Some(snapshot.as_text_snapshot().offset_to_point(source_offset))
+}
+
+fn point_for_display_offset(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    display_offset: usize,
+) -> Point {
+    let source_offset = display_row.projection.display_to_source(display_offset);
+    let source_offset = snapshot
+        .as_text_snapshot()
+        .as_rope()
+        .floor_char_boundary(source_offset);
+    snapshot.as_text_snapshot().offset_to_point(source_offset)
 }
 
 fn display_offset_for_visual_row_x(
@@ -4145,6 +4325,96 @@ mod tests {
         assert_eq!(
             visual_row_index_containing_caret(&visual_rows, 11, 10),
             None
+        );
+    }
+
+    #[test]
+    fn visual_row_index_for_caret_uses_wrapped_goal_at_boundary() {
+        let visual_rows = vec![
+            VisualDisplayRow {
+                display_range: 0..5,
+                line_start_x: px(0.),
+                top: px(0.),
+                height: px(20.),
+            },
+            VisualDisplayRow {
+                display_range: 5..10,
+                line_start_x: px(48.),
+                top: px(20.),
+                height: px(20.),
+            },
+        ];
+
+        assert_eq!(
+            visual_row_index_for_caret(&visual_rows, 5, 10, SelectionGoal::None),
+            Some(1)
+        );
+        assert_eq!(
+            visual_row_index_for_caret(
+                &visual_rows,
+                5,
+                10,
+                SelectionGoal::WrappedHorizontalPosition((0, 48.))
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            visual_row_index_for_caret(
+                &visual_rows,
+                5,
+                10,
+                SelectionGoal::WrappedHorizontalPosition((1, 0.))
+            ),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn visual_line_boundary_for_caret_uses_current_visual_row() {
+        let visual_rows = vec![
+            VisualDisplayRow {
+                display_range: 0..5,
+                line_start_x: px(0.),
+                top: px(0.),
+                height: px(20.),
+            },
+            VisualDisplayRow {
+                display_range: 5..10,
+                line_start_x: px(48.),
+                top: px(20.),
+                height: px(20.),
+            },
+        ];
+
+        assert_eq!(
+            visual_line_boundary_for_caret(
+                &visual_rows,
+                2,
+                10,
+                SelectionGoal::None,
+                VisualLineBoundary::Start
+            ),
+            Some((0, 0))
+        );
+        assert_eq!(
+            visual_line_boundary_for_caret(
+                &visual_rows,
+                2,
+                10,
+                SelectionGoal::None,
+                VisualLineBoundary::End
+            ),
+            Some((0, 5))
+        );
+        assert_eq!(
+            visual_line_boundary_for_caret(
+                &visual_rows,
+                5,
+                10,
+                SelectionGoal::WrappedHorizontalPosition((0, 48.)),
+                VisualLineBoundary::End
+            ),
+            Some((0, 5))
         );
     }
 

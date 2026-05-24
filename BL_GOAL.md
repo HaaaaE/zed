@@ -191,11 +191,20 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Added focused tests for atom-boundary cursor display and content cursor marker reveal.
 - This keeps the display state consistent with atom-aware horizontal movement at atom boundaries.
 
+### 2026-05-25 - Visual line boundaries drive Home/End on wrapped rows
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- `MoveToBeginningOfLine`, `MoveToEndOfLine`, `SelectToBeginningOfLine`, and `SelectToEndOfLine` now use the current visual row when wrapped layout is available, falling back to the source-line helpers when layout cannot be resolved.
+- Text rows map the current visual row's start or end display offset back through the Markdown projection, so Source and Rendered modes keep hidden marker handling consistent with the visible row.
+- Remote image block rows map Home/End to the rendered image source range edges, matching the existing block mouse and vertical movement behavior.
+- `SelectionGoal::WrappedHorizontalPosition` now disambiguates caret ownership at soft-wrap boundaries, so a caret at the end of a wrapped visual row can still render and continue moving from that visual row instead of defaulting to the next row's start.
+- Added focused pure helper tests for wrapped-boundary caret ownership and visual-row Home/End targets.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 54/54 tests.
+- `cargo test -p md_editor` passed: 56/56 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work
