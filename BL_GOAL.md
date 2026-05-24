@@ -219,6 +219,14 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Added a focused helper test for the padded inline atom width formula.
 - The content width is still derived from fallback text shaping; measuring real GPUI inline element content remains open.
 
+### 2026-05-25 - Inline atom width measured from rendered element
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Rendered text rows now measure inline atom width from the same GPUI element tree used for rendering, including atom padding, font family, text size, line height, and nowrap behavior.
+- The measured width is used before fragment-aware wrapping, so inline atom line breaks, caret x mapping, selection bounds, and mouse/keyboard hit targets consume the rendered element box width instead of only the shaped fallback text width.
+- Measurement is only performed from the render/prepaint layout path because `layout_as_root` is phase-sensitive in GPUI.
+- Event paths reuse a cached measured layout when available. If a row has not yet been measured by rendering, they compute a non-cached fallback layout from shaped text width so mouse and keyboard handling do not call `layout_as_root` outside the allowed phase.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
@@ -228,7 +236,7 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 
 ## Known Remaining Work
 
-- Replace fallback-text-derived inline atom width with real Rendered-mode GPUI inline element measurement, including invalidation when measured element dimensions change.
+- Generalize inline atom measurement beyond the current inactive inline math atom path, and add invalidation for dynamic element dimensions if future atom content can resize after the row is cached.
 - Implement general block-level GPUI elements as measured list items or subitems. Remote image blocks now update from loaded image dimensions, but arbitrary GPUI block measurement is not solved.
 - Add stronger runtime or visual tests for visual-row keyboard movement, especially Rendered-mode marker reveal/hide transitions.
 - Add stronger runtime or visual tests for resize reflow, wrapped hit testing, selection across visual rows, mode switching at wrapped positions, and Rendered image/block behavior.

@@ -562,6 +562,7 @@ impl MarkdownEditor {
             self.mode,
             row_style,
             wrap_width,
+            false,
             window,
             cx,
         );
@@ -634,6 +635,7 @@ impl MarkdownEditor {
             self.mode,
             row_style,
             wrap_width,
+            false,
             window,
             cx,
         );
@@ -714,6 +716,7 @@ impl MarkdownEditor {
             self.mode,
             target_row_style,
             wrap_width,
+            false,
             window,
             cx,
         );
@@ -1031,6 +1034,7 @@ impl MarkdownEditor {
         mode: MarkdownEditorMode,
         row_style: RowDisplayStyle,
         wrap_width: gpui::Pixels,
+        measure_inline_atoms: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> DisplayRowLayout {
@@ -1056,10 +1060,11 @@ impl MarkdownEditor {
             mode,
             row_style,
             wrap_width,
+            measure_inline_atoms,
             window,
             cx,
         );
-        if matches!(layout, DisplayRowLayout::Text(_)) {
+        if measure_inline_atoms && matches!(layout, DisplayRowLayout::Text(_)) {
             self.row_layout_cache.insert(cache_key, layout.clone());
         }
         layout
@@ -1087,6 +1092,7 @@ impl MarkdownEditor {
             self.mode,
             row_style,
             wrap_width,
+            false,
             window,
             cx,
         ) {
@@ -1131,6 +1137,7 @@ impl MarkdownEditor {
             self.mode,
             row_style,
             wrap_width,
+            false,
             window,
             cx,
         ) {
@@ -1273,6 +1280,7 @@ impl Render for MarkdownEditor {
                             mode,
                             row_style,
                             wrap_width,
+                            true,
                             window,
                             _cx,
                         );
@@ -2046,6 +2054,7 @@ fn compute_display_row_layout(
     mode: MarkdownEditorMode,
     row_style: RowDisplayStyle,
     wrap_width: gpui::Pixels,
+    measure_inline_atoms: bool,
     window: &mut Window,
     cx: &mut App,
 ) -> DisplayRowLayout {
@@ -2062,6 +2071,7 @@ fn compute_display_row_layout(
         mode,
         row_style,
         wrap_width,
+        measure_inline_atoms,
         window,
         cx,
     ))
@@ -2109,6 +2119,7 @@ fn text_layout_for_display_row(
     mode: MarkdownEditorMode,
     row_style: RowDisplayStyle,
     wrap_width: gpui::Pixels,
+    measure_inline_atoms: bool,
     window: &mut Window,
     cx: &mut App,
 ) -> DisplayRowTextLayout {
@@ -2121,7 +2132,11 @@ fn text_layout_for_display_row(
         &text_runs,
         None,
     );
-    assign_inline_atom_widths(&mut fragments, &shaped_line);
+    if measure_inline_atoms {
+        measure_inline_atom_widths(&mut fragments, &shaped_line, row_style, window, cx);
+    } else {
+        assign_inline_atom_fallback_widths(&mut fragments, &shaped_line);
+    }
     let visual_rows = if has_inline_atoms(&fragments) {
         visual_rows_for_fragments(
             &display_row.text,
@@ -2159,7 +2174,7 @@ fn text_layout_for_display_row(
     }
 }
 
-fn assign_inline_atom_widths(
+fn assign_inline_atom_fallback_widths(
     fragments: &mut [DisplayInlineFragment],
     shaped_line: &gpui::ShapedLine,
 ) {
@@ -2167,10 +2182,56 @@ fn assign_inline_atom_widths(
         let DisplayInlineFragment::Atom(atom) = fragment else {
             continue;
         };
-        let start_x = shaped_line.x_for_index(atom.display_range.start);
-        let end_x = shaped_line.x_for_index(atom.display_range.end);
-        atom.width = inline_atom_width(atom.kind, (end_x - start_x).max(px(1.)));
+        let content_width = fallback_inline_atom_content_width(atom, shaped_line);
+        atom.width = inline_atom_width(atom.kind, content_width);
     }
+}
+
+fn measure_inline_atom_widths(
+    fragments: &mut [DisplayInlineFragment],
+    shaped_line: &gpui::ShapedLine,
+    row_style: RowDisplayStyle,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    for fragment in fragments {
+        let DisplayInlineFragment::Atom(atom) = fragment else {
+            continue;
+        };
+        let content_width = fallback_inline_atom_content_width(atom, shaped_line);
+        atom.width = measure_inline_atom_width(atom, content_width, row_style, window, cx);
+    }
+}
+
+fn fallback_inline_atom_content_width(
+    atom: &DisplayInlineAtom,
+    shaped_line: &gpui::ShapedLine,
+) -> gpui::Pixels {
+    let start_x = shaped_line.x_for_index(atom.display_range.start);
+    let end_x = shaped_line.x_for_index(atom.display_range.end);
+    (end_x - start_x).max(px(1.))
+}
+
+fn measure_inline_atom_width(
+    atom: &DisplayInlineAtom,
+    fallback_content_width: gpui::Pixels,
+    row_style: RowDisplayStyle,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui::Pixels {
+    let fallback_width = inline_atom_width(atom.kind, fallback_content_width);
+    let mut element =
+        render_inline_atom_measurement_piece(atom, atom.fallback_text.clone(), row_style);
+    let size = element.layout_as_root(
+        gpui::size(
+            gpui::AvailableSpace::MaxContent,
+            gpui::AvailableSpace::Definite(atom.height),
+        ),
+        window,
+        cx,
+    );
+
+    size.width.max(fallback_width).max(px(1.))
 }
 
 fn has_inline_atoms(fragments: &[DisplayInlineFragment]) -> bool {
@@ -2479,6 +2540,7 @@ fn render_visual_text_row(
         .children(render_fragments_for_visual_row(
             &text_layout.fragments,
             &visual_row,
+            row_style,
         ))
         .when_some(
             caret_position_for_visual_row(
@@ -2531,6 +2593,7 @@ fn selection_elements_for_visual_row(
 fn render_fragments_for_visual_row(
     fragments: &[DisplayInlineFragment],
     visual_row: &VisualDisplayRow,
+    row_style: RowDisplayStyle,
 ) -> Vec<gpui::AnyElement> {
     let mut elements = Vec::new();
 
@@ -2554,7 +2617,7 @@ fn render_fragments_for_visual_row(
                 ) else {
                     continue;
                 };
-                elements.push(render_inline_atom_piece(atom, text));
+                elements.push(render_inline_atom_piece(atom, text, row_style));
             }
         }
     }
@@ -3139,20 +3202,47 @@ fn render_text_piece(text: String, style: &DisplayTextStyle) -> gpui::AnyElement
     element.into_any_element()
 }
 
-fn render_inline_atom_piece(atom: &DisplayInlineAtom, text: String) -> gpui::AnyElement {
+fn render_inline_atom_piece(
+    atom: &DisplayInlineAtom,
+    text: String,
+    row_style: RowDisplayStyle,
+) -> gpui::AnyElement {
+    render_inline_atom_element(atom, text, row_style, Some(atom.width))
+}
+
+fn render_inline_atom_measurement_piece(
+    atom: &DisplayInlineAtom,
+    text: String,
+    row_style: RowDisplayStyle,
+) -> gpui::AnyElement {
+    render_inline_atom_element(atom, text, row_style, None)
+}
+
+fn render_inline_atom_element(
+    atom: &DisplayInlineAtom,
+    text: String,
+    row_style: RowDisplayStyle,
+    width: Option<gpui::Pixels>,
+) -> gpui::AnyElement {
     match atom.kind {
         DisplayInlineAtomKind::InlineMath => {
             let palette = editor_palette();
-            div()
+            let mut element = div()
                 .h(atom.height)
-                .w(atom.width)
                 .px(inline_atom_horizontal_padding(atom.kind))
                 .flex()
                 .items_center()
+                .font_family(EDITOR_FONT_FAMILY)
+                .text_size(row_style.text_size)
+                .line_height(row_style.line_height)
+                .whitespace_nowrap()
                 .rounded_sm()
                 .bg(palette.inline_math_text.opacity(0.08))
-                .child(render_text_piece(text, &atom.style))
-                .into_any_element()
+                .child(render_text_piece(text, &atom.style));
+            if let Some(width) = width {
+                element = element.w(width);
+            }
+            element.into_any_element()
         }
     }
 }
