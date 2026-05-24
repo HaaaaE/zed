@@ -382,11 +382,18 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - This prevents a `WrappedHorizontalPosition` captured under the previous marker reveal/hide projection from influencing caret ownership or Home/End after the row projection changes, while preserving the desired x position for continued vertical movement.
 - Added coverage that active-range changes downgrade wrapped goals to horizontal goals while preserving selection shape, and unchanged active ranges leave newly established wrapped goals intact.
 
+### 2026-05-25 - Wrapped selection bounds stay visual-row-relative
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Added focused coverage for selection bounds across multiple soft-wrapped visual rows.
+- The test locks down that partial first/last visual rows and fully selected middle visual rows compute their selection rectangles relative to each visual row's own `line_start_x`.
+- This strengthens the wrapped-selection geometry coverage without changing runtime behavior.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 83/83 tests.
+- `cargo test -p md_editor` passed: 84/84 tests.
 - `cargo check -p markdown_editor` passed.
 - `git diff --check` passed with only the existing LF/CRLF warning for `crates/md_editor/src/lib.rs`.
 

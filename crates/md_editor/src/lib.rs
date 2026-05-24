@@ -5586,6 +5586,81 @@ mod tests {
     }
 
     #[test]
+    fn selection_bounds_are_relative_to_each_wrapped_visual_row() {
+        let text = "abcdefghijklmno".to_string();
+        let text_system = gpui::WindowTextSystem::new(std::sync::Arc::new(gpui::TextSystem::new(
+            std::sync::Arc::new(gpui::NoopTextSystem::new()),
+        )));
+        let shaped_line = text_system.shape_line(
+            SharedString::from(text.clone()),
+            px(10.),
+            &[TextRun {
+                len: text.len(),
+                font: font(EDITOR_FONT_FAMILY),
+                ..Default::default()
+            }],
+            None,
+        );
+        let fragments = vec![DisplayInlineFragment::Text(StyledDisplaySegment {
+            display_range: 0..text.len(),
+            text,
+            style: DisplayTextStyle::default(),
+        })];
+        let visual_rows = vec![
+            VisualDisplayRow {
+                display_range: 0..5,
+                line_start_x: px(0.),
+                top: px(0.),
+                height: px(20.),
+            },
+            VisualDisplayRow {
+                display_range: 5..10,
+                line_start_x: shaped_line.x_for_index(5),
+                top: px(20.),
+                height: px(20.),
+            },
+            VisualDisplayRow {
+                display_range: 10..15,
+                line_start_x: shaped_line.x_for_index(10),
+                top: px(40.),
+                height: px(20.),
+            },
+        ];
+        let text_layout = DisplayRowTextLayout {
+            fragments,
+            visual_rows: visual_rows.clone(),
+            shaped_line,
+            text_len: 15,
+        };
+        let selected_range = 2..13;
+
+        assert_eq!(
+            selection_bounds_for_visual_row(&text_layout, Some(&selected_range), &visual_rows[0]),
+            Some((
+                display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, 2),
+                display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, 5)
+                    - display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, 2)
+            ))
+        );
+        assert_eq!(
+            selection_bounds_for_visual_row(&text_layout, Some(&selected_range), &visual_rows[1]),
+            Some((
+                px(0.),
+                display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, 10)
+                    - display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, 5)
+            ))
+        );
+        assert_eq!(
+            selection_bounds_for_visual_row(&text_layout, Some(&selected_range), &visual_rows[2]),
+            Some((
+                px(0.),
+                display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, 13)
+                    - display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, 10)
+            ))
+        );
+    }
+
+    #[test]
     fn visual_row_contains_caret_assigns_wrap_boundary_to_next_row() {
         let first_visual_row = VisualDisplayRow {
             display_range: 0..5,
