@@ -1187,13 +1187,13 @@ impl MarkdownEditor {
         self.is_selecting_with_mouse = true;
 
         let snapshot = self.buffer.snapshot();
-        let point =
-            point_for_image_block_mouse_x(&snapshot, image_block, image_width, event.position.x);
+        let (point, goal) =
+            mouse_target_for_image_block(&snapshot, image_block, image_width, event.position.x);
         let previous_selection = self.selection.clone();
         self.selection = if event.modifiers.shift {
-            select_to_point(&snapshot, &self.selection, point)
+            select_to_point_with_goal(&snapshot, &self.selection, point, goal)
         } else {
-            collapsed_selection(point)
+            collapsed_selection_with_goal(point, goal)
         };
         self.notify_after_selection_change(&previous_selection, cx);
     }
@@ -1211,10 +1211,10 @@ impl MarkdownEditor {
         }
 
         let snapshot = self.buffer.snapshot();
-        let point =
-            point_for_image_block_mouse_x(&snapshot, image_block, image_width, event.position.x);
+        let (point, goal) =
+            mouse_target_for_image_block(&snapshot, image_block, image_width, event.position.x);
         let previous_selection = self.selection.clone();
-        self.selection = select_to_point(&snapshot, &self.selection, point);
+        self.selection = select_to_point_with_goal(&snapshot, &self.selection, point, goal);
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
@@ -3055,6 +3055,27 @@ fn point_for_image_block_mouse_x(
     point_for_image_block_x(snapshot, image_block, image_width, x - gutter_width())
 }
 
+fn mouse_target_for_image_block(
+    snapshot: &BufferSnapshot,
+    image_block: &RenderedImageBlock,
+    image_width: gpui::Pixels,
+    x: gpui::Pixels,
+) -> (Point, SelectionGoal) {
+    let point = point_for_image_block_mouse_x(snapshot, image_block, image_width, x);
+    let source_offset = snapshot.as_text_snapshot().point_to_offset(point);
+    (
+        point,
+        visual_horizontal_goal(
+            0,
+            image_block_visible_x_for_source_offset(
+                &image_block.source_range,
+                image_width,
+                source_offset,
+            ),
+        ),
+    )
+}
+
 fn point_for_image_block_x(
     snapshot: &BufferSnapshot,
     image_block: &RenderedImageBlock,
@@ -3090,13 +3111,24 @@ fn image_block_x_for_source_offset(
     image_layout: &RenderedImageBlockLayout,
     source_offset: usize,
 ) -> gpui::Pixels {
-    let source_range = &image_layout.image_block.source_range;
+    image_block_visible_x_for_source_offset(
+        &image_layout.image_block.source_range,
+        image_layout.width,
+        source_offset,
+    )
+}
+
+fn image_block_visible_x_for_source_offset(
+    source_range: &Range<usize>,
+    image_width: gpui::Pixels,
+    source_offset: usize,
+) -> gpui::Pixels {
     if source_offset <= source_range.start {
         px(0.)
     } else if source_offset >= source_range.end {
-        image_layout.width
+        image_width
     } else {
-        image_layout.width * 0.5
+        image_width * 0.5
     }
 }
 
@@ -4820,6 +4852,40 @@ mod tests {
                 gutter_width() + px(260.)
             ),
             Point::new(0, 35)
+        );
+    }
+
+    #[test]
+    fn image_block_mouse_target_tracks_visible_caret_goal() {
+        let mut buffer = Buffer::local("![alt](https://example.com/cat.png)\n");
+        let snapshot = buffer.snapshot();
+        let image_block = RenderedImageBlock {
+            url: "https://example.com/cat.png".to_string(),
+            alt_text: "alt".to_string(),
+            source_range: 0..35,
+        };
+
+        assert_eq!(
+            mouse_target_for_image_block(&snapshot, &image_block, px(200.), gutter_width()),
+            (Point::new(0, 0), visual_horizontal_goal(0, px(0.)))
+        );
+        assert_eq!(
+            mouse_target_for_image_block(
+                &snapshot,
+                &image_block,
+                px(200.),
+                gutter_width() + px(160.)
+            ),
+            (Point::new(0, 35), visual_horizontal_goal(0, px(200.)))
+        );
+        assert_eq!(
+            mouse_target_for_image_block(
+                &snapshot,
+                &image_block,
+                px(200.),
+                gutter_width() + px(260.)
+            ),
+            (Point::new(0, 35), visual_horizontal_goal(0, px(200.)))
         );
     }
 
