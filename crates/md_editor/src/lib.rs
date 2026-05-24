@@ -2,9 +2,9 @@ use std::{collections::HashMap, ops::Range};
 
 use gpui::{
     App, Context, EventEmitter, FocusHandle, Focusable, FontWeight, IntoElement, KeyBinding,
-    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, SharedString,
-    StatefulInteractiveElement, TextAlign, TextRun, Window, div, font, img, prelude::*, px,
-    uniform_list,
+    KeyDownEvent, ListAlignment, ListSizingBehavior, ListState, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Render, SharedString, TextAlign, TextRun, Window, div, font, img,
+    list, prelude::*, px,
 };
 use markdown_wysiwyg::{MarkdownBlockKind, MarkdownInlineKind, MarkdownProjectionMap};
 use md_buffer::{Buffer, BufferSnapshot};
@@ -88,6 +88,7 @@ pub fn init_standalone(cx: &mut App) {
 pub struct MarkdownEditor {
     buffer: Buffer,
     focus_handle: FocusHandle,
+    display_list_state: ListState,
     mode: MarkdownEditorMode,
     selection: Selection<Point>,
     is_selecting_with_mouse: bool,
@@ -137,6 +138,7 @@ struct TransactionSelectionState {
     before: Selection<Point>,
     after: Selection<Point>,
 }
+
 #[derive(Clone, Debug, Default, PartialEq)]
 struct DisplayTextStyle {
     color: Option<gpui::Hsla>,
@@ -187,10 +189,12 @@ pub enum MarkdownEditorEvent {
 impl EventEmitter<MarkdownEditorEvent> for MarkdownEditor {}
 
 impl MarkdownEditor {
-    pub fn new(buffer: Buffer, cx: &mut Context<Self>) -> Self {
+    pub fn new(mut buffer: Buffer, cx: &mut Context<Self>) -> Self {
+        let row_count = buffer.snapshot().row_count() as usize;
         Self {
             buffer,
             focus_handle: cx.focus_handle(),
+            display_list_state: ListState::new(row_count, ListAlignment::Top, px(1000.)),
             mode: MarkdownEditorMode::Source,
             selection: collapsed_selection(Point::zero()),
             is_selecting_with_mouse: false,
@@ -229,6 +233,7 @@ impl MarkdownEditor {
         }
 
         self.mode = mode;
+        self.display_list_state.remeasure();
         cx.notify();
     }
 
@@ -262,27 +267,33 @@ impl MarkdownEditor {
     }
 
     pub fn set_cursor(&mut self, cursor: Point) {
+        let previous_selection = self.selection.clone();
         self.selection = collapsed_selection(clip_cursor(&self.buffer.snapshot(), cursor));
+        self.sync_rendered_rows_for_selection_change(&previous_selection);
     }
 
     pub fn move_left(&mut self, _: &MoveLeft, _: &mut Window, cx: &mut Context<Self>) {
+        let previous_selection = self.selection.clone();
         self.selection = move_selection_left(&self.buffer.snapshot(), &self.selection);
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn move_right(&mut self, _: &MoveRight, _: &mut Window, cx: &mut Context<Self>) {
+        let previous_selection = self.selection.clone();
         self.selection = move_selection_right(&self.buffer.snapshot(), &self.selection);
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn move_up(&mut self, _: &MoveUp, _: &mut Window, cx: &mut Context<Self>) {
+        let previous_selection = self.selection.clone();
         self.selection = move_selection_vertical(&self.buffer.snapshot(), &self.selection, -1);
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn move_down(&mut self, _: &MoveDown, _: &mut Window, cx: &mut Context<Self>) {
+        let previous_selection = self.selection.clone();
         self.selection = move_selection_vertical(&self.buffer.snapshot(), &self.selection, 1);
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn move_to_beginning_of_line(
@@ -291,9 +302,10 @@ impl MarkdownEditor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let previous_selection = self.selection.clone();
         self.selection =
             move_selection_to_beginning_of_line(&self.buffer.snapshot(), &self.selection);
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn move_to_end_of_line(
@@ -302,28 +314,33 @@ impl MarkdownEditor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let previous_selection = self.selection.clone();
         self.selection = move_selection_to_end_of_line(&self.buffer.snapshot(), &self.selection);
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
+        let previous_selection = self.selection.clone();
         self.selection = select_left(&self.buffer.snapshot(), &self.selection);
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
+        let previous_selection = self.selection.clone();
         self.selection = select_right(&self.buffer.snapshot(), &self.selection);
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
+        let previous_selection = self.selection.clone();
         self.selection = select_vertical(&self.buffer.snapshot(), &self.selection, -1);
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
+        let previous_selection = self.selection.clone();
         self.selection = select_vertical(&self.buffer.snapshot(), &self.selection, 1);
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn select_to_beginning_of_line(
@@ -332,8 +349,9 @@ impl MarkdownEditor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let previous_selection = self.selection.clone();
         self.selection = select_to_beginning_of_line(&self.buffer.snapshot(), &self.selection);
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn select_to_end_of_line(
@@ -342,11 +360,13 @@ impl MarkdownEditor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let previous_selection = self.selection.clone();
         self.selection = select_to_end_of_line(&self.buffer.snapshot(), &self.selection);
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        let previous_selection = self.selection.clone();
         let max_point = self.buffer.snapshot().as_text_snapshot().max_point();
         self.selection = Selection {
             id: 0,
@@ -355,29 +375,35 @@ impl MarkdownEditor {
             reversed: false,
             goal: SelectionGoal::None,
         };
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
         let selection_before = self.selection.clone();
+        let previous_selection = self.selection.clone();
+        let row_count_before = self.display_list_state.item_count();
         let (selection, transaction_id) = backspace_selection(&mut self.buffer, &self.selection);
         let changed = transaction_id.is_some();
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
-        self.notify_after_edit(changed, cx);
+        self.notify_after_edit(changed, row_count_before, &previous_selection, cx);
     }
 
     pub fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
         let selection_before = self.selection.clone();
+        let previous_selection = self.selection.clone();
+        let row_count_before = self.display_list_state.item_count();
         let (selection, transaction_id) = delete_selection(&mut self.buffer, &self.selection);
         let changed = transaction_id.is_some();
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
-        self.notify_after_edit(changed, cx);
+        self.notify_after_edit(changed, row_count_before, &previous_selection, cx);
     }
 
     pub fn insert_newline(&mut self, _: &InsertNewline, _: &mut Window, cx: &mut Context<Self>) {
         let selection_before = self.selection.clone();
+        let previous_selection = self.selection.clone();
+        let row_count_before = self.display_list_state.item_count();
         let current_line_indent = current_line_indent(&self.buffer.snapshot(), self.cursor());
         let insert_text = format!("\n{current_line_indent}");
         let (selection, transaction_id) =
@@ -385,11 +411,13 @@ impl MarkdownEditor {
         let changed = transaction_id.is_some();
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
-        self.notify_after_edit(changed, cx);
+        self.notify_after_edit(changed, row_count_before, &previous_selection, cx);
     }
 
     pub fn tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
         let selection_before = self.selection.clone();
+        let previous_selection = self.selection.clone();
+        let row_count_before = self.display_list_state.item_count();
         let tab_text = if self.settings.use_soft_tabs {
             " ".repeat(self.settings.tab_size)
         } else {
@@ -400,7 +428,7 @@ impl MarkdownEditor {
         let changed = transaction_id.is_some();
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
-        self.notify_after_edit(changed, cx);
+        self.notify_after_edit(changed, row_count_before, &previous_selection, cx);
     }
 
     /// Update editor settings at runtime.
@@ -414,6 +442,8 @@ impl MarkdownEditor {
     }
 
     pub fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
+        let previous_selection = self.selection.clone();
+        let row_count_before = self.display_list_state.item_count();
         let mut changed = false;
         if let Some(transaction_id) = self.buffer.undo() {
             let fallback = collapsed_selection(clip_cursor(&self.buffer.snapshot(), self.cursor()));
@@ -424,10 +454,12 @@ impl MarkdownEditor {
                 .unwrap_or(fallback);
             changed = true;
         }
-        self.notify_after_edit(changed, cx);
+        self.notify_after_edit(changed, row_count_before, &previous_selection, cx);
     }
 
     pub fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
+        let previous_selection = self.selection.clone();
+        let row_count_before = self.display_list_state.item_count();
         let mut changed = false;
         if let Some(transaction_id) = self.buffer.redo() {
             let fallback = collapsed_selection(clip_cursor(&self.buffer.snapshot(), self.cursor()));
@@ -438,7 +470,7 @@ impl MarkdownEditor {
                 .unwrap_or(fallback);
             changed = true;
         }
-        self.notify_after_edit(changed, cx);
+        self.notify_after_edit(changed, row_count_before, &previous_selection, cx);
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -458,13 +490,14 @@ impl MarkdownEditor {
         }
 
         let selection_before = self.selection.clone();
-        let (selection, transaction_id) =
-            replace_selection(&mut self.buffer, &self.selection, text);
+        let previous_selection = self.selection.clone();
+        let row_count_before = self.display_list_state.item_count();
+        let (selection, transaction_id) = replace_selection(&mut self.buffer, &self.selection, text);
         let changed = transaction_id.is_some();
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         cx.stop_propagation();
-        self.notify_after_edit(changed, cx);
+        self.notify_after_edit(changed, row_count_before, &previous_selection, cx);
     }
 
     fn record_selection_history(
@@ -480,11 +513,81 @@ impl MarkdownEditor {
             .insert(transaction_id, TransactionSelectionState { before, after });
     }
 
-    fn notify_after_edit(&mut self, changed: bool, cx: &mut Context<Self>) {
+    fn notify_after_edit(
+        &mut self,
+        changed: bool,
+        row_count_before: usize,
+        previous_selection: &Selection<Point>,
+        cx: &mut Context<Self>,
+    ) {
+        self.sync_display_list_state(row_count_before, previous_selection);
         if changed {
             self.emit_dirty_state(cx);
         } else {
             cx.notify();
+        }
+    }
+
+    fn notify_after_selection_change(
+        &mut self,
+        previous_selection: &Selection<Point>,
+        cx: &mut Context<Self>,
+    ) {
+        self.sync_rendered_rows_for_selection_change(previous_selection);
+        cx.notify();
+    }
+
+    fn sync_display_list_state(
+        &mut self,
+        row_count_before: usize,
+        previous_selection: &Selection<Point>,
+    ) {
+        let row_count_after = self.buffer.snapshot().row_count() as usize;
+        if row_count_before != row_count_after {
+            self.display_list_state.splice(0..row_count_before, row_count_after);
+            if self.mode == MarkdownEditorMode::Rendered {
+                self.display_list_state.remeasure();
+            }
+            return;
+        }
+        self.sync_rendered_rows_for_selection_change(previous_selection);
+    }
+
+    fn sync_rendered_rows_for_selection_change(&mut self, previous_selection: &Selection<Point>) {
+        if self.mode != MarkdownEditorMode::Rendered {
+            return;
+        }
+
+        let snapshot = self.buffer.snapshot();
+        let previous_active = active_source_range_for_selection(&snapshot, previous_selection);
+        let current_active = active_source_range_for_selection(&snapshot, &self.selection);
+        self.remeasure_rows_from_source_ranges(
+            &snapshot,
+            previous_active.as_ref(),
+            current_active.as_ref(),
+        );
+    }
+
+    fn remeasure_rows_from_source_ranges(
+        &self,
+        snapshot: &BufferSnapshot,
+        previous_source_range: Option<&Range<usize>>,
+        current_source_range: Option<&Range<usize>>,
+    ) {
+        let mut ranges = Vec::new();
+        if let Some(previous_source_range) = previous_source_range
+            && let Some(rows) = source_range_to_row_range(snapshot, previous_source_range)
+        {
+            ranges.push(rows);
+        }
+        if let Some(current_source_range) = current_source_range
+            && let Some(rows) = source_range_to_row_range(snapshot, current_source_range)
+        {
+            ranges.push(rows);
+        }
+
+        for rows in merge_overlapping_row_ranges(ranges) {
+            self.display_list_state.remeasure_items(rows);
         }
     }
 
@@ -505,12 +608,13 @@ impl MarkdownEditor {
 
         let snapshot = self.buffer.snapshot();
         let point = point_for_mouse_x(&snapshot, display_row, event.position.x, window, self.mode);
+        let previous_selection = self.selection.clone();
         self.selection = if event.modifiers.shift {
             select_to_point(&snapshot, &self.selection, point)
         } else {
             collapsed_selection(point)
         };
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     fn mouse_move_on_row(
@@ -526,8 +630,9 @@ impl MarkdownEditor {
 
         let snapshot = self.buffer.snapshot();
         let point = point_for_mouse_x(&snapshot, display_row, event.position.x, window, self.mode);
+        let previous_selection = self.selection.clone();
         self.selection = select_to_point(&snapshot, &self.selection, point);
-        cx.notify();
+        self.notify_after_selection_change(&previous_selection, cx);
     }
 
     fn mouse_left_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
@@ -543,7 +648,6 @@ impl Focusable for MarkdownEditor {
 
 impl Render for MarkdownEditor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let row_count = self.row_count() as usize;
         let mode = self.mode;
         let selection = self.selection.clone();
         let palette = editor_palette();
@@ -579,84 +683,80 @@ impl Render for MarkdownEditor {
             .font_family(EDITOR_FONT_FAMILY)
             .text_size(default_metrics.text_size)
             .line_height(default_metrics.line_height)
-            .overflow_y_scroll()
+            .overflow_hidden()
             .child(
-                uniform_list(
-                    "md-editor-display-rows",
-                    row_count,
-                    cx.processor(move |this, range, _window, _cx| {
+                list(
+                    self.display_list_state.clone(),
+                    cx.processor(move |this, row, _window, _cx| {
                         let snapshot = this.buffer.snapshot();
                         let selection = clip_selection(&snapshot, &selection);
                         let cursor = selection.head();
-                        display_rows_in_mode(&snapshot, range, Some(&selection), mode)
-                            .into_iter()
-                            .map(|display_row| {
-                                let is_cursor_row = display_row.row == cursor.row;
-                                let mouse_row = display_row.clone();
-                                let mouse_move_row = display_row.clone();
-                                let row_style = row_display_style(&snapshot, display_row.row, mode);
+                        let Some(display_row) = display_rows_in_mode(
+                            &snapshot,
+                            row..row.saturating_add(1),
+                            Some(&selection),
+                            mode,
+                        )
+                        .into_iter()
+                        .next()
+                        else {
+                            return div().into_any_element();
+                        };
+
+                        let is_cursor_row = display_row.row == cursor.row;
+                        let mouse_row = display_row.clone();
+                        let mouse_move_row = display_row.clone();
+                        let row_style = row_display_style(&snapshot, display_row.row, mode);
+                        div()
+                            .id(display_row.row as usize)
+                            .min_h(row_style.min_height)
+                            .flex()
+                            .items_center()
+                            .when(is_cursor_row, |this| this.bg(palette.current_row_background))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                _cx.listener(move |this, event, window, cx| {
+                                    this.mouse_left_down_on_row(&mouse_row, event, window, cx)
+                                }),
+                            )
+                            .on_mouse_up(MouseButton::Left, _cx.listener(Self::mouse_left_up))
+                            .on_mouse_up_out(MouseButton::Left, _cx.listener(Self::mouse_left_up))
+                            .on_mouse_move(_cx.listener(move |this, event, window, cx| {
+                                this.mouse_move_on_row(&mouse_move_row, event, window, cx)
+                            }))
+                            .child(
                                 div()
-                                    .id(display_row.row as usize)
-                                    .min_h(row_style.min_height)
+                                    .w(gutter_width())
+                                    .pr_2()
+                                    .text_align(TextAlign::Right)
+                                    .text_color(if is_cursor_row {
+                                        palette.gutter_current_text
+                                    } else {
+                                        palette.gutter_text
+                                    })
+                                    .child(SharedString::from((display_row.row + 1).to_string())),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
                                     .flex()
                                     .items_center()
-                                    .when(is_cursor_row, |this| {
-                                        this.bg(palette.current_row_background)
-                                    })
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        _cx.listener(move |this, event, window, cx| {
-                                            this.mouse_left_down_on_row(
-                                                &mouse_row, event, window, cx,
-                                            )
-                                        }),
-                                    )
-                                    .on_mouse_up(
-                                        MouseButton::Left,
-                                        _cx.listener(Self::mouse_left_up),
-                                    )
-                                    .on_mouse_up_out(
-                                        MouseButton::Left,
-                                        _cx.listener(Self::mouse_left_up),
-                                    )
-                                    .on_mouse_move(_cx.listener(move |this, event, window, cx| {
-                                        this.mouse_move_on_row(&mouse_move_row, event, window, cx)
-                                    }))
-                                    .child(
-                                        div()
-                                            .w(gutter_width())
-                                            .pr_2()
-                                            .text_align(TextAlign::Right)
-                                            .text_color(if is_cursor_row {
-                                                palette.gutter_current_text
-                                            } else {
-                                                palette.gutter_text
-                                            })
-                                            .child(SharedString::from(
-                                                (display_row.row + 1).to_string(),
-                                            )),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .flex()
-                                            .items_center()
-                                            .text_size(row_style.text_size)
-                                            .line_height(row_style.line_height)
-                                            .whitespace_nowrap()
-                                            .children(render_row_contents(
-                                                &snapshot,
-                                                &display_row,
-                                                &selection,
-                                                mode,
-                                                row_style,
-                                            )),
-                                    )
-                            })
-                            .collect::<Vec<_>>()
+                                    .text_size(row_style.text_size)
+                                    .line_height(row_style.line_height)
+                                    .whitespace_nowrap()
+                                    .children(render_row_contents(
+                                        &snapshot,
+                                        &display_row,
+                                        &selection,
+                                        mode,
+                                        row_style,
+                                    )),
+                            )
+                            .into_any_element()
                     }),
                 )
-                .h_full(),
+                .with_sizing_behavior(ListSizingBehavior::Auto)
+                .size_full(),
             )
     }
 }
@@ -1687,6 +1787,43 @@ fn active_source_range_for_selection(
             .floor_char_boundary(offset.saturating_sub(1));
         Some(start..offset)
     }
+}
+
+fn source_range_to_row_range(
+    snapshot: &BufferSnapshot,
+    source_range: &Range<usize>,
+) -> Option<Range<usize>> {
+    if source_range.start >= source_range.end {
+        return None;
+    }
+
+    let text_snapshot = snapshot.as_text_snapshot();
+    let start_point = text_snapshot.offset_to_point(source_range.start);
+    let end_point = text_snapshot.offset_to_point(source_range.end.saturating_sub(1));
+    let start_row = start_point.row as usize;
+    let end_row_exclusive = end_point.row as usize + 1;
+    Some(start_row..end_row_exclusive)
+}
+
+fn merge_overlapping_row_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
+    if ranges.is_empty() {
+        return ranges;
+    }
+
+    ranges.sort_by_key(|range| (range.start, range.end));
+    let mut merged = Vec::with_capacity(ranges.len());
+    let mut current = ranges[0].clone();
+
+    for range in ranges.into_iter().skip(1) {
+        if range.start <= current.end {
+            current.end = current.end.max(range.end);
+        } else {
+            merged.push(current);
+            current = range;
+        }
+    }
+    merged.push(current);
+    merged
 }
 
 #[cfg(test)]
