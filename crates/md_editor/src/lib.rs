@@ -160,6 +160,26 @@ struct StyledDisplaySegment {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+enum DisplayInlineFragment {
+    Text(StyledDisplaySegment),
+    Atom(DisplayInlineAtom),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct DisplayInlineAtom {
+    kind: DisplayInlineAtomKind,
+    source_range: Range<usize>,
+    display_range: Range<usize>,
+    fallback_text: String,
+    style: DisplayTextStyle,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DisplayInlineAtomKind {
+    InlineMath,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 struct VisualDisplayRow {
     display_range: Range<usize>,
     line_start_x: gpui::Pixels,
@@ -168,7 +188,7 @@ struct VisualDisplayRow {
 
 #[derive(Clone, Debug)]
 struct DisplayRowTextLayout {
-    segments: Vec<StyledDisplaySegment>,
+    fragments: Vec<DisplayInlineFragment>,
     visual_rows: Vec<VisualDisplayRow>,
     shaped_line: gpui::ShapedLine,
     text_len: usize,
@@ -1733,7 +1753,8 @@ fn text_layout_for_display_row(
     wrap_width: gpui::Pixels,
     window: &mut Window,
 ) -> DisplayRowTextLayout {
-    let segments = styled_display_segments(snapshot, display_row, mode);
+    let fragments = display_inline_fragments(snapshot, display_row, mode);
+    let segments = text_segments_for_fragments(&fragments);
     let text_runs = text_runs_for_segments(&segments);
     let shaped_line = window.text_system().shape_line(
         SharedString::from(display_row.text.clone()),
@@ -1756,7 +1777,7 @@ fn text_layout_for_display_row(
     };
 
     DisplayRowTextLayout {
-        segments,
+        fragments,
         visual_rows,
         shaped_line,
         text_len: display_row.text.len(),
@@ -1909,8 +1930,8 @@ fn render_visual_text_row(
             &visual_row,
             row_style,
         ))
-        .children(render_segments_for_visual_row(
-            &text_layout.segments,
+        .children(render_fragments_for_visual_row(
+            &text_layout.fragments,
             &visual_row,
         ))
         .when_some(
@@ -1959,36 +1980,46 @@ fn selection_elements_for_visual_row(
     ]
 }
 
-fn render_segments_for_visual_row(
-    segments: &[StyledDisplaySegment],
+fn render_fragments_for_visual_row(
+    fragments: &[DisplayInlineFragment],
     visual_row: &VisualDisplayRow,
 ) -> Vec<gpui::AnyElement> {
     let mut elements = Vec::new();
 
-    for segment in segments {
-        if segment.display_range.end <= visual_row.display_range.start
-            || segment.display_range.start >= visual_row.display_range.end
+    for fragment in fragments {
+        let (display_range, text, style) = match fragment {
+            DisplayInlineFragment::Text(segment) => (
+                &segment.display_range,
+                segment.text.as_str(),
+                &segment.style,
+            ),
+            DisplayInlineFragment::Atom(atom) => (
+                &atom.display_range,
+                atom.fallback_text.as_str(),
+                &atom.style,
+            ),
+        };
+
+        if display_range.end <= visual_row.display_range.start
+            || display_range.start >= visual_row.display_range.end
         {
             continue;
         }
 
-        let start = segment
-            .display_range
-            .start
-            .max(visual_row.display_range.start);
-        let end = segment.display_range.end.min(visual_row.display_range.end);
+        let start = display_range.start.max(visual_row.display_range.start);
+        let end = display_range.end.min(visual_row.display_range.end);
         if start >= end {
             continue;
         }
 
-        let local_start = start - segment.display_range.start;
-        let local_end = end - segment.display_range.start;
-        let text = segment.text[local_start..local_end].to_string();
+        let local_start = start - display_range.start;
+        let local_end = end - display_range.start;
+        let text = text[local_start..local_end].to_string();
         if text.is_empty() {
             continue;
         }
 
-        elements.push(render_text_piece(text, &segment.style));
+        elements.push(render_text_piece(text, style));
     }
 
     if elements.is_empty() {
@@ -2322,22 +2353,23 @@ fn render_text_piece(text: String, style: &DisplayTextStyle) -> gpui::AnyElement
     element.into_any_element()
 }
 
-fn styled_display_segments(
+fn display_inline_fragments(
     snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
     mode: MarkdownEditorMode,
-) -> Vec<StyledDisplaySegment> {
+) -> Vec<DisplayInlineFragment> {
     let source_range = display_row.projection.visible_source_range();
     let source_text = row_text(snapshot, display_row.row);
     if source_text.is_empty() {
-        return vec![StyledDisplaySegment {
+        return vec![DisplayInlineFragment::Text(StyledDisplaySegment {
             display_range: 0..0,
             text: String::new(),
             style: DisplayTextStyle::default(),
-        }];
+        })];
     }
 
     let style_ranges = markdown_style_ranges_for_row(snapshot, source_range.clone(), mode);
+    let atom_ranges = inline_atom_ranges_for_row(snapshot, display_row, mode);
     let hidden_ranges = display_row.projection.hidden_ranges();
     let mut breakpoints = vec![source_range.start, source_range.end];
     for hidden_range in hidden_ranges {
@@ -2348,10 +2380,14 @@ fn styled_display_segments(
         breakpoints.push(style_range.start);
         breakpoints.push(style_range.end);
     }
+    for atom_range in &atom_ranges {
+        breakpoints.push(atom_range.source_range.start);
+        breakpoints.push(atom_range.source_range.end);
+    }
     breakpoints.sort_unstable();
     breakpoints.dedup();
 
-    let mut segments: Vec<StyledDisplaySegment> = Vec::new();
+    let mut fragments: Vec<DisplayInlineFragment> = Vec::new();
     for window in breakpoints.windows(2) {
         let interval = window[0]..window[1];
         if interval.start >= interval.end
@@ -2359,6 +2395,18 @@ fn styled_display_segments(
                 .iter()
                 .any(|hidden_range| range_contains(hidden_range, &interval))
         {
+            continue;
+        }
+
+        if let Some(atom) = atom_ranges
+            .iter()
+            .find(|atom| range_contains(&atom.source_range, &interval))
+        {
+            if !fragments.iter().any(|fragment| {
+                matches!(fragment, DisplayInlineFragment::Atom(existing) if existing.source_range == atom.source_range)
+            }) {
+                fragments.push(DisplayInlineFragment::Atom(atom.clone()));
+            }
             continue;
         }
 
@@ -2373,30 +2421,108 @@ fn styled_display_segments(
         let display_range = display_row.projection.source_to_display(interval.start)
             ..display_row.projection.source_to_display(interval.end);
 
-        if let Some(previous) = segments.last_mut()
+        if let Some(DisplayInlineFragment::Text(previous)) = fragments.last_mut()
             && previous.style == style
             && previous.display_range.end == display_range.start
         {
             previous.text.push_str(&text);
             previous.display_range.end = display_range.end;
         } else {
-            segments.push(StyledDisplaySegment {
+            fragments.push(DisplayInlineFragment::Text(StyledDisplaySegment {
                 display_range,
                 text,
                 style,
-            });
+            }));
         }
     }
 
-    if segments.is_empty() {
-        vec![StyledDisplaySegment {
+    if fragments.is_empty() {
+        vec![DisplayInlineFragment::Text(StyledDisplaySegment {
             display_range: 0..display_row.text.len(),
             text: display_row.text.clone(),
             style: DisplayTextStyle::default(),
-        }]
+        })]
     } else {
-        segments
+        fragments
     }
+}
+
+fn text_segments_for_fragments(fragments: &[DisplayInlineFragment]) -> Vec<StyledDisplaySegment> {
+    let mut segments: Vec<StyledDisplaySegment> = Vec::new();
+    for fragment in fragments {
+        let segment = match fragment {
+            DisplayInlineFragment::Text(segment) => segment.clone(),
+            DisplayInlineFragment::Atom(atom) => StyledDisplaySegment {
+                display_range: atom.display_range.clone(),
+                text: atom.fallback_text.clone(),
+                style: atom.style.clone(),
+            },
+        };
+
+        if let Some(previous) = segments.last_mut()
+            && previous.style == segment.style
+            && previous.display_range.end == segment.display_range.start
+        {
+            previous.text.push_str(&segment.text);
+            previous.display_range.end = segment.display_range.end;
+        } else {
+            segments.push(segment);
+        }
+    }
+
+    segments
+}
+
+fn inline_atom_ranges_for_row(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    mode: MarkdownEditorMode,
+) -> Vec<DisplayInlineAtom> {
+    if mode != MarkdownEditorMode::Rendered {
+        return Vec::new();
+    }
+
+    let row_source_range = display_row.projection.visible_source_range();
+    let hidden_ranges = display_row.projection.hidden_ranges();
+    snapshot
+        .syntax_tree()
+        .inline_spans()
+        .iter()
+        .filter(|span| {
+            span.kind == MarkdownInlineKind::InlineMath
+                && range_contains(&row_source_range, &span.source_range)
+                && span.marker_ranges.iter().any(|marker_range| {
+                    hidden_ranges
+                        .iter()
+                        .any(|hidden_range| ranges_overlap(marker_range, hidden_range))
+                })
+        })
+        .filter_map(|span| inline_math_atom_for_span(display_row, span))
+        .collect()
+}
+
+fn inline_math_atom_for_span(
+    display_row: &DisplayRow,
+    span: &markdown_wysiwyg::MarkdownInlineSpan,
+) -> Option<DisplayInlineAtom> {
+    let display_range = display_row
+        .projection
+        .source_to_display(span.source_range.start)
+        ..display_row
+            .projection
+            .source_to_display(span.source_range.end);
+    let fallback_text = display_row.text.get(display_range.clone())?.to_string();
+    if fallback_text.is_empty() {
+        return None;
+    }
+
+    Some(DisplayInlineAtom {
+        kind: DisplayInlineAtomKind::InlineMath,
+        source_range: span.source_range.clone(),
+        display_range,
+        fallback_text,
+        style: inline_style(MarkdownInlineKind::InlineMath),
+    })
 }
 
 fn markdown_style_ranges_for_row(
@@ -2823,7 +2949,8 @@ mod tests {
         )
         .remove(0);
 
-        let segments = styled_display_segments(&snapshot, &row, MarkdownEditorMode::Rendered);
+        let fragments = display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered);
+        let segments = text_segments_for_fragments(&fragments);
 
         assert_eq!(segments.len(), 1);
         assert_eq!(segments[0].text, "Title");
@@ -2846,7 +2973,8 @@ mod tests {
         )
         .remove(0);
 
-        let segments = styled_display_segments(&snapshot, &row, MarkdownEditorMode::Rendered);
+        let fragments = display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered);
+        let segments = text_segments_for_fragments(&fragments);
 
         assert_eq!(
             segments
@@ -2860,6 +2988,41 @@ mod tests {
         assert_eq!(
             segments[3].style.color,
             Some(md_theme::editor_palette().inline_code_text)
+        );
+    }
+
+    #[test]
+    fn rendered_inline_fragments_create_inline_math_atom() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let snapshot = buffer.snapshot();
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&collapsed_selection(Point::new(0, 0))),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        assert_eq!(row.text, "Before x + y after");
+
+        let fragments = display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered);
+        let atom = fragments
+            .iter()
+            .find_map(|fragment| match fragment {
+                DisplayInlineFragment::Atom(atom) => Some(atom),
+                DisplayInlineFragment::Text(_) => None,
+            })
+            .expect("expected inline math atom fragment");
+
+        assert_eq!(atom.kind, DisplayInlineAtomKind::InlineMath);
+        assert_eq!(atom.fallback_text, "x + y");
+        assert_eq!(atom.display_range, 7..12);
+        assert_eq!(
+            text_segments_for_fragments(&fragments)
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Before ", "x + y", " after"]
         );
     }
 

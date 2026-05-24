@@ -98,10 +98,23 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Added pure helper tests for image block local x-to-source mapping and source offset-to-visible x mapping.
 - This keeps remote-image block cursor movement consistent with the mouse hit-test path, but still does not implement arbitrary GPUI fragment hit testing or inline element layout.
 
+### 2026-05-25 - Inline fragment foundation for rendered text rows
+
+- Scope: `crates/md_editor/src/lib.rs` and `crates/markdown_wysiwyg/src/markdown_wysiwyg.rs`.
+- Replaced the text-row render path's direct styled-segment storage with a `DisplayInlineFragment` model:
+  - text fragments still render through the existing styled text path,
+  - inline atom fragments can carry source/display ranges, fallback text, and styling for future GPUI element measurement.
+- Added an `InlineMath` atom fragment for inactive Rendered-mode inline math. It currently renders via fallback text, preserving the existing visual output while giving the layout cache an explicit atom boundary to replace with measured GPUI inline content later.
+- Rendered text rows now render from fragments directly and derive text runs from flattened fragments for the current GPUI text shaping path.
+- Fixed inline math projection in `markdown_wysiwyg` so math operators such as `+` are kept as content instead of being hidden as unnamed marker nodes.
+- Added tests for inline math projection and for rendered inline math fragment creation/flattening.
+- This is a structural step toward inline GPUI elements participating in text flow; actual inline element measurement, line-height maxing, hit testing around inline atoms, and GPUI element rendering are still open.
+
 ## Verification
 
-- `cargo fmt -p md_editor -p markdown_editor` passed.
-- `cargo test -p md_editor` passed: 36/36 tests.
+- `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
+- `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
+- `cargo test -p md_editor` passed: 37/37 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work

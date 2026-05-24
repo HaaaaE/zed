@@ -181,7 +181,11 @@ impl MarkdownSyntaxTree {
     }
 
     pub fn source_range_for_rows(&self, rows: Range<usize>) -> Range<usize> {
-        let start = self.line_starts.get(rows.start).copied().unwrap_or(self.source_len);
+        let start = self
+            .line_starts
+            .get(rows.start)
+            .copied()
+            .unwrap_or(self.source_len);
         let end = self
             .line_starts
             .get(rows.end)
@@ -313,8 +317,10 @@ impl MarkdownProjectionMap {
     }
 
     pub fn source_to_display(&self, source_offset: usize) -> usize {
-        let clipped_offset =
-            source_offset.clamp(self.visible_source_range.start, self.visible_source_range.end);
+        let clipped_offset = source_offset.clamp(
+            self.visible_source_range.start,
+            self.visible_source_range.end,
+        );
         let mut display_offset = clipped_offset - self.visible_source_range.start;
 
         for hidden_range in &self.hidden_ranges {
@@ -380,7 +386,10 @@ fn parse_inline_trees(
 
     for parent_node in inline_parent_nodes {
         let ranges = inline_included_ranges(parent_node);
-        if ranges.iter().all(|range| range.start_byte == range.end_byte) {
+        if ranges
+            .iter()
+            .all(|range| range.start_byte == range.end_byte)
+        {
             continue;
         }
 
@@ -388,7 +397,14 @@ fn parse_inline_trees(
             .set_included_ranges(&ranges)
             .expect("failed to set markdown inline parse ranges");
         let inline_tree = inline_parser
-            .parse(source, old_tree.and_then(|tree| tree.inline_trees.get(inline_trees.len()).map(|tree| &tree.tree)))
+            .parse(
+                source,
+                old_tree.and_then(|tree| {
+                    tree.inline_trees
+                        .get(inline_trees.len())
+                        .map(|tree| &tree.tree)
+                }),
+            )
             .expect("tree-sitter markdown inline parser was cancelled");
         inline_tree_by_parent_id.insert(parent_node.id(), inline_trees.len());
         inline_trees.push(MarkdownInlineTree {
@@ -487,8 +503,12 @@ fn inline_span_from_node(source: &str, node: Node<'_>) -> Option<MarkdownInlineS
         "emphasis" => MarkdownInlineKind::Emphasis,
         "strong_emphasis" => MarkdownInlineKind::Strong,
         "code_span" => MarkdownInlineKind::InlineCode,
-        "inline_link" | "full_reference_link" | "collapsed_reference_link" | "shortcut_link"
-        | "uri_autolink" | "email_autolink" => MarkdownInlineKind::Link,
+        "inline_link"
+        | "full_reference_link"
+        | "collapsed_reference_link"
+        | "shortcut_link"
+        | "uri_autolink"
+        | "email_autolink" => MarkdownInlineKind::Link,
         "strikethrough" => MarkdownInlineKind::Strikethrough,
         "image" => MarkdownInlineKind::Image,
         "latex_block" => MarkdownInlineKind::InlineMath,
@@ -499,9 +519,7 @@ fn inline_span_from_node(source: &str, node: Node<'_>) -> Option<MarkdownInlineS
     let marker_ranges = inline_marker_ranges(node);
     let content_ranges = inline_content_ranges(source_range.clone(), &marker_ranges);
     let url = match kind {
-        MarkdownInlineKind::Image | MarkdownInlineKind::Link => {
-            extract_link_url(source, &node)
-        }
+        MarkdownInlineKind::Image | MarkdownInlineKind::Link => extract_link_url(source, &node),
         _ => None,
     };
 
@@ -519,8 +537,13 @@ fn inline_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
-            "emphasis_delimiter" | "code_span_delimiter" | "link_destination"
-            | "link_label" | "link_title" | "latex_span_delimiter" => marker_ranges.push(child.byte_range()),
+            "latex_span_delimiter" => marker_ranges.push(child.byte_range()),
+            _ if node.kind() == "latex_block" => {}
+            "emphasis_delimiter"
+            | "code_span_delimiter"
+            | "link_destination"
+            | "link_label"
+            | "link_title" => marker_ranges.push(child.byte_range()),
             _ if !child.is_named() => marker_ranges.push(child.byte_range()),
             _ => {}
         }
@@ -607,7 +630,8 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
 
 fn atx_heading_block(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
     let source_range = node.byte_range();
-    let (level, marker_range, content_start) = atx_heading_marker_range(source, source_range.clone())?;
+    let (level, marker_range, content_start) =
+        atx_heading_marker_range(source, source_range.clone())?;
 
     let content_end = trim_line_end(source, content_start..source_range.end).end;
 
@@ -799,7 +823,10 @@ mod tests {
         assert_eq!(tree.block_tree().root_node().kind(), "document");
         assert_eq!(tree.source_len(), 14);
         assert_eq!(tree.blocks().len(), 3);
-        assert_eq!(tree.blocks()[0].kind, MarkdownBlockKind::AtxHeading { level: 1 });
+        assert_eq!(
+            tree.blocks()[0].kind,
+            MarkdownBlockKind::AtxHeading { level: 1 }
+        );
         assert_eq!(tree.blocks()[0].source_range, 0..8);
         assert_eq!(tree.blocks()[0].content_range, 2..7);
         assert_eq!(tree.blocks()[0].marker_ranges, vec![0..2]);
@@ -815,7 +842,10 @@ mod tests {
         let tree = tree.reparse_after_edit(old_source, 7..7, new_source);
 
         assert_eq!(tree.source_len(), new_source.len());
-        assert_eq!(tree.blocks()[0].kind, MarkdownBlockKind::AtxHeading { level: 1 });
+        assert_eq!(
+            tree.blocks()[0].kind,
+            MarkdownBlockKind::AtxHeading { level: 1 }
+        );
         assert_eq!(tree.blocks()[0].source_range, 0..9);
         assert_eq!(tree.blocks()[0].content_range, 2..8);
     }
@@ -892,19 +922,34 @@ mod tests {
         assert_eq!(tree.blocks().len(), 2);
         assert_eq!(tree.blocks()[0].kind, MarkdownBlockKind::FencedCodeBlock);
         assert_eq!(tree.blocks()[0].row_range, 0..3);
-        assert_eq!(tree.blocks()[1].kind, MarkdownBlockKind::AtxHeading { level: 1 });
+        assert_eq!(
+            tree.blocks()[1].kind,
+            MarkdownBlockKind::AtxHeading { level: 1 }
+        );
     }
 
     #[test]
     fn parses_pipe_table() {
         let source = "# Title\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n";
         let tree = MarkdownSyntaxTree::parse(source);
-        let table_block = tree.blocks().iter().find(|b| b.kind == MarkdownBlockKind::PipeTable);
+        let table_block = tree
+            .blocks()
+            .iter()
+            .find(|b| b.kind == MarkdownBlockKind::PipeTable);
         assert!(table_block.is_some(), "expected a PipeTable block");
         let table = table_block.unwrap();
-        assert!(!table.marker_ranges.is_empty(), "table should have marker ranges");
-        let has_pipe_marker = table.marker_ranges.iter().any(|r| &source[r.clone()] == "|");
-        assert!(has_pipe_marker, "table markers should include pipe characters");
+        assert!(
+            !table.marker_ranges.is_empty(),
+            "table should have marker ranges"
+        );
+        let has_pipe_marker = table
+            .marker_ranges
+            .iter()
+            .any(|r| &source[r.clone()] == "|");
+        assert!(
+            has_pipe_marker,
+            "table markers should include pipe characters"
+        );
     }
 
     #[test]
@@ -913,6 +958,19 @@ mod tests {
         let tree = MarkdownSyntaxTree::parse(source);
         let spans = tree.inline_spans();
         assert!(spans.iter().any(|s| s.kind == MarkdownInlineKind::Image));
-        assert!(spans.iter().any(|s| s.kind == MarkdownInlineKind::InlineMath));
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.kind == MarkdownInlineKind::InlineMath)
+        );
+    }
+
+    #[test]
+    fn inline_math_projection_keeps_operator_content() {
+        let tree = MarkdownSyntaxTree::parse("Before $x + y$ after\n");
+        let projection = tree.projection_for_visible_rows(0..1, None);
+
+        assert_eq!(projection.hidden_ranges(), &[7..8, 13..14]);
+        assert_eq!(projection.display_len(), "Before x + y after\n".len());
     }
 }
