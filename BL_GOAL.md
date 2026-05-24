@@ -141,11 +141,20 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Added a focused pure helper test for atom range detection and atomic wrap-boundary adjustment.
 - This prevents inline atom render fragments from being split across two visual rows, but cursor and mouse mapping inside atom bounds still need an atom-aware snap policy.
 
+### 2026-05-25 - Inline atom hit targets snap to atom boundaries
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Mouse hit testing and visual-row keyboard movement now share `display_offset_for_visual_row_x`, so both paths use the same atom-aware x-to-display-offset mapping.
+- When a target x position falls inside an inline atom's rendered fallback bounds, the target display offset now snaps to the atom start or end based on the atom midpoint.
+- The soft-wrap end-of-row fallback now preserves a row-end offset when that row ends at an atom boundary, avoiding a snap back into the atom text.
+- Added focused pure helper tests for inline atom midpoint snapping and atom end-boundary detection.
+- This keeps inactive inline math atoms from accepting cursor positions in their interior for mouse/vertical movement. Horizontal movement through inactive atom source content and richer atom selection visuals still remain open.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 40/40 tests.
+- `cargo test -p md_editor` passed: 42/42 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work

@@ -1621,10 +1621,8 @@ fn point_for_mouse_x_in_text_layout(
     text_layout: &DisplayRowTextLayout,
 ) -> Point {
     let text_x = (x - gutter_width()).max(px(0.));
-    let display_offset = text_layout
-        .shaped_line
-        .closest_index_for_x(text_x + visual_row.line_start_x)
-        .clamp(visual_row.display_range.start, visual_row.display_range.end);
+    let display_offset =
+        display_offset_for_visual_row_x(&display_row.text, text_layout, visual_row, text_x);
     let source_offset = display_row.projection.display_to_source(display_offset);
     let source_offset = snapshot
         .as_text_snapshot()
@@ -2218,20 +2216,89 @@ fn display_offset_for_visual_row_x(
     visual_row: &VisualDisplayRow,
     x: gpui::Pixels,
 ) -> usize {
+    let display_x = x.max(px(0.)) + visual_row.line_start_x;
     let display_offset = text_layout
         .shaped_line
-        .closest_index_for_x(x.max(px(0.)) + visual_row.line_start_x)
+        .closest_index_for_x(display_x)
         .clamp(visual_row.display_range.start, visual_row.display_range.end);
+
+    if let Some(atom_offset) = snap_display_offset_to_inline_atom_boundary(
+        text_layout,
+        visual_row,
+        display_offset,
+        display_x,
+    ) {
+        return atom_offset;
+    }
 
     if display_offset == visual_row.display_range.end
         && visual_row.display_range.end < text_layout.text_len
     {
+        if atom_ends_at_display_index(&text_layout.fragments, visual_row.display_range.end) {
+            return display_offset;
+        }
+
         return display_text
             .floor_char_boundary(visual_row.display_range.end.saturating_sub(1))
             .max(visual_row.display_range.start);
     }
 
     display_offset
+}
+
+fn snap_display_offset_to_inline_atom_boundary(
+    text_layout: &DisplayRowTextLayout,
+    visual_row: &VisualDisplayRow,
+    display_offset: usize,
+    display_x: gpui::Pixels,
+) -> Option<usize> {
+    text_layout.fragments.iter().find_map(|fragment| {
+        let DisplayInlineFragment::Atom(atom) = fragment else {
+            return None;
+        };
+        if !ranges_overlap(&atom.display_range, &visual_row.display_range) {
+            return None;
+        }
+
+        let atom_start_x = text_layout
+            .shaped_line
+            .x_for_index(atom.display_range.start);
+        let atom_end_x = text_layout.shaped_line.x_for_index(atom.display_range.end);
+        let offset_inside_atom =
+            atom.display_range.start < display_offset && display_offset < atom.display_range.end;
+        let x_inside_atom = atom_start_x <= display_x && display_x <= atom_end_x;
+        if !offset_inside_atom && !x_inside_atom {
+            return None;
+        }
+
+        Some(inline_atom_boundary_for_x(
+            &atom.display_range,
+            atom_start_x,
+            atom_end_x,
+            display_x,
+        ))
+    })
+}
+
+fn inline_atom_boundary_for_x(
+    atom_range: &Range<usize>,
+    atom_start_x: gpui::Pixels,
+    atom_end_x: gpui::Pixels,
+    display_x: gpui::Pixels,
+) -> usize {
+    let midpoint = atom_start_x + (atom_end_x - atom_start_x) / 2.;
+    if display_x < midpoint {
+        atom_range.start
+    } else {
+        atom_range.end
+    }
+}
+
+fn atom_ends_at_display_index(fragments: &[DisplayInlineFragment], display_index: usize) -> bool {
+    fragments.iter().any(|fragment| match fragment {
+        DisplayInlineFragment::Text(_) => false,
+        DisplayInlineFragment::Atom(atom) => atom.display_range.end == display_index,
+    })
 }
 
 fn point_for_image_block_mouse_x(
@@ -3219,6 +3286,35 @@ mod tests {
         assert_eq!(atomic_wrap_boundary_index(&fragments, 9, 0), 7);
         assert_eq!(atomic_wrap_boundary_index(&fragments, 9, 7), 12);
         assert_eq!(atomic_wrap_boundary_index(&fragments, 15, 12), 15);
+    }
+
+    #[test]
+    fn inline_atom_x_position_snaps_to_nearest_boundary() {
+        let atom_range = 7..12;
+
+        assert_eq!(
+            inline_atom_boundary_for_x(&atom_range, px(70.), px(120.), px(80.)),
+            7
+        );
+        assert_eq!(
+            inline_atom_boundary_for_x(&atom_range, px(70.), px(120.), px(95.)),
+            12
+        );
+    }
+
+    #[test]
+    fn atom_ends_at_display_index_finds_inline_atom_boundary() {
+        let fragments = vec![DisplayInlineFragment::Atom(DisplayInlineAtom {
+            kind: DisplayInlineAtomKind::InlineMath,
+            source_range: 8..15,
+            display_range: 7..12,
+            fallback_text: "x + y".to_string(),
+            style: inline_style(MarkdownInlineKind::InlineMath),
+            height: px(24.),
+        })];
+
+        assert!(!atom_ends_at_display_index(&fragments, 7));
+        assert!(atom_ends_at_display_index(&fragments, 12));
     }
 
     #[test]
