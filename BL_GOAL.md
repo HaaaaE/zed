@@ -148,13 +148,25 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - When a target x position falls inside an inline atom's rendered fallback bounds, the target display offset now snaps to the atom start or end based on the atom midpoint.
 - The soft-wrap end-of-row fallback now preserves a row-end offset when that row ends at an atom boundary, avoiding a snap back into the atom text.
 - Added focused pure helper tests for inline atom midpoint snapping and atom end-boundary detection.
-- This keeps inactive inline math atoms from accepting cursor positions in their interior for mouse/vertical movement. Horizontal movement through inactive atom source content and richer atom selection visuals still remain open.
+- This keeps inactive inline math atoms from accepting cursor positions in their interior for mouse/vertical movement. Richer atom selection visuals still remain open.
+
+### 2026-05-25 - Inline atoms are skipped by rendered horizontal movement
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- `MoveLeft`, `MoveRight`, `SelectLeft`, and `SelectRight` now route through mode-aware helpers.
+- Rendered-mode horizontal movement now treats inactive inline math atoms as atomic:
+  - moving right from the atom source start jumps to the atom source end,
+  - moving left from the atom source end jumps to the atom source start,
+  - shift-selection variants extend selection across the same source range.
+- Source mode still uses normal character movement, and cursors already inside inline math content continue to move character-by-character so active source editing remains available.
+- Added focused tests for rendered atom skipping, rendered atom range selection, active inline math character movement, and Source-mode character movement.
+- This closes the immediate keyboard-horizontal gap for inactive inline atoms, but atom selection is still rendered with the existing source-range highlight rather than a richer atom-specific visual.
 
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 42/42 tests.
+- `cargo test -p md_editor` passed: 46/46 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work

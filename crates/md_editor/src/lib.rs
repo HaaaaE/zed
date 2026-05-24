@@ -390,13 +390,15 @@ impl MarkdownEditor {
 
     pub fn move_left(&mut self, _: &MoveLeft, _: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
-        self.selection = move_selection_left(&self.buffer.snapshot(), &self.selection);
+        self.selection =
+            move_selection_left_in_mode(&self.buffer.snapshot(), &self.selection, self.mode);
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn move_right(&mut self, _: &MoveRight, _: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
-        self.selection = move_selection_right(&self.buffer.snapshot(), &self.selection);
+        self.selection =
+            move_selection_right_in_mode(&self.buffer.snapshot(), &self.selection, self.mode);
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
@@ -437,13 +439,13 @@ impl MarkdownEditor {
 
     pub fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
-        self.selection = select_left(&self.buffer.snapshot(), &self.selection);
+        self.selection = select_left_in_mode(&self.buffer.snapshot(), &self.selection, self.mode);
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
-        self.selection = select_right(&self.buffer.snapshot(), &self.selection);
+        self.selection = select_right_in_mode(&self.buffer.snapshot(), &self.selection, self.mode);
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
@@ -1414,6 +1416,42 @@ pub fn move_selection_right(
     }
 }
 
+fn move_selection_left_in_mode(
+    snapshot: &BufferSnapshot,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+) -> Selection<Point> {
+    let selection = clip_selection(snapshot, selection);
+    if selection.is_empty() {
+        collapsed_selection(move_horizontal_in_mode(
+            snapshot,
+            selection.head(),
+            mode,
+            HorizontalDirection::Left,
+        ))
+    } else {
+        collapsed_selection(selection.start)
+    }
+}
+
+fn move_selection_right_in_mode(
+    snapshot: &BufferSnapshot,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+) -> Selection<Point> {
+    let selection = clip_selection(snapshot, selection);
+    if selection.is_empty() {
+        collapsed_selection(move_horizontal_in_mode(
+            snapshot,
+            selection.head(),
+            mode,
+            HorizontalDirection::Right,
+        ))
+    } else {
+        collapsed_selection(selection.end)
+    }
+}
+
 pub fn move_selection_vertical(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
@@ -1445,6 +1483,30 @@ pub fn select_left(snapshot: &BufferSnapshot, selection: &Selection<Point>) -> S
 
 pub fn select_right(snapshot: &BufferSnapshot, selection: &Selection<Point>) -> Selection<Point> {
     select_to_point(snapshot, selection, move_right(snapshot, selection.head()))
+}
+
+fn select_left_in_mode(
+    snapshot: &BufferSnapshot,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+) -> Selection<Point> {
+    select_to_point(
+        snapshot,
+        selection,
+        move_horizontal_in_mode(snapshot, selection.head(), mode, HorizontalDirection::Left),
+    )
+}
+
+fn select_right_in_mode(
+    snapshot: &BufferSnapshot,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+) -> Selection<Point> {
+    select_to_point(
+        snapshot,
+        selection,
+        move_horizontal_in_mode(snapshot, selection.head(), mode, HorizontalDirection::Right),
+    )
 }
 
 pub fn select_vertical(
@@ -1490,6 +1552,76 @@ pub fn select_to_point(
     let mut updated = selection.clone();
     updated.set_head(head, SelectionGoal::None);
     updated
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HorizontalDirection {
+    Left,
+    Right,
+}
+
+fn move_horizontal_in_mode(
+    snapshot: &BufferSnapshot,
+    cursor: Point,
+    mode: MarkdownEditorMode,
+    direction: HorizontalDirection,
+) -> Point {
+    if mode == MarkdownEditorMode::Rendered
+        && let Some(point) = move_across_rendered_inline_atom(snapshot, cursor, direction)
+    {
+        return point;
+    }
+
+    match direction {
+        HorizontalDirection::Left => move_left(snapshot, cursor),
+        HorizontalDirection::Right => move_right(snapshot, cursor),
+    }
+}
+
+fn move_across_rendered_inline_atom(
+    snapshot: &BufferSnapshot,
+    cursor: Point,
+    direction: HorizontalDirection,
+) -> Option<Point> {
+    let cursor = clip_cursor(snapshot, cursor);
+    let text_snapshot = snapshot.as_text_snapshot();
+    let source_offset = text_snapshot.point_to_offset(cursor);
+    let display_row = display_rows_in_mode(
+        snapshot,
+        cursor.row as usize..cursor.row as usize + 1,
+        None,
+        MarkdownEditorMode::Rendered,
+    )
+    .into_iter()
+    .next()?;
+    let row_style = row_display_style(snapshot, display_row.row, MarkdownEditorMode::Rendered);
+    let atoms = inline_atom_ranges_for_row(
+        snapshot,
+        &display_row,
+        MarkdownEditorMode::Rendered,
+        row_style,
+    );
+
+    let target_offset = atoms
+        .iter()
+        .find_map(|atom| rendered_inline_atom_horizontal_target(atom, source_offset, direction))?;
+    Some(text_snapshot.offset_to_point(target_offset))
+}
+
+fn rendered_inline_atom_horizontal_target(
+    atom: &DisplayInlineAtom,
+    source_offset: usize,
+    direction: HorizontalDirection,
+) -> Option<usize> {
+    match direction {
+        HorizontalDirection::Left if source_offset == atom.source_range.end => {
+            Some(atom.source_range.start)
+        }
+        HorizontalDirection::Right if source_offset == atom.source_range.start => {
+            Some(atom.source_range.end)
+        }
+        _ => None,
+    }
 }
 
 pub fn selection_byte_range(
@@ -3529,6 +3661,113 @@ mod tests {
         let cursor = move_left(&snapshot, cursor);
         assert_eq!(cursor, Point::zero());
         assert_eq!(move_left(&snapshot, cursor), Point::zero());
+    }
+
+    #[test]
+    fn rendered_horizontal_movement_skips_inactive_inline_atom() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let snapshot = buffer.snapshot();
+        let atom_start = "Before ".len();
+        let atom_end = "Before $x + y$".len();
+
+        assert_eq!(
+            move_horizontal_in_mode(
+                &snapshot,
+                Point::new(0, atom_start as u32),
+                MarkdownEditorMode::Rendered,
+                HorizontalDirection::Right,
+            ),
+            Point::new(0, atom_end as u32)
+        );
+        assert_eq!(
+            move_horizontal_in_mode(
+                &snapshot,
+                Point::new(0, atom_end as u32),
+                MarkdownEditorMode::Rendered,
+                HorizontalDirection::Left,
+            ),
+            Point::new(0, atom_start as u32)
+        );
+    }
+
+    #[test]
+    fn rendered_select_horizontal_extends_across_inactive_inline_atom() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let snapshot = buffer.snapshot();
+        let atom_start = "Before ".len();
+        let atom_end = "Before $x + y$".len();
+
+        assert_eq!(
+            select_right_in_mode(
+                &snapshot,
+                &collapsed_selection(Point::new(0, atom_start as u32)),
+                MarkdownEditorMode::Rendered,
+            ),
+            Selection {
+                id: 0,
+                start: Point::new(0, atom_start as u32),
+                end: Point::new(0, atom_end as u32),
+                reversed: false,
+                goal: SelectionGoal::None,
+            }
+        );
+        assert_eq!(
+            select_left_in_mode(
+                &snapshot,
+                &collapsed_selection(Point::new(0, atom_end as u32)),
+                MarkdownEditorMode::Rendered,
+            ),
+            Selection {
+                id: 0,
+                start: Point::new(0, atom_start as u32),
+                end: Point::new(0, atom_end as u32),
+                reversed: true,
+                goal: SelectionGoal::None,
+            }
+        );
+    }
+
+    #[test]
+    fn rendered_horizontal_movement_keeps_active_inline_atom_character_movement() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let snapshot = buffer.snapshot();
+        let atom_content_start = "Before $".len();
+
+        assert_eq!(
+            move_horizontal_in_mode(
+                &snapshot,
+                Point::new(0, atom_content_start as u32),
+                MarkdownEditorMode::Rendered,
+                HorizontalDirection::Right,
+            ),
+            Point::new(0, atom_content_start as u32 + 1)
+        );
+        assert_eq!(
+            move_horizontal_in_mode(
+                &snapshot,
+                Point::new(0, atom_content_start as u32 + 1),
+                MarkdownEditorMode::Rendered,
+                HorizontalDirection::Left,
+            ),
+            Point::new(0, atom_content_start as u32)
+        );
+    }
+
+    #[test]
+    fn source_horizontal_movement_keeps_inline_atom_source_editable() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let snapshot = buffer.snapshot();
+        let atom_start = "Before ".len();
+
+        assert_eq!(
+            move_horizontal_in_mode(
+                &snapshot,
+                Point::new(0, atom_start as u32),
+                MarkdownEditorMode::Source,
+                HorizontalDirection::Right,
+            ),
+            Point::new(0, atom_start as u32 + 1)
+        );
     }
 
     #[test]
