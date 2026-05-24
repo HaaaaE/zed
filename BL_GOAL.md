@@ -256,11 +256,19 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - The block height now includes the same vertical padding used by the rendered element, keeping list measurement, scroll geometry, and block hit area aligned with the actual GPUI element.
 - Added coverage for the padded block-height calculation.
 
+### 2026-05-25 - Whole image block selection stays rendered
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Generalized the whole-rendered-element selection check so an exact non-empty selection of a standalone remote image block behaves like an exact inline math atom selection.
+- Selecting the full Markdown image source range for a standalone remote image block now keeps the row projected as the rendered image block instead of revealing the image syntax.
+- Inline images with surrounding text still reveal source when selected, so only true standalone block images use the rendered block selection behavior.
+- Added coverage for whole image-block selection and for the inline-image whole-selection guard.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 62/62 tests.
+- `cargo test -p md_editor` passed: 64/64 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work

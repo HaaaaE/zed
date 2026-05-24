@@ -3710,7 +3710,7 @@ fn active_source_range_for_selection(
     let selection = clip_selection(snapshot, selection);
     if !selection.is_empty() {
         let selection_range = selection_byte_range(snapshot, &selection);
-        if selection_range_is_whole_inline_atom(snapshot, &selection_range) {
+        if selection_range_is_whole_rendered_element(snapshot, &selection_range) {
             return None;
         }
         return Some(selection_range);
@@ -3738,14 +3738,24 @@ fn active_source_range_for_selection(
     }
 }
 
-fn selection_range_is_whole_inline_atom(
+fn selection_range_is_whole_rendered_element(
     snapshot: &BufferSnapshot,
     selection_range: &Range<usize>,
 ) -> bool {
     snapshot.syntax_tree().inline_spans().iter().any(|span| {
-        span.kind == MarkdownInlineKind::InlineMath
-            && &span.source_range == selection_range
-            && !span.marker_ranges.is_empty()
+        if &span.source_range != selection_range || span.marker_ranges.is_empty() {
+            return false;
+        }
+
+        match span.kind {
+            MarkdownInlineKind::InlineMath => true,
+            MarkdownInlineKind::Image => rendered_remote_image_span_is_block(snapshot, span),
+            MarkdownInlineKind::Emphasis
+            | MarkdownInlineKind::Strong
+            | MarkdownInlineKind::InlineCode
+            | MarkdownInlineKind::Link
+            | MarkdownInlineKind::Strikethrough => false,
+        }
     })
 }
 
@@ -4391,6 +4401,37 @@ mod tests {
     }
 
     #[test]
+    fn rendered_image_block_keeps_whole_selection_inactive() {
+        let mut buffer = Buffer::local("![alt](https://example.com/cat.png)\nnext\n");
+        let snapshot = buffer.snapshot();
+        let image_source_end = "![alt](https://example.com/cat.png)".len();
+        let selection = Selection {
+            id: 0,
+            start: Point::new(0, 0),
+            end: Point::new(0, image_source_end as u32),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        assert_eq!(row.text, "alt");
+        assert_eq!(
+            rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+            Some(RenderedImageBlock {
+                url: "https://example.com/cat.png".to_string(),
+                alt_text: "alt".to_string(),
+                source_range: 0..image_source_end,
+            })
+        );
+    }
+
+    #[test]
     fn image_block_mouse_x_maps_to_source_range_edges() {
         let mut buffer = Buffer::local("![alt](https://example.com/cat.png)\n");
         let snapshot = buffer.snapshot();
@@ -4550,6 +4591,34 @@ mod tests {
         let snapshot = buffer.snapshot();
         let image_start = "before ".len();
         let selection = collapsed_selection(Point::new(0, image_start as u32));
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        assert_eq!(row.text, "before ![alt](https://example.com/cat.png) after");
+        assert_eq!(
+            rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+            None
+        );
+    }
+
+    #[test]
+    fn rendered_inline_image_whole_selection_reveals_source() {
+        let mut buffer = Buffer::local("before ![alt](https://example.com/cat.png) after\n");
+        let snapshot = buffer.snapshot();
+        let image_start = "before ".len();
+        let image_end = "before ![alt](https://example.com/cat.png)".len();
+        let selection = Selection {
+            id: 0,
+            start: Point::new(0, image_start as u32),
+            end: Point::new(0, image_end as u32),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
         let row = display_rows_in_mode(
             &snapshot,
             0..1,
