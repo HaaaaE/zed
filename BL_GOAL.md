@@ -389,11 +389,18 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - The test locks down that partial first/last visual rows and fully selected middle visual rows compute their selection rectangles relative to each visual row's own `line_start_x`.
 - This strengthens the wrapped-selection geometry coverage without changing runtime behavior.
 
+### 2026-05-25 - Wrapped mouse hit testing uses visual-row-local x
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Added focused coverage for mouse hit testing on non-first soft-wrapped visual rows.
+- The test locks down that clicks on a later visual row map x positions relative to that row's `line_start_x`, including row-start and mid-row clicks.
+- This strengthens wrapped hit-testing coverage without changing runtime behavior.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 84/84 tests.
+- `cargo test -p md_editor` passed: 85/85 tests.
 - `cargo check -p markdown_editor` passed.
 - `git diff --check` passed with only the existing LF/CRLF warning for `crates/md_editor/src/lib.rs`.
 

@@ -4694,6 +4694,69 @@ mod tests {
     }
 
     #[test]
+    fn mouse_target_for_wrapped_row_uses_visual_row_local_x() {
+        let mut buffer = Buffer::local("abcdefghij\n");
+        let snapshot = buffer.snapshot();
+        let Some(display_row) = display_rows(&snapshot, 0..1).into_iter().next() else {
+            panic!("expected display row");
+        };
+        let text = display_row.text.clone();
+        let text_system = gpui::WindowTextSystem::new(std::sync::Arc::new(gpui::TextSystem::new(
+            std::sync::Arc::new(gpui::NoopTextSystem::new()),
+        )));
+        let shaped_line = text_system.shape_line(
+            SharedString::from(text.clone()),
+            px(10.),
+            &[TextRun {
+                len: text.len(),
+                font: font(EDITOR_FONT_FAMILY),
+                ..Default::default()
+            }],
+            None,
+        );
+        let second_visual_row = VisualDisplayRow {
+            display_range: 5..text.len(),
+            line_start_x: shaped_line.x_for_index(5),
+            top: px(20.),
+            height: px(20.),
+        };
+        let text_layout = DisplayRowTextLayout {
+            fragments: vec![DisplayInlineFragment::Text(StyledDisplaySegment {
+                display_range: 0..text.len(),
+                text,
+                style: DisplayTextStyle::default(),
+            })],
+            visual_rows: vec![second_visual_row.clone()],
+            shaped_line,
+            text_len: display_row.text.len(),
+        };
+        let local_x = display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, 7)
+            - second_visual_row.line_start_x;
+
+        let (row_start_point, row_start_goal) = mouse_target_for_text_layout(
+            &snapshot,
+            &display_row,
+            1,
+            &second_visual_row,
+            gutter_width(),
+            &text_layout,
+        );
+        let (middle_point, middle_goal) = mouse_target_for_text_layout(
+            &snapshot,
+            &display_row,
+            1,
+            &second_visual_row,
+            gutter_width() + local_x,
+            &text_layout,
+        );
+
+        assert_eq!(row_start_point, Point::new(0, 5));
+        assert_eq!(row_start_goal, visual_horizontal_goal(1, px(0.)));
+        assert_eq!(middle_point, Point::new(0, 7));
+        assert_eq!(middle_goal, visual_horizontal_goal(1, local_x));
+    }
+
+    #[test]
     fn fragment_text_for_visual_row_clips_to_visible_range() {
         let visual_row = VisualDisplayRow {
             display_range: 7..12,
