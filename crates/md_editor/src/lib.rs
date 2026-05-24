@@ -1083,6 +1083,7 @@ impl MarkdownEditor {
     fn mouse_left_down_on_row(
         &mut self,
         display_row: &DisplayRow,
+        visual_row_index: usize,
         visual_row: &VisualDisplayRow,
         event: &MouseDownEvent,
         window: &mut Window,
@@ -1095,7 +1096,7 @@ impl MarkdownEditor {
         let wrap_width = text_wrap_width(window);
         let row_style = row_display_style(&snapshot, display_row.row, self.mode);
         let selection = self.selection.clone();
-        let point = match self.cached_row_layout(
+        let (point, goal) = match self.cached_row_layout(
             &snapshot,
             display_row,
             &selection,
@@ -1106,20 +1107,24 @@ impl MarkdownEditor {
             window,
             cx,
         ) {
-            DisplayRowLayout::Text(text_layout) => point_for_mouse_x_in_text_layout(
+            DisplayRowLayout::Text(text_layout) => mouse_target_for_text_layout(
                 &snapshot,
                 display_row,
+                visual_row_index,
                 visual_row,
                 event.position.x,
                 &text_layout,
             ),
-            DisplayRowLayout::Block(_) => clip_cursor(&snapshot, selection.head()),
+            DisplayRowLayout::Block(_) => (
+                clip_cursor(&snapshot, selection.head()),
+                SelectionGoal::None,
+            ),
         };
         let previous_selection = self.selection.clone();
         self.selection = if event.modifiers.shift {
-            select_to_point(&snapshot, &self.selection, point)
+            select_to_point_with_goal(&snapshot, &self.selection, point, goal)
         } else {
-            collapsed_selection(point)
+            collapsed_selection_with_goal(point, goal)
         };
         self.notify_after_selection_change(&previous_selection, cx);
     }
@@ -1127,6 +1132,7 @@ impl MarkdownEditor {
     fn mouse_move_on_row(
         &mut self,
         display_row: &DisplayRow,
+        visual_row_index: usize,
         visual_row: &VisualDisplayRow,
         event: &MouseMoveEvent,
         window: &mut Window,
@@ -1140,7 +1146,7 @@ impl MarkdownEditor {
         let wrap_width = text_wrap_width(window);
         let row_style = row_display_style(&snapshot, display_row.row, self.mode);
         let selection = self.selection.clone();
-        let point = match self.cached_row_layout(
+        let (point, goal) = match self.cached_row_layout(
             &snapshot,
             display_row,
             &selection,
@@ -1151,17 +1157,21 @@ impl MarkdownEditor {
             window,
             cx,
         ) {
-            DisplayRowLayout::Text(text_layout) => point_for_mouse_x_in_text_layout(
+            DisplayRowLayout::Text(text_layout) => mouse_target_for_text_layout(
                 &snapshot,
                 display_row,
+                visual_row_index,
                 visual_row,
                 event.position.x,
                 &text_layout,
             ),
-            DisplayRowLayout::Block(_) => clip_cursor(&snapshot, selection.head()),
+            DisplayRowLayout::Block(_) => (
+                clip_cursor(&snapshot, selection.head()),
+                SelectionGoal::None,
+            ),
         };
         let previous_selection = self.selection.clone();
-        self.selection = select_to_point(&snapshot, &self.selection, point);
+        self.selection = select_to_point_with_goal(&snapshot, &self.selection, point, goal);
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
@@ -1483,12 +1493,16 @@ pub fn clip_selection(snapshot: &BufferSnapshot, selection: &Selection<Point>) -
 }
 
 pub fn collapsed_selection(point: Point) -> Selection<Point> {
+    collapsed_selection_with_goal(point, SelectionGoal::None)
+}
+
+fn collapsed_selection_with_goal(point: Point, goal: SelectionGoal) -> Selection<Point> {
     Selection {
         id: 0,
         start: point,
         end: point,
         reversed: false,
-        goal: SelectionGoal::None,
+        goal,
     }
 }
 
@@ -1698,9 +1712,18 @@ pub fn select_to_point(
     selection: &Selection<Point>,
     head: Point,
 ) -> Selection<Point> {
+    select_to_point_with_goal(snapshot, selection, head, SelectionGoal::None)
+}
+
+fn select_to_point_with_goal(
+    snapshot: &BufferSnapshot,
+    selection: &Selection<Point>,
+    head: Point,
+    goal: SelectionGoal,
+) -> Selection<Point> {
     let selection = clip_selection(snapshot, selection);
     let mut updated = selection.clone();
-    updated.set_head(head, SelectionGoal::None);
+    updated.set_head(head, goal);
     updated
 }
 
@@ -1949,26 +1972,35 @@ pub fn current_line_indent(snapshot: &BufferSnapshot, cursor: Point) -> String {
         .collect()
 }
 
-fn point_for_mouse_x_in_text_layout(
+fn mouse_target_for_text_layout(
     snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
+    visual_row_index: usize,
     visual_row: &VisualDisplayRow,
     x: gpui::Pixels,
     text_layout: &DisplayRowTextLayout,
-) -> Point {
+) -> (Point, SelectionGoal) {
     let text_x = (x - gutter_width()).max(px(0.));
-    let display_offset =
-        display_offset_for_visual_row_x(&display_row.text, text_layout, visual_row, text_x);
+    let display_offset = display_offset_for_visual_row_x(text_layout, visual_row, text_x);
     let source_offset =
         source_offset_for_display_offset(display_row, &text_layout.fragments, display_offset);
     let source_offset = snapshot
         .as_text_snapshot()
         .as_rope()
         .floor_char_boundary(source_offset);
-
-    clip_cursor(
+    let point = clip_cursor(
         snapshot,
         snapshot.as_text_snapshot().offset_to_point(source_offset),
+    );
+    let target_x = display_x_for_offset(
+        &text_layout.fragments,
+        &text_layout.shaped_line,
+        display_offset,
+    ) - visual_row.line_start_x;
+
+    (
+        point,
+        visual_horizontal_goal(visual_row_index, target_x.max(px(0.))),
     )
 }
 
@@ -2512,8 +2544,10 @@ fn render_visual_text_row(
     cx: &mut Context<MarkdownEditor>,
 ) -> gpui::AnyElement {
     let mouse_down_row = display_row.clone();
+    let mouse_down_visual_row_index = visual_row_index;
     let mouse_down_visual_row = visual_row.clone();
     let mouse_move_row = display_row.clone();
+    let mouse_move_visual_row_index = visual_row_index;
     let mouse_move_visual_row = visual_row.clone();
 
     div()
@@ -2528,6 +2562,7 @@ fn render_visual_text_row(
             cx.listener(move |this, event, window, cx| {
                 this.mouse_left_down_on_row(
                     &mouse_down_row,
+                    mouse_down_visual_row_index,
                     &mouse_down_visual_row,
                     event,
                     window,
@@ -2536,7 +2571,14 @@ fn render_visual_text_row(
             }),
         )
         .on_mouse_move(cx.listener(move |this, event, window, cx| {
-            this.mouse_move_on_row(&mouse_move_row, &mouse_move_visual_row, event, window, cx)
+            this.mouse_move_on_row(
+                &mouse_move_row,
+                mouse_move_visual_row_index,
+                &mouse_move_visual_row,
+                event,
+                window,
+                cx,
+            )
         }))
         .children(selection_elements_for_visual_row(
             text_layout,
@@ -2805,8 +2847,7 @@ fn point_for_visual_row_x(
     visual_row: &VisualDisplayRow,
     x: gpui::Pixels,
 ) -> Option<Point> {
-    let display_offset =
-        display_offset_for_visual_row_x(&display_row.text, text_layout, visual_row, x);
+    let display_offset = display_offset_for_visual_row_x(text_layout, visual_row, x);
     let source_offset =
         source_offset_for_display_offset(display_row, &text_layout.fragments, display_offset);
     let source_offset = snapshot
@@ -2856,7 +2897,6 @@ fn source_offset_for_display_offset(
 }
 
 fn display_offset_for_visual_row_x(
-    display_text: &str,
     text_layout: &DisplayRowTextLayout,
     visual_row: &VisualDisplayRow,
     x: gpui::Pixels,
@@ -2873,18 +2913,6 @@ fn display_offset_for_visual_row_x(
         display_x,
     ) {
         return atom_offset;
-    }
-
-    if display_offset == visual_row.display_range.end
-        && visual_row.display_range.end < text_layout.text_len
-    {
-        if atom_ends_at_display_index(&text_layout.fragments, visual_row.display_range.end) {
-            return display_offset;
-        }
-
-        return display_text
-            .floor_char_boundary(visual_row.display_range.end.saturating_sub(1))
-            .max(visual_row.display_range.start);
     }
 
     display_offset
@@ -3016,13 +3044,6 @@ fn inline_atom_boundary_for_x(
     } else {
         atom_range.end
     }
-}
-
-fn atom_ends_at_display_index(fragments: &[DisplayInlineFragment], display_index: usize) -> bool {
-    fragments.iter().any(|fragment| match fragment {
-        DisplayInlineFragment::Text(_) => false,
-        DisplayInlineFragment::Atom(atom) => atom.display_range.end == display_index,
-    })
 }
 
 fn point_for_image_block_mouse_x(
@@ -4482,19 +4503,74 @@ mod tests {
     }
 
     #[test]
-    fn atom_ends_at_display_index_finds_inline_atom_boundary() {
-        let fragments = vec![DisplayInlineFragment::Atom(DisplayInlineAtom {
-            kind: DisplayInlineAtomKind::InlineMath,
-            source_range: 8..15,
-            display_range: 7..12,
-            fallback_text: "x + y".to_string(),
-            style: inline_style(MarkdownInlineKind::InlineMath),
-            height: px(24.),
-            width: px(50.),
-        })];
+    fn mouse_target_for_wrapped_row_end_keeps_clicked_visual_row_goal() {
+        let mut buffer = Buffer::local("abcdefghij\n");
+        let snapshot = buffer.snapshot();
+        let Some(display_row) = display_rows(&snapshot, 0..1).into_iter().next() else {
+            panic!("expected display row");
+        };
+        let text = display_row.text.clone();
+        let text_system = gpui::WindowTextSystem::new(std::sync::Arc::new(gpui::TextSystem::new(
+            std::sync::Arc::new(gpui::NoopTextSystem::new()),
+        )));
+        let shaped_line = text_system.shape_line(
+            SharedString::from(text.clone()),
+            px(10.),
+            &[TextRun {
+                len: text.len(),
+                font: font(EDITOR_FONT_FAMILY),
+                ..Default::default()
+            }],
+            None,
+        );
+        let first_visual_row = VisualDisplayRow {
+            display_range: 0..5,
+            line_start_x: px(0.),
+            top: px(0.),
+            height: px(20.),
+        };
+        let second_visual_row = VisualDisplayRow {
+            display_range: 5..text.len(),
+            line_start_x: shaped_line.x_for_index(5),
+            top: px(20.),
+            height: px(20.),
+        };
+        let text_layout = DisplayRowTextLayout {
+            fragments: vec![DisplayInlineFragment::Text(StyledDisplaySegment {
+                display_range: 0..text.len(),
+                text,
+                style: DisplayTextStyle::default(),
+            })],
+            visual_rows: vec![first_visual_row.clone(), second_visual_row],
+            shaped_line,
+            text_len: display_row.text.len(),
+        };
 
-        assert!(!atom_ends_at_display_index(&fragments, 7));
-        assert!(atom_ends_at_display_index(&fragments, 12));
+        let row_end_x = display_x_for_offset(
+            &text_layout.fragments,
+            &text_layout.shaped_line,
+            first_visual_row.display_range.end,
+        ) - first_visual_row.line_start_x;
+        let (point, goal) = mouse_target_for_text_layout(
+            &snapshot,
+            &display_row,
+            0,
+            &first_visual_row,
+            gutter_width() + row_end_x,
+            &text_layout,
+        );
+
+        assert_eq!(point, Point::new(0, 5));
+        assert_eq!(goal, visual_horizontal_goal(0, row_end_x));
+        assert_eq!(
+            visual_row_index_for_caret(
+                &text_layout.visual_rows,
+                first_visual_row.display_range.end,
+                text_layout.text_len,
+                goal
+            ),
+            Some(0)
+        );
     }
 
     #[test]

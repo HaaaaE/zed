@@ -331,12 +331,21 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Strengthened the contained inline math selection coverage so a larger Rendered-mode selection still maps to the rendered display range while the fully contained atom reports selected state.
 - This locks the interaction between inactive rendered-element override ranges, row selection geometry, and inline atom selected styling without changing runtime behavior.
 
+### 2026-05-25 - Wrapped row-end mouse hits keep visual-row ownership
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Mouse hit testing on wrapped text rows now stores a `WrappedHorizontalPosition` goal with the clicked visual-row index.
+- Non-final soft-wrap row-end clicks can now return the real display-row boundary while still rendering and continuing movement from the clicked visual row instead of being reassigned to the next visual row.
+- Removed the old row-end backtracking fallback and its now-unused inline atom boundary helper.
+- Added regression coverage for clicking the end of a non-final wrapped visual row and preserving visual-row ownership through the selection goal.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
 - `cargo test -p md_editor` passed: 76/76 tests.
 - `cargo check -p markdown_editor` passed.
+- `git diff --check` passed with only the existing LF/CRLF warning for `crates/md_editor/src/lib.rs`.
 
 ## Known Remaining Work
 
