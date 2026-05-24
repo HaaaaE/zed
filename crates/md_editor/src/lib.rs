@@ -3716,7 +3716,7 @@ fn active_source_range_for_selection(
     }
 
     let offset = text_snapshot.point_to_offset(selection.head());
-    if source_offset_is_inline_atom_start(snapshot, offset) {
+    if source_offset_is_rendered_element_boundary(snapshot, offset) {
         return None;
     }
     if offset < text_snapshot.len() {
@@ -3743,12 +3743,61 @@ fn selection_range_is_whole_inline_atom(
     })
 }
 
-fn source_offset_is_inline_atom_start(snapshot: &BufferSnapshot, source_offset: usize) -> bool {
+fn source_offset_is_rendered_element_boundary(
+    snapshot: &BufferSnapshot,
+    source_offset: usize,
+) -> bool {
     snapshot.syntax_tree().inline_spans().iter().any(|span| {
-        span.kind == MarkdownInlineKind::InlineMath
-            && span.source_range.start == source_offset
-            && !span.marker_ranges.is_empty()
+        if span.marker_ranges.is_empty()
+            || (span.source_range.start != source_offset && span.source_range.end != source_offset)
+        {
+            return false;
+        }
+
+        match span.kind {
+            MarkdownInlineKind::InlineMath => true,
+            MarkdownInlineKind::Image => rendered_remote_image_span_is_block(snapshot, span),
+            MarkdownInlineKind::Emphasis
+            | MarkdownInlineKind::Strong
+            | MarkdownInlineKind::InlineCode
+            | MarkdownInlineKind::Link
+            | MarkdownInlineKind::Strikethrough => false,
+        }
     })
+}
+
+fn rendered_remote_image_span_is_block(
+    snapshot: &BufferSnapshot,
+    span: &markdown_wysiwyg::MarkdownInlineSpan,
+) -> bool {
+    if !span
+        .url
+        .as_ref()
+        .is_some_and(|url| is_remote_image_url(url))
+    {
+        return false;
+    }
+
+    let row = snapshot
+        .as_text_snapshot()
+        .offset_to_point(span.source_range.start)
+        .row;
+    let row_source_range = row_source_range(snapshot, row);
+    if !range_contains(&row_source_range, &span.source_range) {
+        return false;
+    }
+
+    let source_text = row_text(snapshot, row);
+    let local_start = span.source_range.start - row_source_range.start;
+    let local_end = span.source_range.end - row_source_range.start;
+    let Some(before) = source_text.get(..local_start) else {
+        return false;
+    };
+    let Some(after) = source_text.get(local_end..) else {
+        return false;
+    };
+
+    before.trim().is_empty() && after.trim().is_empty()
 }
 
 fn source_range_to_row_range(
@@ -4303,6 +4352,39 @@ mod tests {
     }
 
     #[test]
+    fn rendered_image_block_keeps_source_boundaries_inactive() {
+        let mut buffer = Buffer::local("![alt](https://example.com/cat.png)\nnext\n");
+        let snapshot = buffer.snapshot();
+        let image_source_end = "![alt](https://example.com/cat.png)".len();
+
+        for cursor in [0, image_source_end] {
+            let selection = collapsed_selection(Point::new(0, cursor as u32));
+            let row = display_rows_in_mode(
+                &snapshot,
+                0..1,
+                Some(&selection),
+                MarkdownEditorMode::Rendered,
+            )
+            .remove(0);
+
+            assert_eq!(row.text, "alt");
+            assert_eq!(
+                rendered_image_block_for_row(
+                    &snapshot,
+                    &row,
+                    &selection,
+                    MarkdownEditorMode::Rendered
+                ),
+                Some(RenderedImageBlock {
+                    url: "https://example.com/cat.png".to_string(),
+                    alt_text: "alt".to_string(),
+                    source_range: 0..image_source_end,
+                })
+            );
+        }
+    }
+
+    #[test]
     fn image_block_mouse_x_maps_to_source_range_edges() {
         let mut buffer = Buffer::local("![alt](https://example.com/cat.png)\n");
         let snapshot = buffer.snapshot();
@@ -4431,6 +4513,27 @@ mod tests {
         )
         .remove(0);
 
+        assert_eq!(
+            rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+            None
+        );
+    }
+
+    #[test]
+    fn rendered_inline_image_boundary_reveals_source() {
+        let mut buffer = Buffer::local("before ![alt](https://example.com/cat.png) after\n");
+        let snapshot = buffer.snapshot();
+        let image_start = "before ".len();
+        let selection = collapsed_selection(Point::new(0, image_start as u32));
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        assert_eq!(row.text, "before ![alt](https://example.com/cat.png) after");
         assert_eq!(
             rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
             None

@@ -242,11 +242,18 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Clicking or dragging in the image block's right-side empty area now maps to the image source range end, while the left side still maps to the source range start.
 - Added coverage for mouse x positions beyond the rendered image width so block-row hit testing remains consistent with the displayed block footprint.
 
+### 2026-05-25 - Rendered element boundaries stay inactive
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Collapsed Rendered-mode cursors at the source start or source end of rendered elements now keep those elements inactive instead of immediately revealing Markdown source markers.
+- This generalizes the previous inline math boundary behavior to remote image block elements, so clicking the left or right edge of a rendered image block keeps the block rendered while still placing the cursor at the source range edge.
+- Added coverage for remote image block source-boundary cursors and for inline images with surrounding text staying source-editable at their boundaries.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 59/59 tests.
+- `cargo test -p md_editor` passed: 61/61 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work
