@@ -2610,22 +2610,13 @@ fn selection_elements_for_visual_row(
     selected_range: Option<&Range<usize>>,
     visual_row: &VisualDisplayRow,
 ) -> Vec<gpui::AnyElement> {
-    let Some(selected_range) = selected_range else {
+    let Some((start_x, width)) =
+        selection_bounds_for_visual_row(text_layout, selected_range, visual_row)
+    else {
         return Vec::new();
     };
 
-    let start = selected_range.start.max(visual_row.display_range.start);
-    let end = selected_range.end.min(visual_row.display_range.end);
-    if start >= end {
-        return Vec::new();
-    }
-
     let palette = editor_palette();
-    let start_x = display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, start)
-        - visual_row.line_start_x;
-    let end_x = display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, end)
-        - visual_row.line_start_x;
-    let width = (end_x - start_x).max(px(1.));
 
     vec![
         div()
@@ -2637,6 +2628,31 @@ fn selection_elements_for_visual_row(
             .bg(palette.selection_background)
             .into_any_element(),
     ]
+}
+
+fn selection_bounds_for_visual_row(
+    text_layout: &DisplayRowTextLayout,
+    selected_range: Option<&Range<usize>>,
+    visual_row: &VisualDisplayRow,
+) -> Option<(gpui::Pixels, gpui::Pixels)> {
+    let selected_range = selected_range?;
+    let start = selected_range.start.max(visual_row.display_range.start);
+    let end = selected_range.end.min(visual_row.display_range.end);
+    if start > end {
+        return None;
+    }
+    if start == end {
+        return visual_row
+            .display_range
+            .is_empty()
+            .then_some((px(0.), px(1.)));
+    }
+
+    let start_x = display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, start)
+        - visual_row.line_start_x;
+    let end_x = display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, end)
+        - visual_row.line_start_x;
+    Some((start_x, (end_x - start_x).max(px(1.))))
 }
 
 fn render_fragments_for_visual_row(
@@ -3824,7 +3840,7 @@ fn selected_range_for_row(
 
     let selection_range = selection_byte_range(snapshot, selection);
     let row_range = display_row.projection.visible_source_range();
-    if selection_range.end <= row_range.start || selection_range.start >= row_range.end {
+    if !selection_intersects_visible_row_range(&selection_range, &row_range) {
         return None;
     }
 
@@ -3834,6 +3850,17 @@ fn selected_range_for_row(
     let end = display_row.projection.source_to_display(end);
 
     Some(start.min(end)..end.max(start))
+}
+
+fn selection_intersects_visible_row_range(
+    selection_range: &Range<usize>,
+    row_range: &Range<usize>,
+) -> bool {
+    if row_range.is_empty() {
+        selection_range.start <= row_range.start && row_range.start < selection_range.end
+    } else {
+        selection_range.end > row_range.start && selection_range.start < row_range.end
+    }
 }
 
 fn active_source_range_for_selection(
@@ -5414,6 +5441,86 @@ mod tests {
         assert_eq!(
             selected_range_for_row(&snapshot, &display_rows[2], &selection),
             Some(0..1)
+        );
+    }
+
+    #[test]
+    fn selected_empty_line_has_visible_selection_bounds() {
+        let mut buffer = Buffer::local("abcd\n\npq");
+        let snapshot = buffer.snapshot();
+        let display_rows = display_rows(&snapshot, 0..3);
+        let visual_row = VisualDisplayRow {
+            display_range: 0..0,
+            line_start_x: px(0.),
+            top: px(0.),
+            height: px(20.),
+        };
+        let text_layout = DisplayRowTextLayout {
+            fragments: Vec::new(),
+            visual_rows: vec![visual_row.clone()],
+            shaped_line: gpui::ShapedLine::default(),
+            text_len: 0,
+        };
+        let crossing_selection = Selection {
+            id: 1,
+            start: Point::new(0, 2),
+            end: Point::new(2, 1),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        let ending_at_empty_line = Selection {
+            id: 1,
+            start: Point::new(0, 2),
+            end: Point::new(1, 0),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        let starting_at_empty_line = Selection {
+            id: 1,
+            start: Point::new(1, 0),
+            end: Point::new(2, 1),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+
+        for selection in [crossing_selection, starting_at_empty_line] {
+            let selected_range = selected_range_for_row(&snapshot, &display_rows[1], &selection);
+
+            assert_eq!(selected_range, Some(0..0));
+            assert_eq!(
+                selection_bounds_for_visual_row(&text_layout, selected_range.as_ref(), &visual_row),
+                Some((px(0.), px(1.)))
+            );
+        }
+
+        assert_eq!(
+            selected_range_for_row(&snapshot, &display_rows[1], &ending_at_empty_line),
+            None
+        );
+    }
+
+    #[test]
+    fn selection_bounds_skip_non_empty_visual_row_boundary_touch() {
+        let visual_row = VisualDisplayRow {
+            display_range: 5..10,
+            line_start_x: px(0.),
+            top: px(0.),
+            height: px(20.),
+        };
+        let text_layout = DisplayRowTextLayout {
+            fragments: Vec::new(),
+            visual_rows: vec![visual_row.clone()],
+            shaped_line: gpui::ShapedLine::default(),
+            text_len: 10,
+        };
+
+        assert_eq!(
+            selection_bounds_for_visual_row(&text_layout, Some(&(0..5)), &visual_row),
+            None
+        );
+        assert_eq!(
+            selection_bounds_for_visual_row(&text_layout, Some(&(10..12)), &visual_row),
+            None
         );
     }
 

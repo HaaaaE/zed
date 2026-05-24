@@ -346,11 +346,19 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Image block hit testing still maps left/right block regions to the image source range start/end, but subsequent vertical movement can now reuse the visible x position from the mouse interaction.
 - Added coverage for image block mouse targets returning both the source boundary point and the matching visible caret x goal, including clicks in the right-side block area beyond the image width.
 
+### 2026-05-25 - Empty selected rows have visible selection bounds
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Text-row selection rendering now routes through a shared visual-row bounds helper.
+- Empty visual rows that are actually covered by a multi-row selection now draw a minimal 1px selection marker instead of disappearing.
+- The empty-row intersection check preserves half-open selection semantics, so a selection ending at the empty row's start does not mark that row selected.
+- Added coverage for selected empty rows and for non-empty visual-row boundary touches that should not produce a zero-width selection marker.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 77/77 tests.
+- `cargo test -p md_editor` passed: 79/79 tests.
 - `cargo check -p markdown_editor` passed.
 - `git diff --check` passed with only the existing LF/CRLF warning for `crates/md_editor/src/lib.rs`.
 
