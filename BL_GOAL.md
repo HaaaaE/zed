@@ -182,11 +182,20 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Added focused tests for whole-atom selection staying inactive and partial atom selection still revealing source syntax.
 - This keeps keyboard selection display consistent with atom-aware horizontal movement, while richer atom-specific selection visuals remain open.
 
+### 2026-05-25 - Inline atom boundary cursors keep rendered atom display
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Collapsed Rendered-mode cursors at an inactive inline math atom's source start now keep the atom inactive instead of immediately revealing `$...$` markers.
+- Cursors at the atom source end already remain inactive through the existing non-overlap projection behavior; this is now covered alongside the source-start case.
+- Moving the cursor into inline math content still reveals markers, preserving the source editing path once the cursor is actually inside the atom.
+- Added focused tests for atom-boundary cursor display and content cursor marker reveal.
+- This keeps the display state consistent with atom-aware horizontal movement at atom boundaries.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 52/52 tests.
+- `cargo test -p md_editor` passed: 54/54 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work

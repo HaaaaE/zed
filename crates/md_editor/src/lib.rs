@@ -3208,6 +3208,9 @@ fn active_source_range_for_selection(
     }
 
     let offset = text_snapshot.point_to_offset(selection.head());
+    if source_offset_is_inline_atom_start(snapshot, offset) {
+        return None;
+    }
     if offset < text_snapshot.len() {
         let end = text_snapshot
             .as_rope()
@@ -3228,6 +3231,14 @@ fn selection_range_is_whole_inline_atom(
     snapshot.syntax_tree().inline_spans().iter().any(|span| {
         span.kind == MarkdownInlineKind::InlineMath
             && &span.source_range == selection_range
+            && !span.marker_ranges.is_empty()
+    })
+}
+
+fn source_offset_is_inline_atom_start(snapshot: &BufferSnapshot, source_offset: usize) -> bool {
+    snapshot.syntax_tree().inline_spans().iter().any(|span| {
+        span.kind == MarkdownInlineKind::InlineMath
+            && span.source_range.start == source_offset
             && !span.marker_ranges.is_empty()
     })
 }
@@ -3374,6 +3385,41 @@ mod tests {
         );
 
         assert_eq!(rows[0].text, "Before **bold** after");
+    }
+
+    #[test]
+    fn rendered_display_rows_keep_inline_atom_boundaries_inactive() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let snapshot = buffer.snapshot();
+        let atom_start = "Before ".len();
+        let atom_end = "Before $x + y$".len();
+
+        for cursor in [atom_start, atom_end] {
+            let rows = display_rows_in_mode(
+                &snapshot,
+                0..1,
+                Some(&collapsed_selection(Point::new(0, cursor as u32))),
+                MarkdownEditorMode::Rendered,
+            );
+
+            assert_eq!(rows[0].text, "Before x + y after");
+        }
+    }
+
+    #[test]
+    fn rendered_display_rows_reveal_inline_atom_when_cursor_enters_content() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let snapshot = buffer.snapshot();
+        let content_start = "Before $".len();
+
+        let rows = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&collapsed_selection(Point::new(0, content_start as u32))),
+            MarkdownEditorMode::Rendered,
+        );
+
+        assert_eq!(rows[0].text, "Before $x + y$ after");
     }
 
     #[test]
