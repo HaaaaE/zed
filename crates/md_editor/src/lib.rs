@@ -687,7 +687,7 @@ impl Render for MarkdownEditor {
             .child(
                 list(
                     self.display_list_state.clone(),
-                    cx.processor(move |this, row, _window, _cx| {
+                    cx.processor(move |this, row, window, _cx| {
                         let snapshot = this.buffer.snapshot();
                         let selection = clip_selection(&snapshot, &selection);
                         let cursor = selection.head();
@@ -740,6 +740,7 @@ impl Render for MarkdownEditor {
                                 div()
                                     .flex_1()
                                     .flex()
+                                    .relative()
                                     .items_center()
                                     .text_size(row_style.text_size)
                                     .line_height(row_style.line_height)
@@ -750,6 +751,7 @@ impl Render for MarkdownEditor {
                                         &selection,
                                         mode,
                                         row_style,
+                                        window,
                                     )),
                             )
                             .into_any_element()
@@ -1196,31 +1198,23 @@ fn render_row_text(
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
     row_style: RowDisplayStyle,
+    window: &mut Window,
 ) -> Vec<gpui::AnyElement> {
     let segments = styled_display_segments(snapshot, display_row, mode);
-    let selection = selection.clone();
-
-    if selection.is_empty() {
-        let cursor = selection.head();
-        let caret_column = if display_row.row == cursor.row {
-            let cursor_offset = snapshot
-                .as_text_snapshot()
-                .point_to_offset(clip_cursor(snapshot, cursor));
-            Some(display_row.projection.source_to_display(cursor_offset))
-        } else {
-            None
-        };
-        return render_styled_segments(segments, None, caret_column, row_style);
-    }
-
-    let Some(selected_range) = selected_range_for_row(snapshot, display_row, &selection) else {
-        return render_styled_segments(segments, None, None, row_style);
+    let selected_range = if selection.is_empty() {
+        None
+    } else {
+        selected_range_for_row(snapshot, display_row, selection)
+            .filter(|selected_range| !selected_range.is_empty())
     };
-    if selected_range.is_empty() {
-        return render_styled_segments(segments, None, None, row_style);
-    }
 
-    render_styled_segments(segments, Some(selected_range), None, row_style)
+    let mut elements = render_styled_segments(segments, selected_range);
+    if let Some(caret_x) =
+        caret_x_for_row(snapshot, display_row, selection, row_style, window)
+    {
+        elements.push(caret_element(caret_x, row_style));
+    }
+    elements
 }
 
 fn render_row_contents(
@@ -1229,13 +1223,14 @@ fn render_row_contents(
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
     row_style: RowDisplayStyle,
+    window: &mut Window,
 ) -> Vec<gpui::AnyElement> {
     if let Some(image_block) = rendered_image_block_for_row(snapshot, display_row, selection, mode)
     {
         return vec![render_image_block(image_block)];
     }
 
-    render_row_text(snapshot, display_row, selection, mode, row_style)
+    render_row_text(snapshot, display_row, selection, mode, row_style, window)
 }
 
 fn render_image_block(image_block: RenderedImageBlock) -> gpui::AnyElement {
@@ -1286,12 +1281,8 @@ fn render_image_block(image_block: RenderedImageBlock) -> gpui::AnyElement {
 fn render_styled_segments(
     segments: Vec<StyledDisplaySegment>,
     selected_range: Option<Range<usize>>,
-    caret_column: Option<usize>,
-    row_style: RowDisplayStyle,
 ) -> Vec<gpui::AnyElement> {
     let mut elements = Vec::new();
-    let mut caret_inserted = false;
-    let caret_column = caret_column.unwrap_or(usize::MAX);
 
     for segment in segments {
         let mut split_points = Vec::new();
@@ -1307,9 +1298,6 @@ fn render_styled_segments(
                 split_points.push(selected_range.end);
             }
         }
-        if caret_column > segment.display_range.start && caret_column < segment.display_range.end {
-            split_points.push(caret_column);
-        }
         split_points.sort_unstable();
         split_points.dedup();
 
@@ -1318,11 +1306,6 @@ fn render_styled_segments(
             .into_iter()
             .chain(std::iter::once(segment.display_range.end))
         {
-            if !caret_inserted && caret_column == piece_start {
-                elements.push(caret_element(row_style));
-                caret_inserted = true;
-            }
-
             let local_start = piece_start - segment.display_range.start;
             let local_end = piece_end - segment.display_range.start;
             let piece_text = segment.text[local_start..local_end].to_string();
@@ -1336,26 +1319,64 @@ fn render_styled_segments(
         }
     }
 
-    if !caret_inserted && caret_column != usize::MAX {
-        elements.push(caret_element(row_style));
-    }
-
     if elements.is_empty() {
-        if caret_column != usize::MAX {
-            return vec![caret_element(row_style)];
-        }
         return vec![SharedString::from(String::new()).into_any_element()];
     }
 
     elements
 }
 
-fn caret_element(row_style: RowDisplayStyle) -> gpui::AnyElement {
+fn caret_x_for_row(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    selection: &Selection<Point>,
+    row_style: RowDisplayStyle,
+    window: &mut Window,
+) -> Option<gpui::Pixels> {
+    if !selection.is_empty() {
+        return None;
+    }
+
+    let cursor = selection.head();
+    if display_row.row != cursor.row {
+        return None;
+    }
+
+    let cursor_offset = snapshot
+        .as_text_snapshot()
+        .point_to_offset(clip_cursor(snapshot, cursor));
+    let display_offset = display_row.projection.source_to_display(cursor_offset);
+
+    let palette = editor_palette();
+    let text = display_row.text.clone();
+    let text_len = text.len();
+    let shaped_line = window.text_system().shape_line(
+        SharedString::from(text),
+        row_style.text_size,
+        &[TextRun {
+            len: text_len,
+            font: font(EDITOR_FONT_FAMILY),
+            color: palette.text,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }],
+        None,
+    );
+    Some(shaped_line.x_for_index(display_offset))
+}
+
+fn caret_element(caret_x: gpui::Pixels, row_style: RowDisplayStyle) -> gpui::AnyElement {
     let palette = editor_palette();
     div()
+        .absolute()
+        .left(caret_x)
+        .top_0()
+        .bottom_0()
         .w(px(1.))
-        .h(row_style.caret_height)
-        .bg(palette.caret)
+        .flex()
+        .items_center()
+        .child(div().w(px(1.)).h(row_style.caret_height).bg(palette.caret))
         .into_any_element()
 }
 
