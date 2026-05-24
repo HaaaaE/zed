@@ -1208,7 +1208,13 @@ fn render_row_text(
             .filter(|selected_range| !selected_range.is_empty())
     };
 
-    let mut elements = render_styled_segments(segments, selected_range);
+    let mut elements = Vec::new();
+    if let Some(selection_element) =
+        selection_element_for_row(display_row, selected_range.as_ref(), row_style, window)
+    {
+        elements.push(selection_element);
+    }
+    elements.extend(render_styled_segments(segments));
     if let Some(caret_x) =
         caret_x_for_row(snapshot, display_row, selection, row_style, window)
     {
@@ -1280,42 +1286,12 @@ fn render_image_block(image_block: RenderedImageBlock) -> gpui::AnyElement {
 
 fn render_styled_segments(
     segments: Vec<StyledDisplaySegment>,
-    selected_range: Option<Range<usize>>,
 ) -> Vec<gpui::AnyElement> {
     let mut elements = Vec::new();
 
     for segment in segments {
-        let mut split_points = Vec::new();
-        if let Some(selected_range) = selected_range.as_ref() {
-            if selected_range.start > segment.display_range.start
-                && selected_range.start < segment.display_range.end
-            {
-                split_points.push(selected_range.start);
-            }
-            if selected_range.end > segment.display_range.start
-                && selected_range.end < segment.display_range.end
-            {
-                split_points.push(selected_range.end);
-            }
-        }
-        split_points.sort_unstable();
-        split_points.dedup();
-
-        let mut piece_start = segment.display_range.start;
-        for piece_end in split_points
-            .into_iter()
-            .chain(std::iter::once(segment.display_range.end))
-        {
-            let local_start = piece_start - segment.display_range.start;
-            let local_end = piece_end - segment.display_range.start;
-            let piece_text = segment.text[local_start..local_end].to_string();
-            let is_selected = selected_range.as_ref().is_some_and(|selected_range| {
-                piece_start < selected_range.end && piece_end > selected_range.start
-            });
-            if !piece_text.is_empty() {
-                elements.push(render_text_piece(piece_text, &segment.style, is_selected));
-            }
-            piece_start = piece_end;
+        if !segment.text.is_empty() {
+            elements.push(render_text_piece(segment.text, &segment.style));
         }
     }
 
@@ -1324,6 +1300,45 @@ fn render_styled_segments(
     }
 
     elements
+}
+
+fn selection_element_for_row(
+    display_row: &DisplayRow,
+    selected_range: Option<&Range<usize>>,
+    row_style: RowDisplayStyle,
+    window: &mut Window,
+) -> Option<gpui::AnyElement> {
+    let selected_range = selected_range?;
+    let palette = editor_palette();
+    let text = display_row.text.clone();
+    let text_len = text.len();
+    let shaped_line = window.text_system().shape_line(
+        SharedString::from(text),
+        row_style.text_size,
+        &[TextRun {
+            len: text_len,
+            font: font(EDITOR_FONT_FAMILY),
+            color: palette.text,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        }],
+        None,
+    );
+    let start_x = shaped_line.x_for_index(selected_range.start);
+    let end_x = shaped_line.x_for_index(selected_range.end);
+    let width = (end_x - start_x).max(px(1.));
+
+    Some(
+        div()
+            .absolute()
+            .left(start_x)
+            .top_0()
+            .bottom_0()
+            .w(width)
+            .bg(palette.selection_background)
+            .into_any_element(),
+    )
 }
 
 fn caret_x_for_row(
@@ -1427,11 +1442,7 @@ fn rendered_image_block_for_row(
     })
 }
 
-fn render_text_piece(
-    text: String,
-    style: &DisplayTextStyle,
-    is_selected: bool,
-) -> gpui::AnyElement {
+fn render_text_piece(text: String, style: &DisplayTextStyle) -> gpui::AnyElement {
     let mut element = div().child(SharedString::from(text));
 
     if let Some(color) = style.color {
@@ -1454,12 +1465,6 @@ fn render_text_piece(
     }
     if style.line_through {
         element = element.line_through();
-    }
-    if is_selected {
-        let palette = editor_palette();
-        element = element
-            .bg(palette.selection_background)
-            .text_color(palette.selection_text);
     }
 
     element.into_any_element()
