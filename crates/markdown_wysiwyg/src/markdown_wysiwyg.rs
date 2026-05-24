@@ -207,13 +207,26 @@ impl MarkdownSyntaxTree {
         visible_source_range: Range<usize>,
         active_source_range: Option<Range<usize>>,
     ) -> MarkdownProjectionMap {
+        self.projection_for_source_range_with_inactive_ranges(
+            visible_source_range,
+            active_source_range,
+            &[],
+        )
+    }
+
+    pub fn projection_for_source_range_with_inactive_ranges(
+        &self,
+        visible_source_range: Range<usize>,
+        active_source_range: Option<Range<usize>>,
+        inactive_source_ranges: &[Range<usize>],
+    ) -> MarkdownProjectionMap {
         let mut hidden_ranges = Vec::new();
         for block in self.blocks_in_source_range(visible_source_range.clone()) {
-            let is_active = active_source_range
-                .as_ref()
-                .is_some_and(|active| ranges_overlap(&block.source_range, active));
-
-            if is_active {
+            if source_range_is_active(
+                &block.source_range,
+                active_source_range.as_ref(),
+                inactive_source_ranges,
+            ) {
                 continue;
             }
 
@@ -233,10 +246,11 @@ impl MarkdownSyntaxTree {
                 continue;
             }
 
-            let is_active = active_source_range
-                .as_ref()
-                .is_some_and(|active| ranges_overlap(&span.source_range, active));
-            if is_active {
+            if source_range_is_active(
+                &span.source_range,
+                active_source_range.as_ref(),
+                inactive_source_ranges,
+            ) {
                 continue;
             }
 
@@ -813,6 +827,27 @@ fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool {
     left.start < right.end && right.start < left.end
 }
 
+fn range_contains(container: &Range<usize>, candidate: &Range<usize>) -> bool {
+    container.start <= candidate.start && container.end >= candidate.end
+}
+
+fn source_range_is_active(
+    source_range: &Range<usize>,
+    active_source_range: Option<&Range<usize>>,
+    inactive_source_ranges: &[Range<usize>],
+) -> bool {
+    let Some(active_source_range) = active_source_range else {
+        return false;
+    };
+    if !ranges_overlap(source_range, active_source_range) {
+        return false;
+    }
+
+    !inactive_source_ranges
+        .iter()
+        .any(|inactive_source_range| range_contains(inactive_source_range, source_range))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -904,6 +939,16 @@ mod tests {
         let projection = tree.projection_for_visible_rows(0..1, Some(10..11));
         assert!(projection.hidden_ranges().is_empty());
         assert_eq!(projection.display_to_source(7), 7);
+    }
+
+    #[test]
+    fn inactive_ranges_keep_markers_hidden_inside_active_range() {
+        let tree = MarkdownSyntaxTree::parse("Before **bold** and $x$ after\n");
+        let projection =
+            tree.projection_for_source_range_with_inactive_ranges(0..30, Some(7..23), &[20..23]);
+
+        assert_eq!(projection.hidden_ranges(), &[20..21, 22..23]);
+        assert_eq!(projection.display_len(), 28);
     }
 
     #[test]

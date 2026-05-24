@@ -308,11 +308,20 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Measurement rendering still uses the unselected atom style, so selected styling does not affect cached atom dimensions.
 - Added coverage for the inline-atom selected-state helper.
 
+### 2026-05-25 - Contained rendered element selections stay rendered
+
+- Scope: `crates/markdown_wysiwyg/src/markdown_wysiwyg.rs` and `crates/md_editor/src/lib.rs`.
+- Added a projection path that accepts inactive source ranges inside an otherwise active selection range.
+- Rendered-mode selections that fully contain inline math atoms or standalone remote image blocks now keep those elements rendered instead of revealing their source markers.
+- Other Markdown covered by the same larger selection still uses the active projection path, so normal source-editing behavior is preserved outside the fully contained rendered elements.
+- Image block selected styling now treats any selection containing the full standalone image source range as a selected block, not only an exact image-only selection.
+- Added projection coverage for inactive override ranges and md_editor coverage for contained inline atom/image block selections.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
-- `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 73/73 tests.
+- `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
+- `cargo test -p md_editor` passed: 75/75 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work

@@ -1372,6 +1372,15 @@ fn display_rows_in_mode(
     } else {
         None
     };
+    let inactive_source_ranges = if mode == MarkdownEditorMode::Rendered {
+        selection
+            .map(|selection| {
+                inactive_rendered_element_source_ranges_for_selection(snapshot, selection)
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
 
     (start..end)
         .map(|row| {
@@ -1386,7 +1395,11 @@ fn display_rows_in_mode(
                 ),
                 MarkdownEditorMode::Rendered => snapshot
                     .syntax_tree()
-                    .projection_for_source_range(source_range.clone(), active_source_range.clone()),
+                    .projection_for_source_range_with_inactive_ranges(
+                        source_range.clone(),
+                        active_source_range.clone(),
+                        &inactive_source_ranges,
+                    ),
             };
 
             DisplayRow {
@@ -3140,7 +3153,11 @@ fn image_block_is_whole_selected(
     image_block: &RenderedImageBlock,
     selection: &Selection<Point>,
 ) -> bool {
-    !selection.is_empty() && selection_byte_range(snapshot, selection) == image_block.source_range
+    !selection.is_empty()
+        && range_contains(
+            &selection_byte_range(snapshot, selection),
+            &image_block.source_range,
+        )
 }
 
 fn caret_element(caret_x: gpui::Pixels, row_style: RowDisplayStyle) -> gpui::AnyElement {
@@ -3167,7 +3184,6 @@ fn rendered_image_block_for_row(
         return None;
     }
 
-    let active_source_range = active_source_range_for_selection(snapshot, selection);
     let row_source_range = row_source_range(snapshot, display_row.row);
     let source_text = row_text(snapshot, display_row.row);
     let mut matching_spans = snapshot.syntax_tree().inline_spans().iter().filter(|span| {
@@ -3184,10 +3200,7 @@ fn rendered_image_block_for_row(
     if matching_spans.next().is_some() {
         return None;
     }
-    if active_source_range
-        .as_ref()
-        .is_some_and(|active_source_range| ranges_overlap(&span.source_range, active_source_range))
-    {
+    if rendered_element_source_range_is_active(snapshot, selection, &span.source_range) {
         return None;
     }
 
@@ -3782,6 +3795,42 @@ fn selection_range_is_whole_rendered_element(
     })
 }
 
+fn inactive_rendered_element_source_ranges_for_selection(
+    snapshot: &BufferSnapshot,
+    selection: &Selection<Point>,
+) -> Vec<Range<usize>> {
+    let selection = clip_selection(snapshot, selection);
+    if selection.is_empty() {
+        return Vec::new();
+    }
+
+    let selection_range = selection_byte_range(snapshot, &selection);
+    snapshot
+        .syntax_tree()
+        .inline_spans()
+        .iter()
+        .filter_map(|span| rendered_element_source_range_for_span(snapshot, span))
+        .filter(|source_range| range_contains(&selection_range, source_range))
+        .collect()
+}
+
+fn rendered_element_source_range_is_active(
+    snapshot: &BufferSnapshot,
+    selection: &Selection<Point>,
+    source_range: &Range<usize>,
+) -> bool {
+    let Some(active_source_range) = active_source_range_for_selection(snapshot, selection) else {
+        return false;
+    };
+    if !ranges_overlap(source_range, &active_source_range) {
+        return false;
+    }
+
+    !inactive_rendered_element_source_ranges_for_selection(snapshot, selection)
+        .iter()
+        .any(|inactive_source_range| range_contains(inactive_source_range, source_range))
+}
+
 fn source_offset_is_rendered_element_boundary(
     snapshot: &BufferSnapshot,
     source_offset: usize,
@@ -4053,6 +4102,33 @@ mod tests {
         assert_eq!(
             selected_range_for_row(&snapshot, &rows[0], &selection),
             Some(7..12)
+        );
+    }
+
+    #[test]
+    fn rendered_display_rows_keep_contained_inline_atom_inactive_when_selected() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let snapshot = buffer.snapshot();
+        let selection_end = "Before $x + y$ after".len();
+        let selection = Selection {
+            id: 0,
+            start: Point::new(0, 0),
+            end: Point::new(0, selection_end as u32),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+
+        let rows = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        );
+
+        assert_eq!(rows[0].text, "Before x + y after");
+        assert_eq!(
+            selected_range_for_row(&snapshot, &rows[0], &selection),
+            Some(0.."Before x + y after".len())
         );
     }
 
@@ -4485,6 +4561,38 @@ mod tests {
     }
 
     #[test]
+    fn rendered_image_block_keeps_contained_selection_inactive() {
+        let image_source = "![alt](https://example.com/cat.png)";
+        let mut buffer = Buffer::local(&format!("intro\n{image_source}\noutro\n"));
+        let snapshot = buffer.snapshot();
+        let selection = Selection {
+            id: 0,
+            start: Point::new(0, 0),
+            end: Point::new(2, "outro".len() as u32),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        let row = display_rows_in_mode(
+            &snapshot,
+            1..2,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        let image_source_start = "intro\n".len();
+        assert_eq!(row.text, "alt");
+        assert_eq!(
+            rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+            Some(RenderedImageBlock {
+                url: "https://example.com/cat.png".to_string(),
+                alt_text: "alt".to_string(),
+                source_range: image_source_start..image_source_start + image_source.len(),
+            })
+        );
+    }
+
+    #[test]
     fn image_block_whole_selection_is_selected_state() {
         let image_source = "![alt](https://example.com/cat.png)";
         let mut buffer = Buffer::local(&format!("{image_source}\nnext\n"));
@@ -4501,6 +4609,13 @@ mod tests {
             reversed: false,
             goal: SelectionGoal::None,
         };
+        let containing_selection = Selection {
+            id: 0,
+            start: Point::new(0, 0),
+            end: Point::new(1, 0),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
         let partial_selection = Selection {
             id: 0,
             start: Point::new(0, 0),
@@ -4513,6 +4628,11 @@ mod tests {
             &snapshot,
             &image_block,
             &whole_selection
+        ));
+        assert!(image_block_is_whole_selected(
+            &snapshot,
+            &image_block,
+            &containing_selection
         ));
         assert!(!image_block_is_whole_selected(
             &snapshot,
