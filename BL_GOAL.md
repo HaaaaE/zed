@@ -120,11 +120,22 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Added a focused pure helper test that verifies only the visual row containing an inline atom expands.
 - This is still using fallback text for atom width and wrapping, so true inline GPUI element measurement, atomic line breaking, and atom-specific hit testing remain open.
 
+### 2026-05-25 - Inline atoms render through a distinct element path
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Split visual-row fragment rendering by fragment type:
+  - text fragments still render through the existing styled text helper,
+  - inline atom fragments now render through a dedicated atom helper.
+- Added `fragment_text_for_visual_row` so both text and atom fragments use the same visible-range clipping logic.
+- Inactive Rendered-mode inline math atoms now render inside their own GPUI container with atom height and a subtle math background while keeping fallback text width unchanged.
+- Added a focused pure helper test for clipping fragment text to the active visual row.
+- This creates a real replacement point for future measured inline GPUI elements, but atom width is still fallback-text-shaped and atom-aware line breaking/hit testing remain open.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 38/38 tests.
+- `cargo test -p md_editor` passed: 39/39 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work

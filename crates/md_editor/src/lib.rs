@@ -2025,39 +2025,28 @@ fn render_fragments_for_visual_row(
     let mut elements = Vec::new();
 
     for fragment in fragments {
-        let (display_range, text, style) = match fragment {
-            DisplayInlineFragment::Text(segment) => (
-                &segment.display_range,
-                segment.text.as_str(),
-                &segment.style,
-            ),
-            DisplayInlineFragment::Atom(atom) => (
-                &atom.display_range,
-                atom.fallback_text.as_str(),
-                &atom.style,
-            ),
-        };
-
-        if display_range.end <= visual_row.display_range.start
-            || display_range.start >= visual_row.display_range.end
-        {
-            continue;
+        match fragment {
+            DisplayInlineFragment::Text(segment) => {
+                let Some(text) = fragment_text_for_visual_row(
+                    &segment.display_range,
+                    segment.text.as_str(),
+                    visual_row,
+                ) else {
+                    continue;
+                };
+                elements.push(render_text_piece(text, &segment.style));
+            }
+            DisplayInlineFragment::Atom(atom) => {
+                let Some(text) = fragment_text_for_visual_row(
+                    &atom.display_range,
+                    atom.fallback_text.as_str(),
+                    visual_row,
+                ) else {
+                    continue;
+                };
+                elements.push(render_inline_atom_piece(atom, text));
+            }
         }
-
-        let start = display_range.start.max(visual_row.display_range.start);
-        let end = display_range.end.min(visual_row.display_range.end);
-        if start >= end {
-            continue;
-        }
-
-        let local_start = start - display_range.start;
-        let local_end = end - display_range.start;
-        let text = text[local_start..local_end].to_string();
-        if text.is_empty() {
-            continue;
-        }
-
-        elements.push(render_text_piece(text, style));
     }
 
     if elements.is_empty() {
@@ -2065,6 +2054,33 @@ fn render_fragments_for_visual_row(
     }
 
     elements
+}
+
+fn fragment_text_for_visual_row(
+    display_range: &Range<usize>,
+    text: &str,
+    visual_row: &VisualDisplayRow,
+) -> Option<String> {
+    if display_range.end <= visual_row.display_range.start
+        || display_range.start >= visual_row.display_range.end
+    {
+        return None;
+    }
+
+    let start = display_range.start.max(visual_row.display_range.start);
+    let end = display_range.end.min(visual_row.display_range.end);
+    if start >= end {
+        return None;
+    }
+
+    let local_start = start - display_range.start;
+    let local_end = end - display_range.start;
+    let text = text.get(local_start..local_end)?;
+    if text.is_empty() {
+        return None;
+    }
+
+    Some(text.to_string())
 }
 
 fn caret_position_for_visual_row(
@@ -2389,6 +2405,22 @@ fn render_text_piece(text: String, style: &DisplayTextStyle) -> gpui::AnyElement
     }
 
     element.into_any_element()
+}
+
+fn render_inline_atom_piece(atom: &DisplayInlineAtom, text: String) -> gpui::AnyElement {
+    match atom.kind {
+        DisplayInlineAtomKind::InlineMath => {
+            let palette = editor_palette();
+            div()
+                .h(atom.height)
+                .flex()
+                .items_center()
+                .rounded_sm()
+                .bg(palette.inline_math_text.opacity(0.08))
+                .child(render_text_piece(text, &atom.style))
+                .into_any_element()
+        }
+    }
 }
 
 fn display_inline_fragments(
@@ -3120,6 +3152,25 @@ mod tests {
         assert_eq!(
             visual_row_height_for_range(&fragments, &(12..18), row_style),
             row_style.line_height
+        );
+    }
+
+    #[test]
+    fn fragment_text_for_visual_row_clips_to_visible_range() {
+        let visual_row = VisualDisplayRow {
+            display_range: 7..12,
+            line_start_x: px(48.),
+            top: px(20.),
+            height: px(24.),
+        };
+
+        assert_eq!(
+            fragment_text_for_visual_row(&(0..18), "Before x + y after", &visual_row),
+            Some("x + y".to_string())
+        );
+        assert_eq!(
+            fragment_text_for_visual_row(&(0..7), "Before ", &visual_row),
+            None
         );
     }
 
