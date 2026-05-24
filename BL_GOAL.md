@@ -227,6 +227,14 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Measurement is only performed from the render/prepaint layout path because `layout_as_root` is phase-sensitive in GPUI.
 - Event paths reuse a cached measured layout when available. If a row has not yet been measured by rendering, they compute a non-cached fallback layout from shaped text width so mouse and keyboard handling do not call `layout_as_root` outside the allowed phase.
 
+### 2026-05-25 - Inline atom measurement returns full element size
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- The inline atom measurement path now returns a full GPUI element size instead of only a width.
+- Rendered inline atom fragments update both `width` and `height` from that measured size before visual-row construction, so visual-row height can follow the rendered atom element as richer inline atoms are introduced.
+- Fallback event-path layout still assigns width and height from shaped text plus the existing inline math minimum height, and measured layout keeps those fallback dimensions as lower bounds.
+- The render path now fixes both width and height from the cached atom size, while the measurement path leaves dimensions unconstrained except for the atom's minimum height.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
@@ -236,7 +244,7 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 
 ## Known Remaining Work
 
-- Generalize inline atom measurement beyond the current inactive inline math atom path, and add invalidation for dynamic element dimensions if future atom content can resize after the row is cached.
+- Generalize inline atom measurement beyond the current inactive inline math atom path, and add invalidation if future atom content can resize after the row is cached.
 - Implement general block-level GPUI elements as measured list items or subitems. Remote image blocks now update from loaded image dimensions, but arbitrary GPUI block measurement is not solved.
 - Add stronger runtime or visual tests for visual-row keyboard movement, especially Rendered-mode marker reveal/hide transitions.
 - Add stronger runtime or visual tests for resize reflow, wrapped hit testing, selection across visual rows, mode switching at wrapped positions, and Rendered image/block behavior.
