@@ -172,6 +172,7 @@ struct DisplayInlineAtom {
     display_range: Range<usize>,
     fallback_text: String,
     style: DisplayTextStyle,
+    height: gpui::Pixels,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -184,6 +185,7 @@ struct VisualDisplayRow {
     display_range: Range<usize>,
     line_start_x: gpui::Pixels,
     top: gpui::Pixels,
+    height: gpui::Pixels,
 }
 
 #[derive(Clone, Debug)]
@@ -196,12 +198,18 @@ struct DisplayRowTextLayout {
 
 impl DisplayRowTextLayout {
     fn height(&self, row_style: RowDisplayStyle) -> gpui::Pixels {
-        row_style.line_height * self.visual_rows.len().max(1)
+        let height = self
+            .visual_rows
+            .iter()
+            .fold(px(0.), |height, visual_row| height + visual_row.height);
+
+        height.max(row_style.line_height)
     }
 }
 
 const RENDERED_IMAGE_BLOCK_MAX_WIDTH: gpui::Pixels = px(600.);
 const RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT: gpui::Pixels = px(120.);
+const INLINE_MATH_ATOM_EXTRA_HEIGHT: gpui::Pixels = px(4.);
 
 #[derive(Clone, Debug, PartialEq)]
 enum DisplayBlockLayout {
@@ -1753,7 +1761,7 @@ fn text_layout_for_display_row(
     wrap_width: gpui::Pixels,
     window: &mut Window,
 ) -> DisplayRowTextLayout {
-    let fragments = display_inline_fragments(snapshot, display_row, mode);
+    let fragments = display_inline_fragments(snapshot, display_row, mode, row_style);
     let segments = text_segments_for_fragments(&fragments);
     let text_runs = text_runs_for_segments(&segments);
     let shaped_line = window.text_system().shape_line(
@@ -1771,9 +1779,9 @@ fn text_layout_for_display_row(
     ) {
         Ok(wrapped_lines) => wrapped_lines
             .first()
-            .map(|wrapped_line| visual_rows_for_wrapped_line(wrapped_line, row_style))
-            .unwrap_or_else(|| fallback_visual_rows(display_row.text.len(), row_style)),
-        Err(_) => fallback_visual_rows(display_row.text.len(), row_style),
+            .map(|wrapped_line| visual_rows_for_wrapped_line(wrapped_line, &fragments, row_style))
+            .unwrap_or_else(|| fallback_visual_rows(display_row.text.len(), &fragments, row_style)),
+        Err(_) => fallback_visual_rows(display_row.text.len(), &fragments, row_style),
     };
 
     DisplayRowTextLayout {
@@ -1786,6 +1794,7 @@ fn text_layout_for_display_row(
 
 fn visual_rows_for_wrapped_line(
     wrapped_line: &gpui::WrappedLine,
+    fragments: &[DisplayInlineFragment],
     row_style: RowDisplayStyle,
 ) -> Vec<VisualDisplayRow> {
     let mut rows = Vec::new();
@@ -1795,23 +1804,28 @@ fn visual_rows_for_wrapped_line(
 
     for wrap_boundary in wrapped_line.wrap_boundaries() {
         let Some(glyph) = wrap_boundary_glyph(wrapped_line, *wrap_boundary) else {
-            return fallback_visual_rows(wrapped_line.len(), row_style);
+            return fallback_visual_rows(wrapped_line.len(), fragments, row_style);
         };
         if glyph.index < start {
-            return fallback_visual_rows(wrapped_line.len(), row_style);
+            return fallback_visual_rows(wrapped_line.len(), fragments, row_style);
         }
+        let display_range = start..glyph.index;
+        let height = visual_row_height_for_range(fragments, &display_range, row_style);
         rows.push(VisualDisplayRow {
-            display_range: start..glyph.index,
+            display_range,
             line_start_x: start_x,
             top,
+            height,
         });
         start = glyph.index;
         start_x = glyph.position.x;
-        top += row_style.line_height;
+        top += height;
     }
 
+    let display_range = start..wrapped_line.len();
     rows.push(VisualDisplayRow {
-        display_range: start..wrapped_line.len(),
+        height: visual_row_height_for_range(fragments, &display_range, row_style),
+        display_range,
         line_start_x: start_x,
         top,
     });
@@ -1829,13 +1843,39 @@ fn wrap_boundary_glyph(
         .and_then(|run| run.glyphs.get(wrap_boundary.glyph_ix))
 }
 
-fn fallback_visual_rows(text_len: usize, row_style: RowDisplayStyle) -> Vec<VisualDisplayRow> {
-    let _ = row_style;
+fn fallback_visual_rows(
+    text_len: usize,
+    fragments: &[DisplayInlineFragment],
+    row_style: RowDisplayStyle,
+) -> Vec<VisualDisplayRow> {
+    let display_range = 0..text_len;
     vec![VisualDisplayRow {
-        display_range: 0..text_len,
+        height: visual_row_height_for_range(fragments, &display_range, row_style),
+        display_range,
         line_start_x: px(0.),
         top: px(0.),
     }]
+}
+
+fn visual_row_height_for_range(
+    fragments: &[DisplayInlineFragment],
+    display_range: &Range<usize>,
+    row_style: RowDisplayStyle,
+) -> gpui::Pixels {
+    fragments
+        .iter()
+        .filter_map(|fragment| match fragment {
+            DisplayInlineFragment::Text(_) => None,
+            DisplayInlineFragment::Atom(atom)
+                if ranges_overlap(&atom.display_range, display_range) =>
+            {
+                Some(atom.height)
+            }
+            DisplayInlineFragment::Atom(_) => None,
+        })
+        .fold(row_style.line_height, |height, atom_height| {
+            height.max(atom_height)
+        })
 }
 
 fn text_runs_for_segments(segments: &[StyledDisplaySegment]) -> Vec<TextRun> {
@@ -1903,7 +1943,7 @@ fn render_visual_text_row(
     let mouse_move_visual_row = visual_row.clone();
 
     div()
-        .h(row_style.line_height)
+        .h(visual_row.height)
         .flex()
         .items_center()
         .relative()
@@ -1928,7 +1968,6 @@ fn render_visual_text_row(
             text_layout,
             selected_range,
             &visual_row,
-            row_style,
         ))
         .children(render_fragments_for_visual_row(
             &text_layout.fragments,
@@ -1951,7 +1990,6 @@ fn selection_elements_for_visual_row(
     text_layout: &DisplayRowTextLayout,
     selected_range: Option<&Range<usize>>,
     visual_row: &VisualDisplayRow,
-    row_style: RowDisplayStyle,
 ) -> Vec<gpui::AnyElement> {
     let Some(selected_range) = selected_range else {
         return Vec::new();
@@ -1973,7 +2011,7 @@ fn selection_elements_for_visual_row(
             .absolute()
             .left(start_x)
             .top_0()
-            .h(row_style.line_height)
+            .h(visual_row.height)
             .w(width)
             .bg(palette.selection_background)
             .into_any_element(),
@@ -2357,6 +2395,7 @@ fn display_inline_fragments(
     snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
     mode: MarkdownEditorMode,
+    row_style: RowDisplayStyle,
 ) -> Vec<DisplayInlineFragment> {
     let source_range = display_row.projection.visible_source_range();
     let source_text = row_text(snapshot, display_row.row);
@@ -2369,7 +2408,7 @@ fn display_inline_fragments(
     }
 
     let style_ranges = markdown_style_ranges_for_row(snapshot, source_range.clone(), mode);
-    let atom_ranges = inline_atom_ranges_for_row(snapshot, display_row, mode);
+    let atom_ranges = inline_atom_ranges_for_row(snapshot, display_row, mode, row_style);
     let hidden_ranges = display_row.projection.hidden_ranges();
     let mut breakpoints = vec![source_range.start, source_range.end];
     for hidden_range in hidden_ranges {
@@ -2477,6 +2516,7 @@ fn inline_atom_ranges_for_row(
     snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
     mode: MarkdownEditorMode,
+    row_style: RowDisplayStyle,
 ) -> Vec<DisplayInlineAtom> {
     if mode != MarkdownEditorMode::Rendered {
         return Vec::new();
@@ -2497,13 +2537,14 @@ fn inline_atom_ranges_for_row(
                         .any(|hidden_range| ranges_overlap(marker_range, hidden_range))
                 })
         })
-        .filter_map(|span| inline_math_atom_for_span(display_row, span))
+        .filter_map(|span| inline_math_atom_for_span(display_row, span, row_style))
         .collect()
 }
 
 fn inline_math_atom_for_span(
     display_row: &DisplayRow,
     span: &markdown_wysiwyg::MarkdownInlineSpan,
+    row_style: RowDisplayStyle,
 ) -> Option<DisplayInlineAtom> {
     let display_range = display_row
         .projection
@@ -2522,7 +2563,14 @@ fn inline_math_atom_for_span(
         display_range,
         fallback_text,
         style: inline_style(MarkdownInlineKind::InlineMath),
+        height: inline_atom_height(DisplayInlineAtomKind::InlineMath, row_style),
     })
+}
+
+fn inline_atom_height(kind: DisplayInlineAtomKind, row_style: RowDisplayStyle) -> gpui::Pixels {
+    match kind {
+        DisplayInlineAtomKind::InlineMath => row_style.line_height + INLINE_MATH_ATOM_EXTRA_HEIGHT,
+    }
 }
 
 fn markdown_style_ranges_for_row(
@@ -2949,7 +2997,9 @@ mod tests {
         )
         .remove(0);
 
-        let fragments = display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered);
+        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Rendered);
+        let fragments =
+            display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
         let segments = text_segments_for_fragments(&fragments);
 
         assert_eq!(segments.len(), 1);
@@ -2973,7 +3023,9 @@ mod tests {
         )
         .remove(0);
 
-        let fragments = display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered);
+        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Rendered);
+        let fragments =
+            display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
         let segments = text_segments_for_fragments(&fragments);
 
         assert_eq!(
@@ -3005,7 +3057,9 @@ mod tests {
 
         assert_eq!(row.text, "Before x + y after");
 
-        let fragments = display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered);
+        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Rendered);
+        let fragments =
+            display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
         let atom = fragments
             .iter()
             .find_map(|fragment| match fragment {
@@ -3018,11 +3072,54 @@ mod tests {
         assert_eq!(atom.fallback_text, "x + y");
         assert_eq!(atom.display_range, 7..12);
         assert_eq!(
+            atom.height,
+            row_style.line_height + INLINE_MATH_ATOM_EXTRA_HEIGHT
+        );
+        assert_eq!(
             text_segments_for_fragments(&fragments)
                 .iter()
                 .map(|segment| segment.text.as_str())
                 .collect::<Vec<_>>(),
             vec!["Before ", "x + y", " after"]
+        );
+    }
+
+    #[test]
+    fn inline_atom_height_expands_visual_row_height() {
+        let row_style: RowDisplayStyle = md_theme::default_row_metrics().into();
+        let atom_height = row_style.line_height + INLINE_MATH_ATOM_EXTRA_HEIGHT;
+        let fragments = vec![
+            DisplayInlineFragment::Text(StyledDisplaySegment {
+                display_range: 0..7,
+                text: "Before ".to_string(),
+                style: DisplayTextStyle::default(),
+            }),
+            DisplayInlineFragment::Atom(DisplayInlineAtom {
+                kind: DisplayInlineAtomKind::InlineMath,
+                source_range: 8..15,
+                display_range: 7..12,
+                fallback_text: "x + y".to_string(),
+                style: inline_style(MarkdownInlineKind::InlineMath),
+                height: atom_height,
+            }),
+            DisplayInlineFragment::Text(StyledDisplaySegment {
+                display_range: 12..18,
+                text: " after".to_string(),
+                style: DisplayTextStyle::default(),
+            }),
+        ];
+
+        assert_eq!(
+            visual_row_height_for_range(&fragments, &(0..7), row_style),
+            row_style.line_height
+        );
+        assert_eq!(
+            visual_row_height_for_range(&fragments, &(7..12), row_style),
+            atom_height
+        );
+        assert_eq!(
+            visual_row_height_for_range(&fragments, &(12..18), row_style),
+            row_style.line_height
         );
     }
 
@@ -3324,11 +3421,13 @@ mod tests {
             display_range: 0..5,
             line_start_x: px(0.),
             top: px(0.),
+            height: px(20.),
         };
         let second_visual_row = VisualDisplayRow {
             display_range: 5..10,
             line_start_x: px(48.),
             top: px(20.),
+            height: px(20.),
         };
 
         assert!(visual_row_contains_caret(&first_visual_row, 4, 10));
@@ -3343,6 +3442,7 @@ mod tests {
             display_range: 0..0,
             line_start_x: px(0.),
             top: px(0.),
+            height: px(20.),
         };
 
         assert!(visual_row_contains_caret(&empty_visual_row, 0, 0));
@@ -3355,11 +3455,13 @@ mod tests {
                 display_range: 0..5,
                 line_start_x: px(0.),
                 top: px(0.),
+                height: px(20.),
             },
             VisualDisplayRow {
                 display_range: 5..10,
                 line_start_x: px(48.),
                 top: px(20.),
+                height: px(20.),
             },
         ];
 

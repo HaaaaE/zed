@@ -110,11 +110,21 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Added tests for inline math projection and for rendered inline math fragment creation/flattening.
 - This is a structural step toward inline GPUI elements participating in text flow; actual inline element measurement, line-height maxing, hit testing around inline atoms, and GPUI element rendering are still open.
 
+### 2026-05-25 - Inline atom height participates in visual-row layout
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Inline atom fragments now carry a layout height, currently used by inactive Rendered-mode inline math atoms.
+- `VisualDisplayRow` now stores its own height instead of assuming every wrapped row has the text line height.
+- Text row layout height now sums per-visual-row heights, and row rendering plus selection backgrounds use the visual row height.
+- Wrapped and fallback visual-row construction now maxes each row's text line height with any inline atom height overlapping that row.
+- Added a focused pure helper test that verifies only the visual row containing an inline atom expands.
+- This is still using fallback text for atom width and wrapping, so true inline GPUI element measurement, atomic line breaking, and atom-specific hit testing remain open.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 37/37 tests.
+- `cargo test -p md_editor` passed: 38/38 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work
