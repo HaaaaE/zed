@@ -375,11 +375,18 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - This prevents undo/redo from restoring a `WrappedHorizontalPosition` captured under an older visual-row layout while preserving selection id, range, and direction.
 - Added coverage that transaction selection state keeps the selection shape but stores `SelectionGoal::None` for both sides.
 
+### 2026-05-25 - Rendered active-range changes drop stale visual-row goals
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Rendered-mode selection changes that alter the active source range now clear the current layout-specific selection goal before row layouts are remeasured.
+- This prevents a `WrappedHorizontalPosition` captured under the previous marker reveal/hide projection from influencing caret ownership, Home/End, or vertical movement after the row projection changes.
+- Added coverage that active-range changes clear the goal while preserving selection shape, and unchanged active ranges leave newly established goals intact.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 82/82 tests.
+- `cargo test -p md_editor` passed: 83/83 tests.
 - `cargo check -p markdown_editor` passed.
 - `git diff --check` passed with only the existing LF/CRLF warning for `crates/md_editor/src/lib.rs`.
 

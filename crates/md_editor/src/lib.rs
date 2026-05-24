@@ -996,7 +996,11 @@ impl MarkdownEditor {
         let snapshot = self.buffer.snapshot();
         let previous_active = active_source_range_for_selection(&snapshot, previous_selection);
         let current_active = active_source_range_for_selection(&snapshot, &self.selection);
-        if previous_active != current_active {
+        if apply_rendered_active_source_range_change(
+            &mut self.selection,
+            previous_active.as_ref(),
+            current_active.as_ref(),
+        ) {
             self.clear_row_layout_cache();
         }
         self.remeasure_rows_from_source_ranges(
@@ -1538,6 +1542,19 @@ fn apply_text_wrap_width_change(
     }
 
     *last_text_wrap_width = Some(wrap_width);
+    *selection = selection_without_goal(selection);
+    true
+}
+
+fn apply_rendered_active_source_range_change(
+    selection: &mut Selection<Point>,
+    previous_active: Option<&Range<usize>>,
+    current_active: Option<&Range<usize>>,
+) -> bool {
+    if previous_active == current_active {
+        return false;
+    }
+
     *selection = selection_without_goal(selection);
     true
 }
@@ -5757,6 +5774,47 @@ mod tests {
             &mut last_text_wrap_width,
             &mut selection,
             px(80.)
+        ));
+        assert_eq!(
+            selection.goal,
+            SelectionGoal::WrappedHorizontalPosition((1, 24.))
+        );
+    }
+
+    #[test]
+    fn rendered_active_source_range_change_clears_stale_selection_goal_once() {
+        let previous_active = 8..12;
+        let current_active = 16..24;
+        let mut selection = Selection {
+            id: 7,
+            start: Point::new(0, 2),
+            end: Point::new(3, 1),
+            reversed: true,
+            goal: SelectionGoal::WrappedHorizontalPosition((2, 48.)),
+        };
+
+        assert!(apply_rendered_active_source_range_change(
+            &mut selection,
+            Some(&previous_active),
+            Some(&current_active)
+        ));
+        assert_eq!(
+            selection,
+            Selection {
+                id: 7,
+                start: Point::new(0, 2),
+                end: Point::new(3, 1),
+                reversed: true,
+                goal: SelectionGoal::None,
+            }
+        );
+
+        selection.goal = SelectionGoal::WrappedHorizontalPosition((1, 24.));
+
+        assert!(!apply_rendered_active_source_range_change(
+            &mut selection,
+            Some(&current_active),
+            Some(&current_active)
         ));
         assert_eq!(
             selection.goal,
