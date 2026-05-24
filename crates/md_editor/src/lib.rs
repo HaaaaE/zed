@@ -486,7 +486,7 @@ impl MarkdownEditor {
         .next()?;
         let row_style = row_display_style(snapshot, display_row.row, self.mode);
         let wrap_width = text_wrap_width(window);
-        let DisplayRowLayout::Text(text_layout) = self.cached_row_layout(
+        let current_layout = self.cached_row_layout(
             snapshot,
             &display_row,
             selection,
@@ -495,43 +495,54 @@ impl MarkdownEditor {
             wrap_width,
             window,
             cx,
-        ) else {
-            return None;
-        };
-        let source_offset = snapshot.as_text_snapshot().point_to_offset(cursor);
-        let display_offset = display_row
-            .projection
-            .source_to_display(source_offset)
-            .min(text_layout.text_len);
-        let visual_row_index = visual_row_index_containing_caret(
-            &text_layout.visual_rows,
-            display_offset,
-            text_layout.text_len,
-        )?;
-        let visual_row = &text_layout.visual_rows[visual_row_index];
-        let cursor_x =
-            text_layout.shaped_line.x_for_index(display_offset) - visual_row.line_start_x;
-        let desired_x = desired_visual_x(selection.goal, cursor_x);
+        );
 
-        let target_visual_row_index = visual_row_index as i32 + delta_visual_rows;
-        if target_visual_row_index >= 0
-            && (target_visual_row_index as usize) < text_layout.visual_rows.len()
-        {
-            let target_visual_row_index = target_visual_row_index as usize;
-            return point_for_visual_row_x(
-                snapshot,
-                &display_row,
-                &text_layout,
-                &text_layout.visual_rows[target_visual_row_index],
-                desired_x,
-            )
-            .map(|point| {
-                (
-                    point,
-                    visual_horizontal_goal(target_visual_row_index, desired_x),
+        let source_offset = snapshot.as_text_snapshot().point_to_offset(cursor);
+        let desired_x = match current_layout {
+            DisplayRowLayout::Text(text_layout) => {
+                let display_offset = display_row
+                    .projection
+                    .source_to_display(source_offset)
+                    .min(text_layout.text_len);
+                let visual_row_index = visual_row_index_containing_caret(
+                    &text_layout.visual_rows,
+                    display_offset,
+                    text_layout.text_len,
+                )?;
+                let visual_row = &text_layout.visual_rows[visual_row_index];
+                let cursor_x =
+                    text_layout.shaped_line.x_for_index(display_offset) - visual_row.line_start_x;
+                let desired_x = desired_visual_x(selection.goal, cursor_x);
+
+                let target_visual_row_index = visual_row_index as i32 + delta_visual_rows;
+                if target_visual_row_index >= 0
+                    && (target_visual_row_index as usize) < text_layout.visual_rows.len()
+                {
+                    let target_visual_row_index = target_visual_row_index as usize;
+                    return point_for_visual_row_x(
+                        snapshot,
+                        &display_row,
+                        &text_layout,
+                        &text_layout.visual_rows[target_visual_row_index],
+                        desired_x,
+                    )
+                    .map(|point| {
+                        (
+                            point,
+                            visual_horizontal_goal(target_visual_row_index, desired_x),
+                        )
+                    });
+                }
+
+                desired_x
+            }
+            DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(image_layout)) => {
+                desired_visual_x(
+                    selection.goal,
+                    image_block_x_for_source_offset(&image_layout, source_offset),
                 )
-            });
-        }
+            }
+        };
 
         let target_row = if delta_visual_rows.is_negative() {
             display_row.row.checked_sub(1)?
@@ -551,7 +562,7 @@ impl MarkdownEditor {
         .into_iter()
         .next()?;
         let target_row_style = row_display_style(snapshot, target_display_row.row, self.mode);
-        let DisplayRowLayout::Text(target_text_layout) = self.cached_row_layout(
+        let target_layout = self.cached_row_layout(
             snapshot,
             &target_display_row,
             selection,
@@ -560,32 +571,43 @@ impl MarkdownEditor {
             wrap_width,
             window,
             cx,
-        ) else {
-            return None;
-        };
-        let target_visual_row = if delta_visual_rows.is_negative() {
-            target_text_layout.visual_rows.last()?
-        } else {
-            target_text_layout.visual_rows.first()?
-        };
-        let target_visual_row_index = if delta_visual_rows.is_negative() {
-            target_text_layout.visual_rows.len().saturating_sub(1)
-        } else {
-            0
-        };
-        point_for_visual_row_x(
-            snapshot,
-            &target_display_row,
-            &target_text_layout,
-            target_visual_row,
-            desired_x,
-        )
-        .map(|point| {
-            (
-                point,
-                visual_horizontal_goal(target_visual_row_index, desired_x),
-            )
-        })
+        );
+        match target_layout {
+            DisplayRowLayout::Text(target_text_layout) => {
+                let target_visual_row = if delta_visual_rows.is_negative() {
+                    target_text_layout.visual_rows.last()?
+                } else {
+                    target_text_layout.visual_rows.first()?
+                };
+                let target_visual_row_index = if delta_visual_rows.is_negative() {
+                    target_text_layout.visual_rows.len().saturating_sub(1)
+                } else {
+                    0
+                };
+                point_for_visual_row_x(
+                    snapshot,
+                    &target_display_row,
+                    &target_text_layout,
+                    target_visual_row,
+                    desired_x,
+                )
+                .map(|point| {
+                    (
+                        point,
+                        visual_horizontal_goal(target_visual_row_index, desired_x),
+                    )
+                })
+            }
+            DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(image_layout)) => Some((
+                point_for_image_block_x(
+                    snapshot,
+                    &image_layout.image_block,
+                    image_layout.width,
+                    desired_x,
+                ),
+                visual_horizontal_goal(0, desired_x),
+            )),
+        }
     }
 
     pub fn select_to_beginning_of_line(
@@ -2089,12 +2111,16 @@ fn point_for_image_block_mouse_x(
     image_width: gpui::Pixels,
     x: gpui::Pixels,
 ) -> Point {
-    let image_x = (x - gutter_width()).max(px(0.));
-    let offset = if image_x < image_width * 0.5 {
-        image_block.source_range.start
-    } else {
-        image_block.source_range.end
-    };
+    point_for_image_block_x(snapshot, image_block, image_width, x - gutter_width())
+}
+
+fn point_for_image_block_x(
+    snapshot: &BufferSnapshot,
+    image_block: &RenderedImageBlock,
+    image_width: gpui::Pixels,
+    x: gpui::Pixels,
+) -> Point {
+    let offset = image_block_source_offset_for_x(image_block, image_width, x);
     let offset = snapshot
         .as_text_snapshot()
         .as_rope()
@@ -2104,6 +2130,33 @@ fn point_for_image_block_mouse_x(
         snapshot,
         snapshot.as_text_snapshot().offset_to_point(offset),
     )
+}
+
+fn image_block_source_offset_for_x(
+    image_block: &RenderedImageBlock,
+    image_width: gpui::Pixels,
+    x: gpui::Pixels,
+) -> usize {
+    let image_x = x.max(px(0.));
+    if image_x < image_width * 0.5 {
+        image_block.source_range.start
+    } else {
+        image_block.source_range.end
+    }
+}
+
+fn image_block_x_for_source_offset(
+    image_layout: &RenderedImageBlockLayout,
+    source_offset: usize,
+) -> gpui::Pixels {
+    let source_range = &image_layout.image_block.source_range;
+    if source_offset <= source_range.start {
+        px(0.)
+    } else if source_offset >= source_range.end {
+        image_layout.width
+    } else {
+        image_layout.width * 0.5
+    }
 }
 
 fn render_image_block(
@@ -2880,6 +2933,49 @@ mod tests {
             ),
             Point::new(0, 35)
         );
+    }
+
+    #[test]
+    fn image_block_local_x_maps_to_source_range_edges() {
+        let image_block = RenderedImageBlock {
+            url: "https://example.com/cat.png".to_string(),
+            alt_text: "alt".to_string(),
+            source_range: 4..39,
+        };
+
+        assert_eq!(
+            image_block_source_offset_for_x(&image_block, px(200.), px(0.)),
+            4
+        );
+        assert_eq!(
+            image_block_source_offset_for_x(&image_block, px(200.), px(99.)),
+            4
+        );
+        assert_eq!(
+            image_block_source_offset_for_x(&image_block, px(200.), px(100.)),
+            39
+        );
+        assert_eq!(
+            image_block_source_offset_for_x(&image_block, px(200.), px(250.)),
+            39
+        );
+    }
+
+    #[test]
+    fn image_block_source_offset_maps_to_visible_x() {
+        let image_layout = RenderedImageBlockLayout {
+            image_block: RenderedImageBlock {
+                url: "https://example.com/cat.png".to_string(),
+                alt_text: "alt".to_string(),
+                source_range: 4..39,
+            },
+            width: px(200.),
+            height: px(120.),
+        };
+
+        assert_eq!(image_block_x_for_source_offset(&image_layout, 4), px(0.));
+        assert_eq!(image_block_x_for_source_offset(&image_layout, 20), px(100.));
+        assert_eq!(image_block_x_for_source_offset(&image_layout, 39), px(200.));
     }
 
     #[test]

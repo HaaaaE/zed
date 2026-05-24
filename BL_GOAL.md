@@ -87,10 +87,21 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Added a pure helper test for image block mouse x-position mapping.
 - This improves block row cursor/selection consistency, but does not replace the need for a general fragment hit-test model for arbitrary GPUI inline and block elements.
 
+### 2026-05-25 - Remote image block keyboard vertical movement
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Keyboard vertical movement now handles remote image block rows instead of falling back to source-row-only movement whenever the current or target row is a block.
+- Moving from text into a rendered image block maps the preserved visible x position onto the image source range:
+  - left half maps to the Markdown image source range start,
+  - right half maps to the Markdown image source range end.
+- Moving out of a rendered image block derives the desired visible x position from the cursor's location within that image source range, then reuses the text-row visual movement path.
+- Added pure helper tests for image block local x-to-source mapping and source offset-to-visible x mapping.
+- This keeps remote-image block cursor movement consistent with the mouse hit-test path, but still does not implement arbitrary GPUI fragment hit testing or inline element layout.
+
 ## Verification
 
 - `cargo fmt -p md_editor -p markdown_editor` passed.
-- `cargo test -p md_editor` passed: 34/34 tests.
+- `cargo test -p md_editor` passed: 36/36 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work
