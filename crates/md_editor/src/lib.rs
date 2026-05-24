@@ -587,7 +587,12 @@ impl MarkdownEditor {
                     boundary,
                 )?;
                 let visual_row = &text_layout.visual_rows[visual_row_index];
-                let point = point_for_display_offset(snapshot, &display_row, target_display_offset);
+                let point = point_for_display_offset(
+                    snapshot,
+                    &display_row,
+                    &text_layout,
+                    target_display_offset,
+                );
                 let target_x = display_x_for_offset(
                     &text_layout.fragments,
                     &text_layout.shaped_line,
@@ -1954,7 +1959,8 @@ fn point_for_mouse_x_in_text_layout(
     let text_x = (x - gutter_width()).max(px(0.));
     let display_offset =
         display_offset_for_visual_row_x(&display_row.text, text_layout, visual_row, text_x);
-    let source_offset = display_row.projection.display_to_source(display_offset);
+    let source_offset =
+        source_offset_for_display_offset(display_row, &text_layout.fragments, display_offset);
     let source_offset = snapshot
         .as_text_snapshot()
         .as_rope()
@@ -2801,7 +2807,8 @@ fn point_for_visual_row_x(
 ) -> Option<Point> {
     let display_offset =
         display_offset_for_visual_row_x(&display_row.text, text_layout, visual_row, x);
-    let source_offset = display_row.projection.display_to_source(display_offset);
+    let source_offset =
+        source_offset_for_display_offset(display_row, &text_layout.fragments, display_offset);
     let source_offset = snapshot
         .as_text_snapshot()
         .as_rope()
@@ -2812,14 +2819,40 @@ fn point_for_visual_row_x(
 fn point_for_display_offset(
     snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
+    text_layout: &DisplayRowTextLayout,
     display_offset: usize,
 ) -> Point {
-    let source_offset = display_row.projection.display_to_source(display_offset);
+    let source_offset =
+        source_offset_for_display_offset(display_row, &text_layout.fragments, display_offset);
     let source_offset = snapshot
         .as_text_snapshot()
         .as_rope()
         .floor_char_boundary(source_offset);
     snapshot.as_text_snapshot().offset_to_point(source_offset)
+}
+
+fn source_offset_for_display_offset(
+    display_row: &DisplayRow,
+    fragments: &[DisplayInlineFragment],
+    display_offset: usize,
+) -> usize {
+    for fragment in fragments {
+        if let DisplayInlineFragment::Atom(atom) = fragment
+            && atom.display_range.end == display_offset
+        {
+            return atom.source_range.end;
+        }
+    }
+
+    for fragment in fragments {
+        if let DisplayInlineFragment::Atom(atom) = fragment
+            && atom.display_range.start == display_offset
+        {
+            return atom.source_range.start;
+        }
+    }
+
+    display_row.projection.display_to_source(display_offset)
 }
 
 fn display_offset_for_visual_row_x(
@@ -4252,6 +4285,27 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["Before ", "x + y", " after"]
         );
+    }
+
+    #[test]
+    fn inline_atom_display_boundaries_map_to_source_boundaries() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let snapshot = buffer.snapshot();
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&collapsed_selection(Point::new(0, 0))),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Rendered);
+        let fragments =
+            display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
+
+        assert_eq!(source_offset_for_display_offset(&row, &fragments, 7), 7);
+        assert_eq!(source_offset_for_display_offset(&row, &fragments, 12), 14);
+        assert_eq!(source_offset_for_display_offset(&row, &fragments, 0), 0);
     }
 
     #[test]

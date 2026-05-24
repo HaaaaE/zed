@@ -317,11 +317,19 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Image block selected styling now treats any selection containing the full standalone image source range as a selected block, not only an exact image-only selection.
 - Added projection coverage for inactive override ranges and md_editor coverage for contained inline atom/image block selections.
 
+### 2026-05-25 - Inline atom display boundaries map to source boundaries
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Mouse hit testing, visual-row vertical movement, and visual-row Home/End now map inline atom display boundaries through an atom-aware source-offset helper.
+- The rendered inline math atom's display start maps to the full `$...$` source range start, and its display end maps to the source range end.
+- This keeps clicks and visual movement on the atom's left side from accidentally placing the cursor inside the math content and revealing source markers.
+- Added coverage for inline atom display-boundary to source-boundary mapping.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 75/75 tests.
+- `cargo test -p md_editor` passed: 76/76 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work
