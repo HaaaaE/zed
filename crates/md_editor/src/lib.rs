@@ -1233,15 +1233,18 @@ impl Focusable for MarkdownEditor {
 impl Render for MarkdownEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let mode = self.mode;
-        let selection = self.selection.clone();
         let palette = editor_palette();
         let default_metrics = default_row_metrics();
         let wrap_width = text_wrap_width(window);
-        if self.last_text_wrap_width != Some(wrap_width) {
-            self.last_text_wrap_width = Some(wrap_width);
+        if apply_text_wrap_width_change(
+            &mut self.last_text_wrap_width,
+            &mut self.selection,
+            wrap_width,
+        ) {
             self.clear_row_layout_cache();
             self.display_list_state.remeasure();
         }
+        let selection = self.selection.clone();
 
         div()
             .id("md-editor")
@@ -1511,6 +1514,20 @@ fn selection_without_goal(selection: &Selection<Point>) -> Selection<Point> {
     let mut selection = selection.clone();
     selection.goal = SelectionGoal::None;
     selection
+}
+
+fn apply_text_wrap_width_change(
+    last_text_wrap_width: &mut Option<gpui::Pixels>,
+    selection: &mut Selection<Point>,
+    wrap_width: gpui::Pixels,
+) -> bool {
+    if *last_text_wrap_width == Some(wrap_width) {
+        return false;
+    }
+
+    *last_text_wrap_width = Some(wrap_width);
+    *selection = selection_without_goal(selection);
+    true
 }
 
 pub fn move_left(snapshot: &BufferSnapshot, cursor: Point) -> Point {
@@ -5659,6 +5676,41 @@ mod tests {
                 reversed: true,
                 goal: SelectionGoal::None,
             }
+        );
+    }
+
+    #[test]
+    fn text_wrap_width_change_clears_stale_selection_goal_once() {
+        let mut last_text_wrap_width = Some(px(120.));
+        let mut selection = Selection {
+            id: 7,
+            start: Point::new(0, 2),
+            end: Point::new(3, 1),
+            reversed: true,
+            goal: SelectionGoal::WrappedHorizontalPosition((2, 48.)),
+        };
+
+        assert!(apply_text_wrap_width_change(
+            &mut last_text_wrap_width,
+            &mut selection,
+            px(80.)
+        ));
+        assert_eq!(last_text_wrap_width, Some(px(80.)));
+        assert_eq!(selection.goal, SelectionGoal::None);
+        assert_eq!(selection.start, Point::new(0, 2));
+        assert_eq!(selection.end, Point::new(3, 1));
+        assert!(selection.reversed);
+
+        selection.goal = SelectionGoal::WrappedHorizontalPosition((1, 24.));
+
+        assert!(!apply_text_wrap_width_change(
+            &mut last_text_wrap_width,
+            &mut selection,
+            px(80.)
+        ));
+        assert_eq!(
+            selection.goal,
+            SelectionGoal::WrappedHorizontalPosition((1, 24.))
         );
     }
 

@@ -361,11 +361,18 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - This prevents a `WrappedHorizontalPosition` visual-row index captured in one layout mode from influencing caret ownership, Home/End, or subsequent vertical movement after the mode's projected row layout changes.
 - Added coverage that clearing the goal preserves selection id, range, and direction.
 
+### 2026-05-25 - Resize reflow drops stale visual-row goals
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Text wrap width changes now clear the current selection goal before the row layout cache is cleared and list rows are remeasured.
+- This prevents a `WrappedHorizontalPosition` visual-row index captured before a resize from influencing caret ownership, Home/End, or subsequent vertical movement after soft-wrap rows are recomputed.
+- Added coverage that width changes clear the goal once while preserving selection shape, and unchanged widths leave newly established goals intact.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 80/80 tests.
+- `cargo test -p md_editor` passed: 81/81 tests.
 - `cargo check -p markdown_editor` passed.
 - `git diff --check` passed with only the existing LF/CRLF warning for `crates/md_editor/src/lib.rs`.
 
