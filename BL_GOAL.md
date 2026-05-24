@@ -396,11 +396,18 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - The test locks down that clicks on a later visual row map x positions relative to that row's `line_start_x`, including row-start and mid-row clicks.
 - This strengthens wrapped hit-testing coverage without changing runtime behavior.
 
+### 2026-05-25 - Cursor row is revealed after selection changes
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Selection changes, edits, mode switches, and explicit cursor placement now ask the list to reveal the current cursor row.
+- This keeps keyboard movement, mouse selection, undo/redo, typing, and mode switching from leaving the caret on a row outside the visible list viewport.
+- Added coverage that cursor-row reveal clips the target to the current list item range before scrolling.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 85/85 tests.
+- `cargo test -p md_editor` passed: 86/86 tests.
 - `cargo check -p markdown_editor` passed.
 - `git diff --check` passed with only the existing LF/CRLF warning for `crates/md_editor/src/lib.rs`.
 

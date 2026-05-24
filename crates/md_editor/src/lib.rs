@@ -358,6 +358,7 @@ impl MarkdownEditor {
         self.selection = selection_without_goal(&self.selection);
         self.clear_row_layout_cache();
         self.display_list_state.remeasure();
+        self.reveal_cursor_row();
         cx.notify();
     }
 
@@ -394,6 +395,7 @@ impl MarkdownEditor {
         let previous_selection = self.selection.clone();
         self.selection = collapsed_selection(clip_cursor(&self.buffer.snapshot(), cursor));
         self.sync_rendered_rows_for_selection_change(&previous_selection);
+        self.reveal_cursor_row();
     }
 
     pub fn move_left(&mut self, _: &MoveLeft, _: &mut Window, cx: &mut Context<Self>) {
@@ -955,6 +957,7 @@ impl MarkdownEditor {
     ) {
         self.clear_row_layout_cache();
         self.sync_display_list_state(row_count_before, previous_selection);
+        self.reveal_cursor_row();
         if changed {
             self.emit_dirty_state(cx);
         } else {
@@ -968,6 +971,7 @@ impl MarkdownEditor {
         cx: &mut Context<Self>,
     ) {
         self.sync_rendered_rows_for_selection_change(previous_selection);
+        self.reveal_cursor_row();
         cx.notify();
     }
 
@@ -1041,6 +1045,14 @@ impl MarkdownEditor {
     fn clear_row_layout_cache(&mut self) {
         self.row_layout_cache.clear();
         self.block_row_heights.clear();
+    }
+
+    fn reveal_cursor_row(&mut self) {
+        reveal_selection_head_row(
+            &self.display_list_state,
+            &self.buffer.snapshot(),
+            &self.selection,
+        );
     }
 
     fn cached_row_layout(
@@ -1538,6 +1550,21 @@ fn transaction_selection_state_without_goals(
         before: selection_without_goal(&before),
         after: selection_without_goal(&after),
     }
+}
+
+fn reveal_selection_head_row(
+    display_list_state: &ListState,
+    snapshot: &BufferSnapshot,
+    selection: &Selection<Point>,
+) {
+    let item_count = display_list_state.item_count();
+    if item_count == 0 {
+        return;
+    }
+
+    let cursor = clip_cursor(snapshot, selection.head());
+    let row = (cursor.row as usize).min(item_count.saturating_sub(1));
+    display_list_state.scroll_to_reveal_item(row);
 }
 
 fn apply_text_wrap_width_change(
@@ -5890,6 +5917,24 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn reveal_selection_head_row_scrolls_to_clipped_cursor_row() {
+        let mut buffer = Buffer::local("zero\none\ntwo\n");
+        let snapshot = buffer.snapshot();
+        let list_state = ListState::new(2, ListAlignment::Top, px(1000.));
+        list_state.scroll_to(gpui::ListOffset {
+            item_ix: 1,
+            offset_in_item: px(5.),
+        });
+        let selection = collapsed_selection(Point::new(2, 0));
+
+        reveal_selection_head_row(&list_state, &snapshot, &selection);
+
+        let scroll_top = list_state.logical_scroll_top();
+        assert_eq!(scroll_top.item_ix, 1);
+        assert_eq!(scroll_top.offset_in_item, px(0.));
     }
 
     #[test]
