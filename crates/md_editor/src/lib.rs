@@ -679,7 +679,8 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
-        let (selection, transaction_id) = backspace_selection(&mut self.buffer, &self.selection);
+        let (selection, transaction_id) =
+            backspace_selection_in_mode(&mut self.buffer, &self.selection, self.mode);
         let changed = transaction_id.is_some();
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
@@ -690,7 +691,8 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
-        let (selection, transaction_id) = delete_selection(&mut self.buffer, &self.selection);
+        let (selection, transaction_id) =
+            delete_selection_in_mode(&mut self.buffer, &self.selection, self.mode);
         let changed = transaction_id.is_some();
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
@@ -1583,9 +1585,21 @@ fn move_across_rendered_inline_atom(
     cursor: Point,
     direction: HorizontalDirection,
 ) -> Option<Point> {
-    let cursor = clip_cursor(snapshot, cursor);
     let text_snapshot = snapshot.as_text_snapshot();
-    let source_offset = text_snapshot.point_to_offset(cursor);
+    let (source_offset, atoms) = rendered_inline_atoms_at_cursor(snapshot, cursor)?;
+
+    let target_offset = atoms
+        .iter()
+        .find_map(|atom| rendered_inline_atom_horizontal_target(atom, source_offset, direction))?;
+    Some(text_snapshot.offset_to_point(target_offset))
+}
+
+fn rendered_inline_atoms_at_cursor(
+    snapshot: &BufferSnapshot,
+    cursor: Point,
+) -> Option<(usize, Vec<DisplayInlineAtom>)> {
+    let cursor = clip_cursor(snapshot, cursor);
+    let source_offset = snapshot.as_text_snapshot().point_to_offset(cursor);
     let display_row = display_rows_in_mode(
         snapshot,
         cursor.row as usize..cursor.row as usize + 1,
@@ -1602,10 +1616,7 @@ fn move_across_rendered_inline_atom(
         row_style,
     );
 
-    let target_offset = atoms
-        .iter()
-        .find_map(|atom| rendered_inline_atom_horizontal_target(atom, source_offset, direction))?;
-    Some(text_snapshot.offset_to_point(target_offset))
+    Some((source_offset, atoms))
 }
 
 fn rendered_inline_atom_horizontal_target(
@@ -1622,6 +1633,33 @@ fn rendered_inline_atom_horizontal_target(
         }
         _ => None,
     }
+}
+
+fn rendered_inline_atom_boundary_range(
+    atom: &DisplayInlineAtom,
+    source_offset: usize,
+    direction: HorizontalDirection,
+) -> Option<Range<usize>> {
+    match direction {
+        HorizontalDirection::Left if source_offset == atom.source_range.end => {
+            Some(atom.source_range.clone())
+        }
+        HorizontalDirection::Right if source_offset == atom.source_range.start => {
+            Some(atom.source_range.clone())
+        }
+        _ => None,
+    }
+}
+
+fn rendered_inline_atom_range_at_cursor(
+    snapshot: &BufferSnapshot,
+    cursor: Point,
+    direction: HorizontalDirection,
+) -> Option<Range<usize>> {
+    let (source_offset, atoms) = rendered_inline_atoms_at_cursor(snapshot, cursor)?;
+    atoms
+        .iter()
+        .find_map(|atom| rendered_inline_atom_boundary_range(atom, source_offset, direction))
 }
 
 pub fn selection_byte_range(
@@ -1657,6 +1695,30 @@ pub fn replace_selection(
     (collapsed_selection(cursor), transaction_id)
 }
 
+fn backspace_selection_in_mode(
+    buffer: &mut Buffer,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+) -> (Selection<Point>, Option<md_text::TransactionId>) {
+    let snapshot = buffer.snapshot();
+    let selection = clip_selection(&snapshot, selection);
+    if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
+        if let Some(range) = rendered_inline_atom_range_at_cursor(
+            &snapshot,
+            selection.head(),
+            HorizontalDirection::Left,
+        ) {
+            return replace_selection(
+                buffer,
+                &selection_for_source_range(&snapshot, selection.id, range),
+                "",
+            );
+        }
+    }
+
+    backspace_selection(buffer, &selection)
+}
+
 pub fn backspace_selection(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
@@ -1689,6 +1751,30 @@ pub fn backspace_selection(
     )
 }
 
+fn delete_selection_in_mode(
+    buffer: &mut Buffer,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+) -> (Selection<Point>, Option<md_text::TransactionId>) {
+    let snapshot = buffer.snapshot();
+    let selection = clip_selection(&snapshot, selection);
+    if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
+        if let Some(range) = rendered_inline_atom_range_at_cursor(
+            &snapshot,
+            selection.head(),
+            HorizontalDirection::Right,
+        ) {
+            return replace_selection(
+                buffer,
+                &selection_for_source_range(&snapshot, selection.id, range),
+                "",
+            );
+        }
+    }
+
+    delete_selection(buffer, &selection)
+}
+
 pub fn delete_selection(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
@@ -1719,6 +1805,21 @@ pub fn delete_selection(
         },
         "",
     )
+}
+
+fn selection_for_source_range(
+    snapshot: &BufferSnapshot,
+    id: usize,
+    source_range: Range<usize>,
+) -> Selection<Point> {
+    let text_snapshot = snapshot.as_text_snapshot();
+    Selection {
+        id,
+        start: text_snapshot.offset_to_point(source_range.start),
+        end: text_snapshot.offset_to_point(source_range.end),
+        reversed: false,
+        goal: SelectionGoal::None,
+    }
 }
 
 fn point_for_row_and_column(snapshot: &BufferSnapshot, row: u32, column: u32) -> Point {
@@ -4011,6 +4112,75 @@ mod tests {
 
         assert_eq!(buffer.text(), "aef");
         assert_eq!(selection, collapsed_selection(Point::new(0, 1)));
+        assert!(transaction_id.is_some());
+    }
+
+    #[test]
+    fn rendered_backspace_deletes_previous_inactive_inline_atom() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let atom_start = "Before ".len();
+        let atom_end = "Before $x + y$".len();
+        let selection = collapsed_selection(Point::new(0, atom_end as u32));
+
+        let (selection, transaction_id) =
+            backspace_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+        assert_eq!(buffer.text(), "Before  after\n");
+        assert_eq!(
+            selection,
+            collapsed_selection(Point::new(0, atom_start as u32))
+        );
+        assert!(transaction_id.is_some());
+    }
+
+    #[test]
+    fn rendered_delete_deletes_next_inactive_inline_atom() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let atom_start = "Before ".len();
+        let selection = collapsed_selection(Point::new(0, atom_start as u32));
+
+        let (selection, transaction_id) =
+            delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+        assert_eq!(buffer.text(), "Before  after\n");
+        assert_eq!(
+            selection,
+            collapsed_selection(Point::new(0, atom_start as u32))
+        );
+        assert!(transaction_id.is_some());
+    }
+
+    #[test]
+    fn rendered_delete_inside_inline_atom_uses_character_movement() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let atom_content_start = "Before $".len();
+        let selection = collapsed_selection(Point::new(0, atom_content_start as u32));
+
+        let (selection, transaction_id) =
+            delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+        assert_eq!(buffer.text(), "Before $ + y$ after\n");
+        assert_eq!(
+            selection,
+            collapsed_selection(Point::new(0, atom_content_start as u32))
+        );
+        assert!(transaction_id.is_some());
+    }
+
+    #[test]
+    fn source_delete_keeps_inline_atom_source_character_movement() {
+        let mut buffer = Buffer::local("Before $x + y$ after\n");
+        let atom_start = "Before ".len();
+        let selection = collapsed_selection(Point::new(0, atom_start as u32));
+
+        let (selection, transaction_id) =
+            delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Source);
+
+        assert_eq!(buffer.text(), "Before x + y$ after\n");
+        assert_eq!(
+            selection,
+            collapsed_selection(Point::new(0, atom_start as u32))
+        );
         assert!(transaction_id.is_some());
     }
 

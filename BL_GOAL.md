@@ -162,11 +162,22 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Added focused tests for rendered atom skipping, rendered atom range selection, active inline math character movement, and Source-mode character movement.
 - This closes the immediate keyboard-horizontal gap for inactive inline atoms, but atom selection is still rendered with the existing source-range highlight rather than a richer atom-specific visual.
 
+### 2026-05-25 - Inline atoms are deleted atomically at rendered boundaries
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- `Backspace` and `Delete` now route through mode-aware helpers.
+- Rendered-mode deletion now treats inactive inline math atoms as atomic at their boundaries:
+  - Backspace from the atom source end deletes the whole atom source range,
+  - Delete from the atom source start deletes the whole atom source range.
+- Non-empty selections, Source mode, and cursors already inside inline math content continue to use the existing source-level deletion behavior.
+- Added focused tests for rendered Backspace/Delete atom deletion, active inline math character deletion, and Source-mode character deletion.
+- This keeps keyboard deletion consistent with Rendered-mode horizontal atom navigation, while richer atom-specific selection visuals remain open.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 46/46 tests.
+- `cargo test -p md_editor` passed: 50/50 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work
