@@ -200,16 +200,26 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - `SelectionGoal::WrappedHorizontalPosition` now disambiguates caret ownership at soft-wrap boundaries, so a caret at the end of a wrapped visual row can still render and continue moving from that visual row instead of defaulting to the next row's start.
 - Added focused pure helper tests for wrapped-boundary caret ownership and visual-row Home/End targets.
 
+### 2026-05-25 - Inline atom widths feed fragment-aware wrapping
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Rendered inline atom fragments now carry an explicit width and rows containing atoms wrap through GPUI `LineFragment` data instead of only shaping the fallback text string.
+- Inline atom fragments are converted to `LineFragment::element(width, len_utf8)` so the GPUI line wrapper can keep their measured width atomic while text fragments still wrap as text.
+- Caret, selection, mouse hit testing, and visual-row keyboard x calculations now use shared helpers that translate between display offsets and x positions with atom width deltas applied.
+- Inline atom render containers use the same explicit width used by wrapping and hit testing, keeping geometry ready for future real GPUI inline element measurement.
+- Current atom width is still derived from the fallback shaped text width; replacing that with actual GPUI element measurement remains open.
+- Added focused helper tests for inline atom `LineFragment::element` conversion and invalid fragment range fallback.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 12/12 tests.
-- `cargo test -p md_editor` passed: 56/56 tests.
+- `cargo test -p md_editor` passed: 58/58 tests.
 - `cargo check -p markdown_editor` passed.
 
 ## Known Remaining Work
 
-- Implement a real Rendered-mode fragment model for inline GPUI elements embedded in text flow, including measuring element width/height, line breaking with text, max-height visual row computation, and hit-test/caret mapping around element spans.
+- Replace fallback-text-derived inline atom width with real Rendered-mode GPUI inline element measurement, including invalidation when measured element dimensions change.
 - Implement general block-level GPUI elements as measured list items or subitems. Remote image blocks now update from loaded image dimensions, but arbitrary GPUI block measurement is not solved.
 - Add stronger runtime or visual tests for visual-row keyboard movement, especially Rendered-mode marker reveal/hide transitions.
 - Add stronger runtime or visual tests for resize reflow, wrapped hit testing, selection across visual rows, mode switching at wrapped positions, and Rendered image/block behavior.

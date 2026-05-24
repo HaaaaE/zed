@@ -2,10 +2,10 @@ use std::{collections::HashMap, hash::Hash, ops::Range};
 
 use gpui::{
     App, Context, EventEmitter, FocusHandle, Focusable, FontStyle, FontWeight, ImgResourceLoader,
-    IntoElement, KeyBinding, KeyDownEvent, ListAlignment, ListSizingBehavior, ListState,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, Resource, SharedString,
-    StrikethroughStyle, TextAlign, TextRun, UnderlineStyle, Window, div, font, img, list,
-    prelude::*, px,
+    IntoElement, KeyBinding, KeyDownEvent, LineFragment, ListAlignment, ListSizingBehavior,
+    ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, Resource,
+    SharedString, StrikethroughStyle, TextAlign, TextRun, UnderlineStyle, Window, div, font, img,
+    list, prelude::*, px,
 };
 use markdown_wysiwyg::{MarkdownBlockKind, MarkdownInlineKind, MarkdownProjectionMap};
 use md_assets::EDITOR_FONT_FAMILY;
@@ -173,6 +173,7 @@ struct DisplayInlineAtom {
     fallback_text: String,
     style: DisplayTextStyle,
     height: gpui::Pixels,
+    width: gpui::Pixels,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -580,8 +581,11 @@ impl MarkdownEditor {
                 )?;
                 let visual_row = &text_layout.visual_rows[visual_row_index];
                 let point = point_for_display_offset(snapshot, &display_row, target_display_offset);
-                let target_x = text_layout.shaped_line.x_for_index(target_display_offset)
-                    - visual_row.line_start_x;
+                let target_x = display_x_for_offset(
+                    &text_layout.fragments,
+                    &text_layout.shaped_line,
+                    target_display_offset,
+                ) - visual_row.line_start_x;
                 Some((point, visual_horizontal_goal(visual_row_index, target_x)))
             }
             DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(image_layout)) => {
@@ -647,8 +651,11 @@ impl MarkdownEditor {
                     selection.goal,
                 )?;
                 let visual_row = &text_layout.visual_rows[visual_row_index];
-                let cursor_x =
-                    text_layout.shaped_line.x_for_index(display_offset) - visual_row.line_start_x;
+                let cursor_x = display_x_for_offset(
+                    &text_layout.fragments,
+                    &text_layout.shaped_line,
+                    display_offset,
+                ) - visual_row.line_start_x;
                 let desired_x = desired_visual_x(selection.goal, cursor_x);
 
                 let target_visual_row_index = visual_row_index as i32 + delta_visual_rows;
@@ -2055,6 +2062,7 @@ fn compute_display_row_layout(
         row_style,
         wrap_width,
         window,
+        cx,
     ))
 }
 
@@ -2101,8 +2109,9 @@ fn text_layout_for_display_row(
     row_style: RowDisplayStyle,
     wrap_width: gpui::Pixels,
     window: &mut Window,
+    cx: &mut App,
 ) -> DisplayRowTextLayout {
-    let fragments = display_inline_fragments(snapshot, display_row, mode, row_style);
+    let mut fragments = display_inline_fragments(snapshot, display_row, mode, row_style);
     let segments = text_segments_for_fragments(&fragments);
     let text_runs = text_runs_for_segments(&segments);
     let shaped_line = window.text_system().shape_line(
@@ -2111,18 +2120,34 @@ fn text_layout_for_display_row(
         &text_runs,
         None,
     );
-    let visual_rows = match window.text_system().shape_text(
-        SharedString::from(display_row.text.clone()),
-        row_style.text_size,
-        &text_runs,
-        Some(wrap_width),
-        None,
-    ) {
-        Ok(wrapped_lines) => wrapped_lines
-            .first()
-            .map(|wrapped_line| visual_rows_for_wrapped_line(wrapped_line, &fragments, row_style))
-            .unwrap_or_else(|| fallback_visual_rows(display_row.text.len(), &fragments, row_style)),
-        Err(_) => fallback_visual_rows(display_row.text.len(), &fragments, row_style),
+    assign_inline_atom_widths(&mut fragments, &shaped_line);
+    let visual_rows = if has_inline_atoms(&fragments) {
+        visual_rows_for_fragments(
+            &display_row.text,
+            &fragments,
+            &shaped_line,
+            row_style,
+            wrap_width,
+            cx,
+        )
+    } else {
+        match window.text_system().shape_text(
+            SharedString::from(display_row.text.clone()),
+            row_style.text_size,
+            &text_runs,
+            Some(wrap_width),
+            None,
+        ) {
+            Ok(wrapped_lines) => wrapped_lines
+                .first()
+                .map(|wrapped_line| {
+                    visual_rows_for_wrapped_line(wrapped_line, &fragments, row_style)
+                })
+                .unwrap_or_else(|| {
+                    fallback_visual_rows(display_row.text.len(), &fragments, row_style)
+                }),
+            Err(_) => fallback_visual_rows(display_row.text.len(), &fragments, row_style),
+        }
     };
 
     DisplayRowTextLayout {
@@ -2131,6 +2156,101 @@ fn text_layout_for_display_row(
         shaped_line,
         text_len: display_row.text.len(),
     }
+}
+
+fn assign_inline_atom_widths(
+    fragments: &mut [DisplayInlineFragment],
+    shaped_line: &gpui::ShapedLine,
+) {
+    for fragment in fragments {
+        let DisplayInlineFragment::Atom(atom) = fragment else {
+            continue;
+        };
+        let start_x = shaped_line.x_for_index(atom.display_range.start);
+        let end_x = shaped_line.x_for_index(atom.display_range.end);
+        atom.width = (end_x - start_x).max(px(1.));
+    }
+}
+
+fn has_inline_atoms(fragments: &[DisplayInlineFragment]) -> bool {
+    fragments
+        .iter()
+        .any(|fragment| matches!(fragment, DisplayInlineFragment::Atom(_)))
+}
+
+fn visual_rows_for_fragments(
+    display_text: &str,
+    fragments: &[DisplayInlineFragment],
+    shaped_line: &gpui::ShapedLine,
+    row_style: RowDisplayStyle,
+    wrap_width: gpui::Pixels,
+    cx: &mut App,
+) -> Vec<VisualDisplayRow> {
+    let Some(line_fragments) = line_fragments_for_wrapping(display_text, fragments) else {
+        return fallback_visual_rows(display_text.len(), fragments, row_style);
+    };
+
+    let mut rows = Vec::new();
+    let mut start = 0;
+    let mut top = px(0.);
+    let mut line_wrapper = cx
+        .text_system()
+        .line_wrapper(font(EDITOR_FONT_FAMILY), row_style.text_size);
+
+    for boundary in line_wrapper.wrap_line(&line_fragments, wrap_width) {
+        let boundary_index = atomic_wrap_boundary_index(fragments, boundary.ix, start);
+        if boundary_index < start || boundary_index > display_text.len() {
+            return fallback_visual_rows(display_text.len(), fragments, row_style);
+        }
+        if boundary_index == start {
+            continue;
+        }
+
+        let display_range = start..boundary_index;
+        let height = visual_row_height_for_range(fragments, &display_range, row_style);
+        rows.push(VisualDisplayRow {
+            line_start_x: display_x_for_offset(fragments, shaped_line, start),
+            display_range,
+            top,
+            height,
+        });
+        start = boundary_index;
+        top += height;
+    }
+
+    let display_range = start..display_text.len();
+    rows.push(VisualDisplayRow {
+        line_start_x: display_x_for_offset(fragments, shaped_line, start),
+        height: visual_row_height_for_range(fragments, &display_range, row_style),
+        display_range,
+        top,
+    });
+    rows
+}
+
+fn line_fragments_for_wrapping<'a>(
+    display_text: &'a str,
+    fragments: &'a [DisplayInlineFragment],
+) -> Option<Vec<LineFragment<'a>>> {
+    let mut line_fragments = Vec::new();
+    for fragment in fragments {
+        match fragment {
+            DisplayInlineFragment::Text(segment) => {
+                let text = display_text.get(segment.display_range.clone())?;
+                if !text.is_empty() {
+                    line_fragments.push(LineFragment::text(text));
+                }
+            }
+            DisplayInlineFragment::Atom(atom) => {
+                let text = display_text.get(atom.display_range.clone())?;
+                if text.is_empty() {
+                    continue;
+                }
+                line_fragments.push(LineFragment::element(atom.width.max(px(1.)), text.len()));
+            }
+        }
+    }
+    Some(line_fragments)
 }
 
 fn visual_rows_for_wrapped_line(
@@ -2389,8 +2509,10 @@ fn selection_elements_for_visual_row(
     }
 
     let palette = editor_palette();
-    let start_x = text_layout.shaped_line.x_for_index(start) - visual_row.line_start_x;
-    let end_x = text_layout.shaped_line.x_for_index(end) - visual_row.line_start_x;
+    let start_x = display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, start)
+        - visual_row.line_start_x;
+    let end_x = display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, end)
+        - visual_row.line_start_x;
     let width = (end_x - start_x).max(px(1.));
 
     vec![
@@ -2504,7 +2626,13 @@ fn caret_position_for_visual_row(
         return None;
     }
 
-    Some(text_layout.shaped_line.x_for_index(display_offset) - visual_row.line_start_x)
+    Some(
+        display_x_for_offset(
+            &text_layout.fragments,
+            &text_layout.shaped_line,
+            display_offset,
+        ) - visual_row.line_start_x,
+    )
 }
 
 fn visual_row_contains_caret(
@@ -2630,10 +2758,9 @@ fn display_offset_for_visual_row_x(
     x: gpui::Pixels,
 ) -> usize {
     let display_x = x.max(px(0.)) + visual_row.line_start_x;
-    let display_offset = text_layout
-        .shaped_line
-        .closest_index_for_x(display_x)
-        .clamp(visual_row.display_range.start, visual_row.display_range.end);
+    let display_offset =
+        closest_display_offset_for_x(&text_layout.fragments, &text_layout.shaped_line, display_x)
+            .clamp(visual_row.display_range.start, visual_row.display_range.end);
 
     if let Some(atom_offset) = snap_display_offset_to_inline_atom_boundary(
         text_layout,
@@ -2673,10 +2800,16 @@ fn snap_display_offset_to_inline_atom_boundary(
             return None;
         }
 
-        let atom_start_x = text_layout
-            .shaped_line
-            .x_for_index(atom.display_range.start);
-        let atom_end_x = text_layout.shaped_line.x_for_index(atom.display_range.end);
+        let atom_start_x = display_x_for_offset(
+            &text_layout.fragments,
+            &text_layout.shaped_line,
+            atom.display_range.start,
+        );
+        let atom_end_x = display_x_for_offset(
+            &text_layout.fragments,
+            &text_layout.shaped_line,
+            atom.display_range.end,
+        );
         let offset_inside_atom =
             atom.display_range.start < display_offset && display_offset < atom.display_range.end;
         let x_inside_atom = atom_start_x <= display_x && display_x <= atom_end_x;
@@ -2691,6 +2824,80 @@ fn snap_display_offset_to_inline_atom_boundary(
             display_x,
         ))
     })
+}
+
+fn closest_display_offset_for_x(
+    fragments: &[DisplayInlineFragment],
+    shaped_line: &gpui::ShapedLine,
+    display_x: gpui::Pixels,
+) -> usize {
+    for fragment in fragments {
+        match fragment {
+            DisplayInlineFragment::Text(segment) => {
+                let start_x =
+                    display_x_for_offset(fragments, shaped_line, segment.display_range.start);
+                let end_x = display_x_for_offset(fragments, shaped_line, segment.display_range.end);
+                if display_x < start_x {
+                    return segment.display_range.start;
+                }
+                if display_x <= end_x {
+                    let shaped_start_x = shaped_line.x_for_index(segment.display_range.start);
+                    let adjusted_x = display_x - (start_x - shaped_start_x);
+                    return shaped_line
+                        .closest_index_for_x(adjusted_x)
+                        .clamp(segment.display_range.start, segment.display_range.end);
+                }
+            }
+            DisplayInlineFragment::Atom(atom) => {
+                let start_x =
+                    display_x_for_offset(fragments, shaped_line, atom.display_range.start);
+                let end_x = display_x_for_offset(fragments, shaped_line, atom.display_range.end);
+                if display_x < start_x {
+                    return atom.display_range.start;
+                }
+                if display_x <= end_x {
+                    return inline_atom_boundary_for_x(
+                        &atom.display_range,
+                        start_x,
+                        end_x,
+                        display_x,
+                    );
+                }
+            }
+        }
+    }
+
+    shaped_line.len()
+}
+
+fn display_x_for_offset(
+    fragments: &[DisplayInlineFragment],
+    shaped_line: &gpui::ShapedLine,
+    display_offset: usize,
+) -> gpui::Pixels {
+    let mut delta = px(0.);
+    for fragment in fragments {
+        let DisplayInlineFragment::Atom(atom) = fragment else {
+            continue;
+        };
+        let fallback_start_x = shaped_line.x_for_index(atom.display_range.start);
+        let fallback_end_x = shaped_line.x_for_index(atom.display_range.end);
+        let fallback_width = (fallback_end_x - fallback_start_x).max(px(0.));
+
+        if display_offset >= atom.display_range.end {
+            delta += atom.width - fallback_width;
+        } else if display_offset > atom.display_range.start {
+            let local_fallback_x = shaped_line.x_for_index(display_offset) - fallback_start_x;
+            let atom_ratio = if fallback_width > px(0.) {
+                local_fallback_x / fallback_width
+            } else {
+                0.
+            };
+            return fallback_start_x + delta + atom.width * atom_ratio;
+        }
+    }
+
+    shaped_line.x_for_index(display_offset) + delta
 }
 
 fn inline_atom_boundary_for_x(
@@ -2937,6 +3144,7 @@ fn render_inline_atom_piece(atom: &DisplayInlineAtom, text: String) -> gpui::Any
             let palette = editor_palette();
             div()
                 .h(atom.height)
+                .w(atom.width)
                 .flex()
                 .items_center()
                 .rounded_sm()
@@ -3120,6 +3328,7 @@ fn inline_math_atom_for_span(
         fallback_text,
         style: inline_style(MarkdownInlineKind::InlineMath),
         height: inline_atom_height(DisplayInlineAtomKind::InlineMath, row_style),
+        width: px(0.),
     })
 }
 
@@ -3769,6 +3978,7 @@ mod tests {
                 fallback_text: "x + y".to_string(),
                 style: inline_style(MarkdownInlineKind::InlineMath),
                 height: atom_height,
+                width: px(50.),
             }),
             DisplayInlineFragment::Text(StyledDisplaySegment {
                 display_range: 12..18,
@@ -3792,6 +4002,61 @@ mod tests {
     }
 
     #[test]
+    fn line_fragments_for_wrapping_uses_inline_atom_element_width() {
+        let fragments = vec![
+            DisplayInlineFragment::Text(StyledDisplaySegment {
+                display_range: 0..7,
+                text: "Before ".to_string(),
+                style: DisplayTextStyle::default(),
+            }),
+            DisplayInlineFragment::Atom(DisplayInlineAtom {
+                kind: DisplayInlineAtomKind::InlineMath,
+                source_range: 8..15,
+                display_range: 7..12,
+                fallback_text: "x + y".to_string(),
+                style: inline_style(MarkdownInlineKind::InlineMath),
+                height: px(24.),
+                width: px(42.),
+            }),
+            DisplayInlineFragment::Text(StyledDisplaySegment {
+                display_range: 12..18,
+                text: " after".to_string(),
+                style: DisplayTextStyle::default(),
+            }),
+        ];
+        let Some(line_fragments) = line_fragments_for_wrapping("Before x + y after", &fragments)
+        else {
+            panic!("expected valid line fragments");
+        };
+
+        assert_eq!(line_fragments.len(), 3);
+        assert!(matches!(
+            &line_fragments[0],
+            LineFragment::Text { text } if *text == "Before "
+        ));
+        assert!(matches!(
+            &line_fragments[1],
+            LineFragment::Element { width, len_utf8 }
+                if *width == px(42.) && *len_utf8 == "x + y".len()
+        ));
+        assert!(matches!(
+            &line_fragments[2],
+            LineFragment::Text { text } if *text == " after"
+        ));
+    }
+
+    #[test]
+    fn line_fragments_for_wrapping_rejects_invalid_text_range() {
+        let fragments = vec![DisplayInlineFragment::Text(StyledDisplaySegment {
+            display_range: 0..10,
+            text: "short".to_string(),
+            style: DisplayTextStyle::default(),
+        })];
+
+        assert!(line_fragments_for_wrapping("short", &fragments).is_none());
+    }
+
+    #[test]
     fn atomic_wrap_boundary_keeps_inline_atom_on_one_visual_row() {
         let fragments = vec![DisplayInlineFragment::Atom(DisplayInlineAtom {
             kind: DisplayInlineAtomKind::InlineMath,
@@ -3800,6 +4065,7 @@ mod tests {
             fallback_text: "x + y".to_string(),
             style: inline_style(MarkdownInlineKind::InlineMath),
             height: px(24.),
+            width: px(50.),
         })];
 
         assert_eq!(atom_range_containing_display_index(&fragments, 7), None);
@@ -3836,6 +4102,7 @@ mod tests {
             fallback_text: "x + y".to_string(),
             style: inline_style(MarkdownInlineKind::InlineMath),
             height: px(24.),
+            width: px(50.),
         })];
 
         assert!(!atom_ends_at_display_index(&fragments, 7));
