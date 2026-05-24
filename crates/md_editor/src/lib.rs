@@ -4163,6 +4163,19 @@ mod tests {
             selected_range_for_row(&snapshot, &rows[0], &selection),
             Some(0.."Before x + y after".len())
         );
+
+        let row_style = row_display_style(&snapshot, rows[0].row, MarkdownEditorMode::Rendered);
+        let fragments =
+            display_inline_fragments(&snapshot, &rows[0], MarkdownEditorMode::Rendered, row_style);
+        let atom = fragments.iter().find_map(|fragment| match fragment {
+            DisplayInlineFragment::Atom(atom) => Some(atom),
+            DisplayInlineFragment::Text(_) => None,
+        });
+        let selected_range = 0.."Before x + y after".len();
+
+        assert!(atom.is_some_and(|atom| {
+            atom.display_range == (7..12) && inline_atom_is_selected(atom, Some(&selected_range))
+        }));
     }
 
     #[test]

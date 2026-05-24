@@ -325,6 +325,12 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - This keeps clicks and visual movement on the atom's left side from accidentally placing the cursor inside the math content and revealing source markers.
 - Added coverage for inline atom display-boundary to source-boundary mapping.
 
+### 2026-05-25 - Contained inline atom selection state is covered
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Strengthened the contained inline math selection coverage so a larger Rendered-mode selection still maps to the rendered display range while the fully contained atom reports selected state.
+- This locks the interaction between inactive rendered-element override ranges, row selection geometry, and inline atom selected styling without changing runtime behavior.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
