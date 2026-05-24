@@ -378,9 +378,9 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 ### 2026-05-25 - Rendered active-range changes drop stale visual-row goals
 
 - Scope: `crates/md_editor/src/lib.rs`.
-- Rendered-mode selection changes that alter the active source range now clear the current layout-specific selection goal before row layouts are remeasured.
-- This prevents a `WrappedHorizontalPosition` captured under the previous marker reveal/hide projection from influencing caret ownership, Home/End, or vertical movement after the row projection changes.
-- Added coverage that active-range changes clear the goal while preserving selection shape, and unchanged active ranges leave newly established goals intact.
+- Rendered-mode selection changes that alter the active source range now drop only the stale visual-row index from layout-specific selection goals before row layouts are remeasured.
+- This prevents a `WrappedHorizontalPosition` captured under the previous marker reveal/hide projection from influencing caret ownership or Home/End after the row projection changes, while preserving the desired x position for continued vertical movement.
+- Added coverage that active-range changes downgrade wrapped goals to horizontal goals while preserving selection shape, and unchanged active ranges leave newly established wrapped goals intact.
 
 ## Verification
 

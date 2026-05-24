@@ -1522,6 +1522,14 @@ fn selection_without_goal(selection: &Selection<Point>) -> Selection<Point> {
     selection
 }
 
+fn selection_without_wrapped_visual_row_goal(selection: &Selection<Point>) -> Selection<Point> {
+    let mut selection = selection.clone();
+    if let SelectionGoal::WrappedHorizontalPosition((_, x)) = selection.goal {
+        selection.goal = SelectionGoal::HorizontalPosition(f64::from(x));
+    }
+    selection
+}
+
 fn transaction_selection_state_without_goals(
     before: Selection<Point>,
     after: Selection<Point>,
@@ -1555,7 +1563,7 @@ fn apply_rendered_active_source_range_change(
         return false;
     }
 
-    *selection = selection_without_goal(selection);
+    *selection = selection_without_wrapped_visual_row_goal(selection);
     true
 }
 
@@ -5782,7 +5790,7 @@ mod tests {
     }
 
     #[test]
-    fn rendered_active_source_range_change_clears_stale_selection_goal_once() {
+    fn rendered_active_source_range_change_drops_stale_visual_row_goal_once() {
         let previous_active = 8..12;
         let current_active = 16..24;
         let mut selection = Selection {
@@ -5805,7 +5813,7 @@ mod tests {
                 start: Point::new(0, 2),
                 end: Point::new(3, 1),
                 reversed: true,
-                goal: SelectionGoal::None,
+                goal: SelectionGoal::HorizontalPosition(48.),
             }
         );
 
