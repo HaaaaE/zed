@@ -3080,31 +3080,25 @@ fn render_image_block(
     div()
         .w_full()
         .py_1()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event, window, cx| {
+                this.mouse_left_down_on_image_block(
+                    &mouse_down_image_block,
+                    image_width,
+                    event,
+                    window,
+                    cx,
+                )
+            }),
+        )
+        .on_mouse_move(cx.listener(move |this, event, window, cx| {
+            this.mouse_move_on_image_block(&mouse_move_image_block, image_width, event, window, cx)
+        }))
         .child(
             div()
                 .w(image_layout.width)
                 .h(image_layout.height)
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, event, window, cx| {
-                        this.mouse_left_down_on_image_block(
-                            &mouse_down_image_block,
-                            image_width,
-                            event,
-                            window,
-                            cx,
-                        )
-                    }),
-                )
-                .on_mouse_move(cx.listener(move |this, event, window, cx| {
-                    this.mouse_move_on_image_block(
-                        &mouse_move_image_block,
-                        image_width,
-                        event,
-                        window,
-                        cx,
-                    )
-                }))
                 .rounded_md()
                 .border_1()
                 .border_color(palette.gutter_text)
@@ -4328,6 +4322,15 @@ mod tests {
                 &image_block,
                 px(200.),
                 gutter_width() + px(160.)
+            ),
+            Point::new(0, 35)
+        );
+        assert_eq!(
+            point_for_image_block_mouse_x(
+                &snapshot,
+                &image_block,
+                px(200.),
+                gutter_width() + px(260.)
             ),
             Point::new(0, 35)
         );

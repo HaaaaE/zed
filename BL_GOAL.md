@@ -235,6 +235,13 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Fallback event-path layout still assigns width and height from shaped text plus the existing inline math minimum height, and measured layout keeps those fallback dimensions as lower bounds.
 - The render path now fixes both width and height from the cached atom size, while the measurement path leaves dimensions unconstrained except for the atom's minimum height.
 
+### 2026-05-25 - Image block hit target covers full block row
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Rendered remote image block mouse handlers now live on the full block-row container instead of only the inner image rectangle.
+- Clicking or dragging in the image block's right-side empty area now maps to the image source range end, while the left side still maps to the source range start.
+- Added coverage for mouse x positions beyond the rendered image width so block-row hit testing remains consistent with the displayed block footprint.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
@@ -247,5 +254,5 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Generalize inline atom measurement beyond the current inactive inline math atom path, and add invalidation if future atom content can resize after the row is cached.
 - Implement general block-level GPUI elements as measured list items or subitems. Remote image blocks now update from loaded image dimensions, but arbitrary GPUI block measurement is not solved.
 - Add stronger runtime or visual tests for visual-row keyboard movement, especially Rendered-mode marker reveal/hide transitions.
-- Add stronger runtime or visual tests for resize reflow, wrapped hit testing, selection across visual rows, mode switching at wrapped positions, and Rendered image/block behavior.
+- Add stronger runtime or visual tests for resize reflow, wrapped hit testing, selection across visual rows, mode switching at wrapped positions, and general Rendered image/block behavior.
 - Add performance-oriented caching/invalidation so large-document wrapping reuses per-row layout and avoids whole-document reflow except when global width changes.
