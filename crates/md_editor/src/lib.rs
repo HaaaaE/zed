@@ -2759,7 +2759,7 @@ fn text_layout_for_display_row(
     window: &mut Window,
     cx: &mut App,
 ) -> DisplayRowTextLayout {
-    let mut fragments = display_inline_fragments(snapshot, display_row, mode, row_style);
+    let mut fragments = display_fragments_for_text_layout(snapshot, display_row, mode, row_style);
     let segments = text_segments_for_fragments(&fragments);
     let text_runs = text_runs_for_segments(&segments);
     let shaped_line = window.text_system().shape_line(
@@ -2768,12 +2768,15 @@ fn text_layout_for_display_row(
         &text_runs,
         None,
     );
-    if measure_inline_atoms {
-        measure_inline_atom_sizes(&mut fragments, &shaped_line, row_style, window, cx);
-    } else {
-        assign_inline_atom_fallback_sizes(&mut fragments, &shaped_line, row_style);
+    let has_inline_atoms = has_inline_atoms(&fragments);
+    if has_inline_atoms {
+        if measure_inline_atoms {
+            measure_inline_atom_sizes(&mut fragments, &shaped_line, row_style, window, cx);
+        } else {
+            assign_inline_atom_fallback_sizes(&mut fragments, &shaped_line, row_style);
+        }
     }
-    let visual_rows = if has_inline_atoms(&fragments) {
+    let visual_rows = if has_inline_atoms {
         visual_rows_for_fragments(
             &display_row.text,
             &fragments,
@@ -2808,6 +2811,27 @@ fn text_layout_for_display_row(
         shaped_line,
         text_len: display_row.text.len(),
     }
+}
+
+fn display_fragments_for_text_layout(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    mode: MarkdownEditorMode,
+    row_style: RowDisplayStyle,
+) -> Vec<DisplayInlineFragment> {
+    if mode == MarkdownEditorMode::Source {
+        return source_display_fragments(display_row);
+    }
+
+    display_inline_fragments(snapshot, display_row, mode, row_style)
+}
+
+fn source_display_fragments(display_row: &DisplayRow) -> Vec<DisplayInlineFragment> {
+    vec![DisplayInlineFragment::Text(StyledDisplaySegment {
+        display_range: 0..display_row.text.len(),
+        text: display_row.text.clone(),
+        style: DisplayTextStyle::default(),
+    })]
 }
 
 fn assign_inline_atom_fallback_sizes(
@@ -4805,6 +4829,36 @@ mod tests {
         assert_eq!(
             segments[3].style.color,
             Some(md_theme::editor_palette().inline_code_text)
+        );
+    }
+
+    #[test]
+    fn source_fragments_use_plain_text_fast_path() {
+        let mut buffer = Buffer::local("Before **bold** and $x$\n");
+        let snapshot = buffer.snapshot();
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&collapsed_selection(Point::new(0, 0))),
+            MarkdownEditorMode::Source,
+        )
+        .remove(0);
+
+        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Source);
+        let fragments = display_fragments_for_text_layout(
+            &snapshot,
+            &row,
+            MarkdownEditorMode::Source,
+            row_style,
+        );
+
+        assert_eq!(
+            fragments,
+            vec![DisplayInlineFragment::Text(StyledDisplaySegment {
+                display_range: 0..row.text.len(),
+                text: row.text.clone(),
+                style: DisplayTextStyle::default(),
+            })]
         );
     }
 

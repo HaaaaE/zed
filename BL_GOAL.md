@@ -498,11 +498,18 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - The query still preserves spans that start before the requested range and overlap it, which matters for multi-line inline syntax.
 - Added coverage for a multi-line inline span that starts before the queried range and still needs to be returned.
 
+### 2026-05-25 - Source text rows use a plain fragment fast path
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Source-mode text layout now bypasses the Rendered-mode inline fragment builder and directly creates one plain text fragment for the display row.
+- Source rows no longer run through Markdown style range collection, inline atom range collection, hidden-range breakpoint construction, or atom fallback measurement when they only need plain text wrapping.
+- Added coverage that Source-mode Markdown syntax stays in a single plain text fragment rather than being split into styled fragments or atoms.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 15/15 tests.
-- `cargo test -p md_editor` passed: 98/98 tests.
+- `cargo test -p md_editor` passed: 99/99 tests.
 - `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo test -p md_editor rendered_mode_draws_inline_image_atom` passed and covers drawing a Rendered-mode inline image atom through the GPUI path.
 - `cargo test -p md_editor rendered_mode_draws_empty_alt_inline_image_atom` passed and covers drawing a Rendered-mode empty-alt inline image atom through the GPUI path.
