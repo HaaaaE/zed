@@ -1028,6 +1028,15 @@ impl MarkdownEditor {
         delta_visual_rows: i32,
         extend_selection: bool,
     ) -> Selection<Point> {
+        if self.mode == MarkdownEditorMode::Source {
+            return self.move_source_selection_visual_vertical(
+                window,
+                cx,
+                delta_visual_rows,
+                extend_selection,
+            );
+        }
+
         let snapshot = self.buffer.snapshot();
         let selection = clip_selection(&snapshot, &self.selection);
         let fallback = if extend_selection {
@@ -1060,6 +1069,15 @@ impl MarkdownEditor {
         boundary: VisualLineBoundary,
         extend_selection: bool,
     ) -> Selection<Point> {
+        if self.mode == MarkdownEditorMode::Source {
+            return self.move_source_selection_visual_line_boundary(
+                window,
+                cx,
+                boundary,
+                extend_selection,
+            );
+        }
+
         let snapshot = self.buffer.snapshot();
         let selection = clip_selection(&snapshot, &self.selection);
         let fallback = if extend_selection {
@@ -1091,6 +1109,229 @@ impl MarkdownEditor {
             updated.collapse_to(target, goal);
             updated
         }
+    }
+
+    fn move_source_selection_visual_vertical(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        delta_visual_rows: i32,
+        extend_selection: bool,
+    ) -> Selection<Point> {
+        let snapshot = self.buffer.text_snapshot();
+        let selection = clip_selection_in_text_snapshot(&snapshot, &self.selection);
+        let fallback = if extend_selection {
+            select_vertical_in_text_snapshot(&snapshot, &selection, delta_visual_rows)
+        } else {
+            move_selection_vertical_in_text_snapshot(&snapshot, &selection, delta_visual_rows)
+        };
+
+        let Some((target, goal)) = self.source_visual_vertical_target_point(
+            &snapshot,
+            &selection,
+            delta_visual_rows,
+            window,
+            cx,
+        ) else {
+            return fallback;
+        };
+
+        if extend_selection {
+            let mut updated = selection.clone();
+            updated.set_head(target, goal);
+            updated
+        } else {
+            let mut updated = selection.clone();
+            updated.collapse_to(target, goal);
+            updated
+        }
+    }
+
+    fn move_source_selection_visual_line_boundary(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        boundary: VisualLineBoundary,
+        extend_selection: bool,
+    ) -> Selection<Point> {
+        let snapshot = self.buffer.text_snapshot();
+        let selection = clip_selection_in_text_snapshot(&snapshot, &self.selection);
+        let fallback = if extend_selection {
+            match boundary {
+                VisualLineBoundary::Start => {
+                    select_to_beginning_of_line_in_text_snapshot(&snapshot, &selection)
+                }
+                VisualLineBoundary::End => {
+                    select_to_end_of_line_in_text_snapshot(&snapshot, &selection)
+                }
+            }
+        } else {
+            match boundary {
+                VisualLineBoundary::Start => {
+                    move_selection_to_beginning_of_line_in_text_snapshot(&snapshot, &selection)
+                }
+                VisualLineBoundary::End => {
+                    move_selection_to_end_of_line_in_text_snapshot(&snapshot, &selection)
+                }
+            }
+        };
+
+        let Some((target, goal)) = self
+            .source_visual_line_boundary_target_point(&snapshot, &selection, boundary, window, cx)
+        else {
+            return fallback;
+        };
+
+        if extend_selection {
+            let mut updated = selection.clone();
+            updated.set_head(target, goal);
+            updated
+        } else {
+            let mut updated = selection.clone();
+            updated.collapse_to(target, goal);
+            updated
+        }
+    }
+
+    fn source_visual_line_boundary_target_point(
+        &mut self,
+        snapshot: &TextBufferSnapshot,
+        selection: &Selection<Point>,
+        boundary: VisualLineBoundary,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<(Point, SelectionGoal)> {
+        let cursor = clip_cursor_in_text_snapshot(snapshot, selection.head());
+        let display_row = self.cached_source_display_row(snapshot, cursor.row as usize)?;
+        let row_style = default_row_metrics().into();
+        let wrap_width = text_wrap_width(window);
+        let text_layout =
+            self.cached_source_text_layout(&display_row, row_style, wrap_width, false, window, cx);
+
+        let source_offset = snapshot.point_to_offset(cursor);
+        let display_offset = display_row
+            .source_to_display(source_offset)
+            .min(text_layout.text_len);
+        let (visual_row_index, target_display_offset) = visual_line_boundary_for_caret(
+            &text_layout.visual_rows,
+            display_offset,
+            text_layout.text_len,
+            selection.goal,
+            boundary,
+        )?;
+        let visual_row = &text_layout.visual_rows[visual_row_index];
+        let point = point_for_display_offset_in_text_snapshot(
+            snapshot,
+            &display_row,
+            &text_layout,
+            target_display_offset,
+        );
+        let target_x = display_x_for_offset(
+            &text_layout.fragments,
+            &text_layout.shaped_line,
+            target_display_offset,
+        ) - visual_row.line_start_x;
+        Some((point, visual_horizontal_goal(visual_row_index, target_x)))
+    }
+
+    fn source_visual_vertical_target_point(
+        &mut self,
+        snapshot: &TextBufferSnapshot,
+        selection: &Selection<Point>,
+        delta_visual_rows: i32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<(Point, SelectionGoal)> {
+        if delta_visual_rows == 0 {
+            return Some((selection.head(), selection.goal));
+        }
+
+        let cursor = clip_cursor_in_text_snapshot(snapshot, selection.head());
+        let display_row = self.cached_source_display_row(snapshot, cursor.row as usize)?;
+        let row_style = default_row_metrics().into();
+        let wrap_width = text_wrap_width(window);
+        let current_layout =
+            self.cached_source_text_layout(&display_row, row_style, wrap_width, false, window, cx);
+
+        let source_offset = snapshot.point_to_offset(cursor);
+        let display_offset = display_row
+            .source_to_display(source_offset)
+            .min(current_layout.text_len);
+        let visual_row_index = visual_row_index_for_caret(
+            &current_layout.visual_rows,
+            display_offset,
+            current_layout.text_len,
+            selection.goal,
+        )?;
+        let visual_row = &current_layout.visual_rows[visual_row_index];
+        let cursor_x = display_x_for_offset(
+            &current_layout.fragments,
+            &current_layout.shaped_line,
+            display_offset,
+        ) - visual_row.line_start_x;
+        let desired_x = desired_visual_x(selection.goal, cursor_x);
+
+        let target_visual_row_index = visual_row_index as i32 + delta_visual_rows;
+        if target_visual_row_index >= 0
+            && (target_visual_row_index as usize) < current_layout.visual_rows.len()
+        {
+            let target_visual_row_index = target_visual_row_index as usize;
+            return point_for_visual_row_x_in_text_snapshot(
+                snapshot,
+                &display_row,
+                &current_layout,
+                &current_layout.visual_rows[target_visual_row_index],
+                desired_x,
+            )
+            .map(|point| {
+                (
+                    point,
+                    visual_horizontal_goal(target_visual_row_index, desired_x),
+                )
+            });
+        }
+
+        let target_row = if delta_visual_rows.is_negative() {
+            display_row.row.checked_sub(1)?
+        } else {
+            let next_row = display_row.row.saturating_add(1);
+            if next_row >= snapshot.row_count() {
+                return None;
+            }
+            next_row
+        };
+        let target_display_row = self.cached_source_display_row(snapshot, target_row as usize)?;
+        let target_layout = self.cached_source_text_layout(
+            &target_display_row,
+            row_style,
+            wrap_width,
+            false,
+            window,
+            cx,
+        );
+        let target_visual_row = if delta_visual_rows.is_negative() {
+            target_layout.visual_rows.last()?
+        } else {
+            target_layout.visual_rows.first()?
+        };
+        let target_visual_row_index = if delta_visual_rows.is_negative() {
+            target_layout.visual_rows.len().saturating_sub(1)
+        } else {
+            0
+        };
+        point_for_visual_row_x_in_text_snapshot(
+            snapshot,
+            &target_display_row,
+            &target_layout,
+            target_visual_row,
+            desired_x,
+        )
+        .map(|point| {
+            (
+                point,
+                visual_horizontal_goal(target_visual_row_index, desired_x),
+            )
+        })
     }
 
     fn visual_line_boundary_target_point(
@@ -1740,6 +1981,34 @@ impl MarkdownEditor {
         Some(display_row)
     }
 
+    fn cached_source_display_row(
+        &mut self,
+        snapshot: &TextBufferSnapshot,
+        row: usize,
+    ) -> Option<Arc<DisplayRow>> {
+        let row_count = snapshot.row_count() as usize;
+        if row >= row_count {
+            return None;
+        }
+
+        let row = row as u32;
+        let cache_key = DisplayRowCacheKey {
+            version: snapshot.version().clone(),
+            row,
+            mode: MarkdownEditorMode::Source,
+            active_projection_source_ranges: Vec::new(),
+        };
+
+        if let Some(display_row) = self.display_row_cache.get(&cache_key) {
+            return Some(display_row.clone());
+        }
+
+        let display_row = Arc::new(source_display_row_in_text_snapshot(snapshot, row));
+        self.display_row_cache
+            .insert(cache_key, display_row.clone());
+        Some(display_row)
+    }
+
     fn cached_row_layout(
         &mut self,
         snapshot: &BufferSnapshot,
@@ -1776,6 +2045,41 @@ impl MarkdownEditor {
         );
         if measure_inline_atoms && layout.cacheable() {
             self.row_layout_cache.insert(cache_key, layout.clone());
+        }
+        layout
+    }
+
+    fn cached_source_text_layout(
+        &mut self,
+        display_row: &DisplayRow,
+        row_style: RowDisplayStyle,
+        wrap_width: gpui::Pixels,
+        measure_inline_atoms: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> DisplayRowTextLayout {
+        let cache_key = RowLayoutCacheKey {
+            row: display_row.row,
+            mode: MarkdownEditorMode::Source,
+            wrap_width,
+            active_projection_source_ranges: Vec::new(),
+        };
+
+        if let Some(DisplayRowLayout::Text(cached_layout)) = self.row_layout_cache.get(&cache_key) {
+            return cached_layout.clone();
+        }
+
+        let layout = source_text_layout_for_display_row(
+            display_row,
+            row_style,
+            wrap_width,
+            measure_inline_atoms,
+            window,
+            cx,
+        );
+        if measure_inline_atoms && layout.cacheable {
+            self.row_layout_cache
+                .insert(cache_key, DisplayRowLayout::Text(layout.clone()));
         }
         layout
     }
@@ -2137,15 +2441,33 @@ fn row_text_in_text_snapshot(snapshot: &TextBufferSnapshot, row: u32) -> String 
     snapshot.text_for_range(start..end).collect()
 }
 
+fn source_display_row_in_text_snapshot(snapshot: &TextBufferSnapshot, row: u32) -> DisplayRow {
+    let source_range = row_source_range_in_text_snapshot(snapshot, row);
+    let source_text: String = snapshot.text_for_range(source_range.clone()).collect();
+    let projection = MarkdownProjectionMap::new(snapshot.len(), source_range.clone(), Vec::new());
+    DisplayRow {
+        row,
+        text: source_text.clone(),
+        source_text,
+        source_range,
+        active_projection_source_ranges: Vec::new(),
+        projection,
+        insertions: Vec::new(),
+    }
+}
+
 fn row_source_range(snapshot: &BufferSnapshot, row: u32) -> Range<usize> {
-    let text_snapshot = snapshot.as_text_snapshot();
-    if row >= text_snapshot.row_count() {
-        let end = text_snapshot.len();
+    row_source_range_in_text_snapshot(snapshot.as_text_snapshot(), row)
+}
+
+fn row_source_range_in_text_snapshot(snapshot: &TextBufferSnapshot, row: u32) -> Range<usize> {
+    if row >= snapshot.row_count() {
+        let end = snapshot.len();
         return end..end;
     }
 
-    let start = text_snapshot.point_to_offset(Point::new(row, 0));
-    let end = start + text_snapshot.line_len(row) as usize;
+    let start = snapshot.point_to_offset(Point::new(row, 0));
+    let end = start + snapshot.line_len(row) as usize;
     start..end
 }
 
@@ -2426,25 +2748,43 @@ fn move_right_in_text_snapshot(snapshot: &TextBufferSnapshot, cursor: Point) -> 
 }
 
 pub fn move_vertical(snapshot: &BufferSnapshot, cursor: Point, delta_rows: i32) -> Point {
-    let text_snapshot = snapshot.as_text_snapshot();
-    let current = clip_cursor(snapshot, cursor);
-    let max_row = text_snapshot.row_count().saturating_sub(1);
+    move_vertical_in_text_snapshot(snapshot.as_text_snapshot(), cursor, delta_rows)
+}
+
+fn move_vertical_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    cursor: Point,
+    delta_rows: i32,
+) -> Point {
+    let current = clip_cursor_in_text_snapshot(snapshot, cursor);
+    let max_row = snapshot.row_count().saturating_sub(1);
     let target_row = if delta_rows.is_negative() {
         current.row.saturating_sub(delta_rows.unsigned_abs())
     } else {
         current.row.saturating_add(delta_rows as u32).min(max_row)
     };
 
-    point_for_row_and_column(snapshot, target_row, current.column)
+    point_for_row_and_column_in_text_snapshot(snapshot, target_row, current.column)
 }
 
 pub fn move_to_beginning_of_line(snapshot: &BufferSnapshot, cursor: Point) -> Point {
-    Point::new(clip_cursor(snapshot, cursor).row, 0)
+    move_to_beginning_of_line_in_text_snapshot(snapshot.as_text_snapshot(), cursor)
+}
+
+fn move_to_beginning_of_line_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    cursor: Point,
+) -> Point {
+    Point::new(clip_cursor_in_text_snapshot(snapshot, cursor).row, 0)
 }
 
 pub fn move_to_end_of_line(snapshot: &BufferSnapshot, cursor: Point) -> Point {
-    let row = clip_cursor(snapshot, cursor).row;
-    Point::new(row, snapshot.as_text_snapshot().line_len(row))
+    move_to_end_of_line_in_text_snapshot(snapshot.as_text_snapshot(), cursor)
+}
+
+fn move_to_end_of_line_in_text_snapshot(snapshot: &TextBufferSnapshot, cursor: Point) -> Point {
+    let row = clip_cursor_in_text_snapshot(snapshot, cursor).row;
+    Point::new(row, snapshot.line_len(row))
 }
 
 pub fn move_selection_left(
@@ -2534,24 +2874,56 @@ pub fn move_selection_vertical(
     selection: &Selection<Point>,
     delta_rows: i32,
 ) -> Selection<Point> {
-    let selection = clip_selection(snapshot, selection);
-    collapsed_selection(move_vertical(snapshot, selection.head(), delta_rows))
+    move_selection_vertical_in_text_snapshot(snapshot.as_text_snapshot(), selection, delta_rows)
+}
+
+fn move_selection_vertical_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+    delta_rows: i32,
+) -> Selection<Point> {
+    let selection = clip_selection_in_text_snapshot(snapshot, selection);
+    collapsed_selection(move_vertical_in_text_snapshot(
+        snapshot,
+        selection.head(),
+        delta_rows,
+    ))
 }
 
 pub fn move_selection_to_beginning_of_line(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Selection<Point> {
-    let selection = clip_selection(snapshot, selection);
-    collapsed_selection(move_to_beginning_of_line(snapshot, selection.head()))
+    move_selection_to_beginning_of_line_in_text_snapshot(snapshot.as_text_snapshot(), selection)
+}
+
+fn move_selection_to_beginning_of_line_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+) -> Selection<Point> {
+    let selection = clip_selection_in_text_snapshot(snapshot, selection);
+    collapsed_selection(move_to_beginning_of_line_in_text_snapshot(
+        snapshot,
+        selection.head(),
+    ))
 }
 
 pub fn move_selection_to_end_of_line(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Selection<Point> {
-    let selection = clip_selection(snapshot, selection);
-    collapsed_selection(move_to_end_of_line(snapshot, selection.head()))
+    move_selection_to_end_of_line_in_text_snapshot(snapshot.as_text_snapshot(), selection)
+}
+
+fn move_selection_to_end_of_line_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+) -> Selection<Point> {
+    let selection = clip_selection_in_text_snapshot(snapshot, selection);
+    collapsed_selection(move_to_end_of_line_in_text_snapshot(
+        snapshot,
+        selection.head(),
+    ))
 }
 
 pub fn select_left(snapshot: &BufferSnapshot, selection: &Selection<Point>) -> Selection<Point> {
@@ -2621,10 +2993,18 @@ pub fn select_vertical(
     selection: &Selection<Point>,
     delta_rows: i32,
 ) -> Selection<Point> {
-    select_to_point(
+    select_vertical_in_text_snapshot(snapshot.as_text_snapshot(), selection, delta_rows)
+}
+
+fn select_vertical_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+    delta_rows: i32,
+) -> Selection<Point> {
+    select_to_point_in_text_snapshot(
         snapshot,
         selection,
-        move_vertical(snapshot, selection.head(), delta_rows),
+        move_vertical_in_text_snapshot(snapshot, selection.head(), delta_rows),
     )
 }
 
@@ -2632,10 +3012,17 @@ pub fn select_to_beginning_of_line(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Selection<Point> {
-    select_to_point(
+    select_to_beginning_of_line_in_text_snapshot(snapshot.as_text_snapshot(), selection)
+}
+
+fn select_to_beginning_of_line_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+) -> Selection<Point> {
+    select_to_point_in_text_snapshot(
         snapshot,
         selection,
-        move_to_beginning_of_line(snapshot, selection.head()),
+        move_to_beginning_of_line_in_text_snapshot(snapshot, selection.head()),
     )
 }
 
@@ -2643,10 +3030,17 @@ pub fn select_to_end_of_line(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Selection<Point> {
-    select_to_point(
+    select_to_end_of_line_in_text_snapshot(snapshot.as_text_snapshot(), selection)
+}
+
+fn select_to_end_of_line_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+) -> Selection<Point> {
+    select_to_point_in_text_snapshot(
         snapshot,
         selection,
-        move_to_end_of_line(snapshot, selection.head()),
+        move_to_end_of_line_in_text_snapshot(snapshot, selection.head()),
     )
 }
 
@@ -2944,18 +3338,21 @@ fn selection_for_source_range(
     }
 }
 
-fn point_for_row_and_column(snapshot: &BufferSnapshot, row: u32, column: u32) -> Point {
-    let text_snapshot = snapshot.as_text_snapshot();
-    let row = row.min(text_snapshot.row_count().saturating_sub(1));
-    let row_start = text_snapshot.point_to_offset(Point::new(row, 0));
-    let row_end = row_start + text_snapshot.line_len(row) as usize;
+fn point_for_row_and_column_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    row: u32,
+    column: u32,
+) -> Point {
+    let row = row.min(snapshot.row_count().saturating_sub(1));
+    let row_start = snapshot.point_to_offset(Point::new(row, 0));
+    let row_end = row_start + snapshot.line_len(row) as usize;
     let target = row_start.saturating_add(column as usize).min(row_end);
-    let target = text_snapshot
+    let target = snapshot
         .as_rope()
         .floor_char_boundary(target)
         .max(row_start);
 
-    text_snapshot.offset_to_point(target)
+    snapshot.offset_to_point(target)
 }
 
 /// Compute the leading whitespace (indent) of the line containing the given cursor position.
@@ -3145,7 +3542,46 @@ fn text_layout_for_display_row(
     window: &mut Window,
     cx: &mut App,
 ) -> DisplayRowTextLayout {
-    let mut fragments = display_fragments_for_text_layout(snapshot, display_row, mode, row_style);
+    let fragments = display_fragments_for_text_layout(snapshot, display_row, mode, row_style);
+    text_layout_for_fragments(
+        display_row,
+        fragments,
+        row_style,
+        wrap_width,
+        measure_inline_atoms,
+        window,
+        cx,
+    )
+}
+
+fn source_text_layout_for_display_row(
+    display_row: &DisplayRow,
+    row_style: RowDisplayStyle,
+    wrap_width: gpui::Pixels,
+    measure_inline_atoms: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> DisplayRowTextLayout {
+    text_layout_for_fragments(
+        display_row,
+        source_display_fragments(display_row),
+        row_style,
+        wrap_width,
+        measure_inline_atoms,
+        window,
+        cx,
+    )
+}
+
+fn text_layout_for_fragments(
+    display_row: &DisplayRow,
+    mut fragments: Vec<DisplayInlineFragment>,
+    row_style: RowDisplayStyle,
+    wrap_width: gpui::Pixels,
+    measure_inline_atoms: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> DisplayRowTextLayout {
     let segments = text_segments_for_fragments(&fragments);
     let text_runs = text_runs_for_segments(&segments);
     let shaped_line = window.text_system().shape_line(
@@ -3856,14 +4292,29 @@ fn point_for_visual_row_x(
     visual_row: &VisualDisplayRow,
     x: gpui::Pixels,
 ) -> Option<Point> {
+    point_for_visual_row_x_in_text_snapshot(
+        snapshot.as_text_snapshot(),
+        display_row,
+        text_layout,
+        visual_row,
+        x,
+    )
+}
+
+fn point_for_visual_row_x_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    display_row: &DisplayRow,
+    text_layout: &DisplayRowTextLayout,
+    visual_row: &VisualDisplayRow,
+    x: gpui::Pixels,
+) -> Option<Point> {
     let display_offset = display_offset_for_visual_row_x(text_layout, visual_row, x);
-    let source_offset =
-        source_offset_for_display_offset(display_row, &text_layout.fragments, display_offset);
-    let source_offset = snapshot
-        .as_text_snapshot()
-        .as_rope()
-        .floor_char_boundary(source_offset);
-    Some(snapshot.as_text_snapshot().offset_to_point(source_offset))
+    Some(point_for_display_offset_in_text_snapshot(
+        snapshot,
+        display_row,
+        text_layout,
+        display_offset,
+    ))
 }
 
 fn point_for_display_offset(
@@ -3872,13 +4323,24 @@ fn point_for_display_offset(
     text_layout: &DisplayRowTextLayout,
     display_offset: usize,
 ) -> Point {
+    point_for_display_offset_in_text_snapshot(
+        snapshot.as_text_snapshot(),
+        display_row,
+        text_layout,
+        display_offset,
+    )
+}
+
+fn point_for_display_offset_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    display_row: &DisplayRow,
+    text_layout: &DisplayRowTextLayout,
+    display_offset: usize,
+) -> Point {
     let source_offset =
         source_offset_for_display_offset(display_row, &text_layout.fragments, display_offset);
-    let source_offset = snapshot
-        .as_text_snapshot()
-        .as_rope()
-        .floor_char_boundary(source_offset);
-    snapshot.as_text_snapshot().offset_to_point(source_offset)
+    let source_offset = snapshot.as_rope().floor_char_boundary(source_offset);
+    snapshot.offset_to_point(source_offset)
 }
 
 fn source_offset_for_display_offset(

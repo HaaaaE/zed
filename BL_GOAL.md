@@ -43,7 +43,7 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Source rows use a plain-fragment fast path that bypasses Rendered-mode style, atom, hidden-range, and fallback-measurement work.
 - Display rows carry their original source text/range so row layout paths can avoid re-reading the buffer for row-local Markdown checks.
 - The render frame snapshots the buffer and clips the selection once per frame, and buffer snapshots share the cached Markdown syntax tree through `Arc`.
-- Text-only editor paths such as row counts, row text reads, cursor clipping, Source-mode horizontal movement and selection, ordinary replace/backspace/delete edits, cursor reveal, auto-indent, and Source edit cache invalidation now use the buffer's text snapshot directly instead of refreshing the Markdown syntax tree through a full buffer snapshot.
+- Text-only editor paths such as row counts, row text reads, cursor clipping, Source-mode horizontal and visual movement/selection, wrapped Home/End, ordinary replace/backspace/delete edits, cursor reveal, auto-indent, and Source edit cache invalidation now use the buffer's text snapshot directly instead of refreshing the Markdown syntax tree through a full buffer snapshot.
 - `ListState::with_default_size_hint` gives long variable-height lists a default unmeasured-row height, reducing scrollbar collapse and scroll-position churn before rows are measured.
 - Width changes clear editor row layout state and stale selection goals without forcing an additional full-list remeasure beyond GPUI list width invalidation.
 - Ordinary Source-mode single-row edits now clear and remeasure only the edited row's cached layout, and rekey reusable Source display-row cache entries to the new buffer version. Length-changing edits retain only rows before the edit because later source ranges can shift; length-preserving edits also retain later rows. Rendered edits, cross-row edits, row-count changes, undo, and redo remain conservative.
@@ -56,24 +56,10 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 
 ## Verification
 
-- `cargo fmt -p gpui -p markdown_wysiwyg -p md_buffer -p md_editor -p markdown_editor` passed.
-- `cargo fmt -p md_editor` passed.
-- `cargo check -p md_editor` passed.
-- `cargo test -p markdown_wysiwyg` passed: 15/15 tests.
-- `cargo test -p md_buffer` passed: 16/16 tests.
-- `cargo test -p gpui test_default_size_hint_sets_unmeasured_total_height` passed.
-- `cargo test -p md_editor` passed: 109/109 tests.
-- `cargo test -p md_editor rendered_inline_row_inputs_collect_styles_and_atoms_together` passed.
-- `cargo test -p md_editor inline_image_atom_size` passed.
-- `cargo test -p md_editor source_single_row_edit_rekeys_display_row_cache_before_edited_row` passed.
-- `cargo test -p md_editor source_length_preserving_single_row_edit_keeps_later_display_rows` passed.
-- `cargo test -p md_editor rendered_mode_does_not_cache_loading_inline_image_layout` passed.
-- `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
-- `cargo test -p md_editor rendered_mode_draws_inline_image_atom` passed and covers drawing a Rendered-mode inline image atom through the GPUI path.
-- `cargo test -p md_editor rendered_mode_draws_empty_alt_inline_image_atom` passed and covers drawing a Rendered-mode empty-alt inline image atom through the GPUI path.
-- `cargo check -p markdown_editor` passed.
+- Formatting and checks have passed across the touched crates, including `cargo fmt` for the Markdown editor path and `cargo check -p md_editor` / `cargo check -p markdown_editor`.
+- Full unit suites have passed for `markdown_wysiwyg` (15/15), `md_buffer` (16/16), and `md_editor` (109/109), with focused coverage for wrapped movement, inline atoms/images, source edit cache invalidation, default list size hints, and Rendered image block drawing.
 - `git diff --check` passed with only LF/CRLF warnings for touched files.
-- `cargo run -p markdown_editor --bin markdown-editor -- tmp-markdown-editor-test.md` was started twice for 12-second smoke windows after the fix; neither run exited with the previous panic, though both were stopped before completion because the short window was still compiling.
+- `cargo run -p markdown_editor --bin markdown-editor -- tmp-markdown-editor-test.md` was started twice for 12-second smoke windows after the Rendered image block fix; neither run exited with the previous panic, though both were stopped before completion because the short window was still compiling.
 
 ## Known Remaining Work
 
