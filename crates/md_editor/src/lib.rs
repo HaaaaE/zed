@@ -2077,7 +2077,7 @@ impl MarkdownEditor {
             window,
             cx,
         );
-        if measure_inline_atoms && layout.cacheable {
+        if layout.cacheable {
             self.row_layout_cache
                 .insert(cache_key, DisplayRowLayout::Text(layout.clone()));
         }
@@ -5494,6 +5494,24 @@ mod tests {
 
             editor.move_up(&MoveUp, window, cx);
             assert_eq!(editor.cursor(), Point::new(0, 0));
+        });
+    }
+
+    #[gpui::test]
+    fn source_interaction_layouts_cache_wrapped_text_rows(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.simulate_resize(gpui::size(px(90.), px(200.)));
+        let editor = cx.new(|cx| MarkdownEditor::for_text("abcdefghijklmnopqrst\n", cx));
+
+        editor.update_in(cx, |editor, window, cx| {
+            assert_eq!(editor.row_layout_cache.len(), 0);
+
+            editor.set_cursor(Point::new(0, 0));
+            editor.move_down(&MoveDown, window, cx);
+            assert_eq!(editor.row_layout_cache.len(), 1);
+
+            editor.move_up(&MoveUp, window, cx);
+            assert_eq!(editor.row_layout_cache.len(), 1);
         });
     }
 
