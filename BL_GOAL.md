@@ -43,6 +43,7 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Source rows use a plain-fragment fast path that bypasses Rendered-mode style, atom, hidden-range, and fallback-measurement work.
 - Display rows carry their original source text/range so row layout paths can avoid re-reading the buffer for row-local Markdown checks.
 - The render frame snapshots the buffer and clips the selection once per frame, and buffer snapshots share the cached Markdown syntax tree through `Arc`.
+- Text-only editor paths such as row counts, cursor clipping, cursor reveal, auto-indent, and Source edit cache invalidation now use the buffer's text snapshot directly instead of refreshing the Markdown syntax tree through a full buffer snapshot.
 - `ListState::with_default_size_hint` gives long variable-height lists a default unmeasured-row height, reducing scrollbar collapse and scroll-position churn before rows are measured.
 - Width changes clear editor row layout state and stale selection goals without forcing an additional full-list remeasure beyond GPUI list width invalidation.
 - Ordinary Source-mode single-row edits now clear and remeasure only the edited row's cached layout, and rekey reusable Source display-row cache entries to the new buffer version. Length-changing edits retain only rows before the edit because later source ranges can shift; length-preserving edits also retain later rows. Rendered edits, cross-row edits, row-count changes, undo, and redo remain conservative.

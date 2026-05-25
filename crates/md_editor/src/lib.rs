@@ -11,7 +11,7 @@ use markdown_wysiwyg::{MarkdownBlockKind, MarkdownInlineKind, MarkdownProjection
 use md_assets::EDITOR_FONT_FAMILY;
 use md_buffer::{Buffer, BufferSnapshot};
 use md_settings::EditorSettings;
-use md_text::{Bias, Point, Selection, SelectionGoal};
+use md_text::{Bias, BufferSnapshot as TextBufferSnapshot, Point, Selection, SelectionGoal};
 use md_theme::{default_row_metrics, editor_palette, gutter_width, heading_row_metrics};
 
 gpui::actions!(
@@ -823,8 +823,8 @@ pub enum MarkdownEditorEvent {
 impl EventEmitter<MarkdownEditorEvent> for MarkdownEditor {}
 
 impl MarkdownEditor {
-    pub fn new(mut buffer: Buffer, cx: &mut Context<Self>) -> Self {
-        let row_count = buffer.snapshot().row_count() as usize;
+    pub fn new(buffer: Buffer, cx: &mut Context<Self>) -> Self {
+        let row_count = buffer.as_text_snapshot().row_count() as usize;
         let row_size_hint = gpui::size(px(0.), default_row_metrics().min_height);
         Self {
             buffer,
@@ -890,7 +890,7 @@ impl MarkdownEditor {
     }
 
     pub fn row_count(&mut self) -> u32 {
-        self.buffer.snapshot().row_count()
+        self.buffer.as_text_snapshot().row_count()
     }
 
     pub fn row_text(&mut self, row: u32) -> String {
@@ -911,7 +911,10 @@ impl MarkdownEditor {
 
     pub fn set_cursor(&mut self, cursor: Point) {
         let previous_selection = self.selection.clone();
-        self.selection = collapsed_selection(clip_cursor(&self.buffer.snapshot(), cursor));
+        self.selection = collapsed_selection(clip_cursor_in_text_snapshot(
+            self.buffer.as_text_snapshot(),
+            cursor,
+        ));
         self.sync_rendered_rows_for_selection_change(&previous_selection);
         self.reveal_cursor_row();
     }
@@ -1284,7 +1287,7 @@ impl MarkdownEditor {
 
     pub fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
-        let max_point = self.buffer.snapshot().as_text_snapshot().max_point();
+        let max_point = self.buffer.as_text_snapshot().max_point();
         self.selection = Selection {
             id: 0,
             start: Point::zero(),
@@ -1339,7 +1342,8 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
-        let current_line_indent = current_line_indent(&self.buffer.snapshot(), self.cursor());
+        let current_line_indent =
+            current_line_indent_in_text_snapshot(self.buffer.as_text_snapshot(), self.cursor());
         let insert_text = format!("\n{current_line_indent}");
         let buffer_len_before = self.buffer.len();
         let (selection, transaction_id) =
@@ -1397,7 +1401,10 @@ impl MarkdownEditor {
         let row_count_before = self.display_list_state.item_count();
         let mut changed = false;
         if let Some(transaction_id) = self.buffer.undo() {
-            let fallback = collapsed_selection(clip_cursor(&self.buffer.snapshot(), self.cursor()));
+            let fallback = collapsed_selection(clip_cursor_in_text_snapshot(
+                self.buffer.as_text_snapshot(),
+                self.cursor(),
+            ));
             self.selection = self
                 .selection_history
                 .get(&transaction_id)
@@ -1419,7 +1426,10 @@ impl MarkdownEditor {
         let row_count_before = self.display_list_state.item_count();
         let mut changed = false;
         if let Some(transaction_id) = self.buffer.redo() {
-            let fallback = collapsed_selection(clip_cursor(&self.buffer.snapshot(), self.cursor()));
+            let fallback = collapsed_selection(clip_cursor_in_text_snapshot(
+                self.buffer.as_text_snapshot(),
+                self.cursor(),
+            ));
             self.selection = self
                 .selection_history
                 .get(&transaction_id)
@@ -1495,7 +1505,7 @@ impl MarkdownEditor {
         invalidation: EditLayoutInvalidation,
         cx: &mut Context<Self>,
     ) {
-        let row_count_after = self.buffer.snapshot().row_count() as usize;
+        let row_count_after = self.buffer.as_text_snapshot().row_count() as usize;
         let local_source_edit_invalidation = if changed {
             match invalidation {
                 EditLayoutInvalidation::LocalSourceSelection { byte_delta } => {
@@ -1516,7 +1526,7 @@ impl MarkdownEditor {
 
         if changed {
             if let Some(invalidation) = local_source_edit_invalidation.as_ref() {
-                let version = self.buffer.snapshot().version().clone();
+                let version = self.buffer.as_text_snapshot().version().clone();
                 self.rekey_source_display_row_cache_for_local_edit(invalidation, version);
                 self.clear_row_layout_cache_for_rows(invalidation.rows.clone());
             } else {
@@ -1551,7 +1561,7 @@ impl MarkdownEditor {
         row_count_before: usize,
         previous_selection: &Selection<Point>,
     ) {
-        let row_count_after = self.buffer.snapshot().row_count() as usize;
+        let row_count_after = self.buffer.as_text_snapshot().row_count() as usize;
         if row_count_before != row_count_after {
             self.display_list_state
                 .splice(0..row_count_before, row_count_after);
@@ -1655,9 +1665,9 @@ impl MarkdownEditor {
     }
 
     fn reveal_cursor_row(&mut self) {
-        reveal_selection_head_row(
+        reveal_selection_head_row_in_text_snapshot(
             &self.display_list_state,
-            &self.buffer.snapshot(),
+            self.buffer.as_text_snapshot(),
             &self.selection,
         );
     }
@@ -2202,7 +2212,11 @@ fn project_row_text(source_text: &str, projection: &MarkdownProjectionMap) -> St
 }
 
 pub fn clip_cursor(snapshot: &BufferSnapshot, cursor: Point) -> Point {
-    snapshot.as_text_snapshot().clip_point(cursor, Bias::Left)
+    clip_cursor_in_text_snapshot(snapshot.as_text_snapshot(), cursor)
+}
+
+fn clip_cursor_in_text_snapshot(snapshot: &TextBufferSnapshot, cursor: Point) -> Point {
+    snapshot.clip_point(cursor, Bias::Left)
 }
 
 pub fn clip_selection(snapshot: &BufferSnapshot, selection: &Selection<Point>) -> Selection<Point> {
@@ -2252,9 +2266,9 @@ fn transaction_selection_state_without_goals(
     }
 }
 
-fn reveal_selection_head_row(
+fn reveal_selection_head_row_in_text_snapshot(
     display_list_state: &ListState,
-    snapshot: &BufferSnapshot,
+    snapshot: &TextBufferSnapshot,
     selection: &Selection<Point>,
 ) {
     let item_count = display_list_state.item_count();
@@ -2262,7 +2276,7 @@ fn reveal_selection_head_row(
         return;
     }
 
-    let cursor = clip_cursor(snapshot, selection.head());
+    let cursor = clip_cursor_in_text_snapshot(snapshot, selection.head());
     let row = (cursor.row as usize).min(item_count.saturating_sub(1));
     display_list_state.scroll_to_reveal_item(row);
 }
@@ -2838,8 +2852,19 @@ fn point_for_row_and_column(snapshot: &BufferSnapshot, row: u32, column: u32) ->
 /// Returns a string of spaces and/or tabs from the start of the line up to the first
 /// non-whitespace character.
 pub fn current_line_indent(snapshot: &BufferSnapshot, cursor: Point) -> String {
-    let text = row_text(snapshot, cursor.row);
-    text.chars()
+    current_line_indent_in_text_snapshot(snapshot.as_text_snapshot(), cursor)
+}
+
+fn current_line_indent_in_text_snapshot(snapshot: &TextBufferSnapshot, cursor: Point) -> String {
+    if cursor.row >= snapshot.row_count() {
+        return String::new();
+    }
+
+    let line_start = Point::new(cursor.row, 0);
+    let line_end = Point::new(cursor.row, snapshot.line_len(cursor.row));
+    snapshot
+        .text_for_range(line_start..line_end)
+        .flat_map(str::chars)
         .take_while(|c| *c == ' ' || *c == '\t')
         .collect()
 }
@@ -7047,8 +7072,7 @@ mod tests {
 
     #[test]
     fn reveal_selection_head_row_scrolls_to_clipped_cursor_row() {
-        let mut buffer = Buffer::local("zero\none\ntwo\n");
-        let snapshot = buffer.snapshot();
+        let buffer = Buffer::local("zero\none\ntwo\n");
         let list_state = ListState::new(2, ListAlignment::Top, px(1000.));
         list_state.scroll_to(gpui::ListOffset {
             item_ix: 1,
@@ -7056,7 +7080,11 @@ mod tests {
         });
         let selection = collapsed_selection(Point::new(2, 0));
 
-        reveal_selection_head_row(&list_state, &snapshot, &selection);
+        reveal_selection_head_row_in_text_snapshot(
+            &list_state,
+            buffer.as_text_snapshot(),
+            &selection,
+        );
 
         let scroll_top = list_state.logical_scroll_top();
         assert_eq!(scroll_top.item_ix, 1);
