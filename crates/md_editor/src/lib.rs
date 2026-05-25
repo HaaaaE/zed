@@ -125,6 +125,7 @@ pub struct DisplayRow {
     pub row: u32,
     pub text: String,
     projection: MarkdownProjectionMap,
+    insertions: Vec<DisplayInsertion>,
 }
 
 impl PartialEq for DisplayRow {
@@ -134,6 +135,41 @@ impl PartialEq for DisplayRow {
 }
 
 impl Eq for DisplayRow {}
+
+impl DisplayRow {
+    fn source_to_display(&self, source_offset: usize) -> usize {
+        let mut display_offset = self.projection.source_to_display(source_offset);
+        for insertion in &self.insertions {
+            if source_offset > insertion.source_range.start {
+                display_offset += insertion.display_range.len();
+            }
+        }
+        display_offset
+    }
+
+    fn display_to_source(&self, display_offset: usize) -> usize {
+        let mut projected_offset = display_offset;
+        for insertion in &self.insertions {
+            if display_offset < insertion.display_range.start {
+                break;
+            }
+            if display_offset == insertion.display_range.start {
+                return insertion.source_range.start;
+            }
+            if display_offset <= insertion.display_range.end {
+                return insertion.source_range.end;
+            }
+            projected_offset = projected_offset.saturating_sub(insertion.display_range.len());
+        }
+        self.projection.display_to_source(projected_offset)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DisplayInsertion {
+    source_range: Range<usize>,
+    display_range: Range<usize>,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 struct TransactionSelectionState {
@@ -411,6 +447,7 @@ const RENDERED_IMAGE_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(4.);
 const INLINE_MATH_ATOM_EXTRA_HEIGHT: gpui::Pixels = px(4.);
 const INLINE_MATH_ATOM_HORIZONTAL_PADDING: gpui::Pixels = px(4.);
 const INLINE_IMAGE_ATOM_SIZE: gpui::Pixels = px(24.);
+const INLINE_IMAGE_PLACEHOLDER: &str = "\u{fffc}";
 
 #[derive(Clone, Debug, PartialEq)]
 enum DisplayBlockLayout {
@@ -946,7 +983,6 @@ impl MarkdownEditor {
             DisplayRowLayout::Text(text_layout) => {
                 let source_offset = snapshot.as_text_snapshot().point_to_offset(cursor);
                 let display_offset = display_row
-                    .projection
                     .source_to_display(source_offset)
                     .min(text_layout.text_len);
                 let (visual_row_index, target_display_offset) = visual_line_boundary_for_caret(
@@ -1015,7 +1051,6 @@ impl MarkdownEditor {
         let desired_x = match current_layout {
             DisplayRowLayout::Text(text_layout) => {
                 let display_offset = display_row
-                    .projection
                     .source_to_display(source_offset)
                     .min(text_layout.text_len);
                 let visual_row_index = visual_row_index_for_caret(
@@ -1844,10 +1879,13 @@ fn display_rows_in_mode(
                     ),
             };
 
+            let (text, insertions) =
+                project_display_row_text(snapshot, row, &source_text, &projection, mode);
             DisplayRow {
                 row,
-                text: project_row_text(&source_text, &projection),
+                text,
                 projection,
+                insertions,
             }
         })
         .collect()
@@ -1873,6 +1911,58 @@ fn row_source_range(snapshot: &BufferSnapshot, row: u32) -> Range<usize> {
     let start = text_snapshot.point_to_offset(Point::new(row, 0));
     let end = start + text_snapshot.line_len(row) as usize;
     start..end
+}
+
+fn project_display_row_text(
+    snapshot: &BufferSnapshot,
+    row: u32,
+    source_text: &str,
+    projection: &MarkdownProjectionMap,
+    mode: MarkdownEditorMode,
+) -> (String, Vec<DisplayInsertion>) {
+    let mut display_text = project_row_text(source_text, projection);
+    if mode != MarkdownEditorMode::Rendered {
+        return (display_text, Vec::new());
+    }
+
+    let row_source_range = row_source_range(snapshot, row);
+    let mut insertions = Vec::new();
+    for span in snapshot.syntax_tree().inline_spans() {
+        if span.kind != MarkdownInlineKind::Image
+            || rendered_remote_image_span_is_block(snapshot, span)
+            || !range_contains(&row_source_range, &span.source_range)
+            || !span.marker_ranges.iter().any(|marker_range| {
+                projection
+                    .hidden_ranges()
+                    .iter()
+                    .any(|hidden_range| ranges_overlap(marker_range, hidden_range))
+            })
+        {
+            continue;
+        }
+
+        let display_start = projection.source_to_display(span.source_range.start);
+        let display_end = projection.source_to_display(span.source_range.end);
+        if display_start != display_end {
+            continue;
+        }
+
+        let inserted_len = insertions
+            .iter()
+            .filter(|insertion: &&DisplayInsertion| {
+                span.source_range.start > insertion.source_range.start
+            })
+            .map(|insertion| insertion.display_range.len())
+            .sum::<usize>();
+        let display_start = display_start + inserted_len;
+        display_text.insert_str(display_start, INLINE_IMAGE_PLACEHOLDER);
+        insertions.push(DisplayInsertion {
+            source_range: span.source_range.clone(),
+            display_range: display_start..display_start + INLINE_IMAGE_PLACEHOLDER.len(),
+        });
+    }
+
+    (display_text, insertions)
 }
 
 fn project_row_text(source_text: &str, projection: &MarkdownProjectionMap) -> String {
@@ -3183,7 +3273,6 @@ fn caret_position_for_visual_row(
         .as_text_snapshot()
         .point_to_offset(clip_cursor(snapshot, cursor));
     let display_offset = display_row
-        .projection
         .source_to_display(cursor_offset)
         .min(text_layout.text_len);
     if visual_row_index_for_caret(
@@ -3344,7 +3433,7 @@ fn source_offset_for_display_offset(
         }
     }
 
-    display_row.projection.display_to_source(display_offset)
+    display_row.display_to_source(display_offset)
 }
 
 fn display_offset_for_visual_row_x(
@@ -3699,11 +3788,7 @@ fn display_inline_fragments(
     let mut fragments: Vec<DisplayInlineFragment> = Vec::new();
     for window in breakpoints.windows(2) {
         let interval = window[0]..window[1];
-        if interval.start >= interval.end
-            || hidden_ranges
-                .iter()
-                .any(|hidden_range| range_contains(hidden_range, &interval))
-        {
+        if interval.start >= interval.end {
             continue;
         }
 
@@ -3719,6 +3804,13 @@ fn display_inline_fragments(
             continue;
         }
 
+        if hidden_ranges
+            .iter()
+            .any(|hidden_range| range_contains(hidden_range, &interval))
+        {
+            continue;
+        }
+
         let local_start = interval.start - source_range.start;
         let local_end = interval.end - source_range.start;
         let text = source_text[local_start..local_end].to_string();
@@ -3727,8 +3819,8 @@ fn display_inline_fragments(
         }
 
         let style = combined_style_for_range(&style_ranges, &interval);
-        let display_range = display_row.projection.source_to_display(interval.start)
-            ..display_row.projection.source_to_display(interval.end);
+        let display_range = display_row.source_to_display(interval.start)
+            ..display_row.source_to_display(interval.end);
 
         if let Some(DisplayInlineFragment::Text(previous)) = fragments.last_mut()
             && previous.style == style
@@ -3829,12 +3921,8 @@ fn inline_math_atom_for_span(
     span: &markdown_wysiwyg::MarkdownInlineSpan,
     row_style: RowDisplayStyle,
 ) -> Option<DisplayInlineAtom> {
-    let display_range = display_row
-        .projection
-        .source_to_display(span.source_range.start)
-        ..display_row
-            .projection
-            .source_to_display(span.source_range.end);
+    let display_range = display_row.source_to_display(span.source_range.start)
+        ..display_row.source_to_display(span.source_range.end);
     let fallback_text = display_row.text.get(display_range.clone())?.to_string();
     if fallback_text.is_empty() {
         return None;
@@ -3857,12 +3945,8 @@ fn inline_image_atom_for_span(
     span: &markdown_wysiwyg::MarkdownInlineSpan,
     row_style: RowDisplayStyle,
 ) -> Option<DisplayInlineAtom> {
-    let display_range = display_row
-        .projection
-        .source_to_display(span.source_range.start)
-        ..display_row
-            .projection
-            .source_to_display(span.source_range.end);
+    let display_range = display_row.source_to_display(span.source_range.start)
+        ..display_row.source_to_display(span.source_range.end);
     let fallback_text = display_row.text.get(display_range.clone())?.to_string();
     if fallback_text.is_empty() {
         return None;
@@ -4114,8 +4198,8 @@ fn selected_range_for_row(
 
     let start = selection_range.start.max(row_range.start);
     let end = selection_range.end.min(row_range.end);
-    let start = display_row.projection.source_to_display(start);
-    let end = display_row.projection.source_to_display(end);
+    let start = display_row.source_to_display(start);
+    let end = display_row.source_to_display(end);
 
     Some(start.min(end)..end.max(start))
 }
@@ -4378,6 +4462,23 @@ mod tests {
         let editor = cx.new(|cx| {
             let mut editor =
                 MarkdownEditor::for_text("Before ![alt](https://example.com/cat.png) after", cx);
+            editor.set_mode(MarkdownEditorMode::Rendered, cx);
+            editor
+        });
+
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(500.), px(120.)),
+            |_, _| editor.clone().into_any_element(),
+        );
+    }
+
+    #[gpui::test]
+    fn rendered_mode_draws_empty_alt_inline_image_atom(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        let editor = cx.new(|cx| {
+            let mut editor =
+                MarkdownEditor::for_text("Before ![](https://example.com/cat.png) after", cx);
             editor.set_mode(MarkdownEditorMode::Rendered, cx);
             editor
         });
@@ -4741,6 +4842,53 @@ mod tests {
     }
 
     #[test]
+    fn rendered_inline_fragments_create_empty_alt_inline_image_atom() {
+        let mut buffer = Buffer::local("Before ![](https://example.com/cat.png) after\n");
+        let snapshot = buffer.snapshot();
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&collapsed_selection(Point::new(0, 0))),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+        let expected_text = format!("Before {INLINE_IMAGE_PLACEHOLDER} after");
+
+        assert_eq!(row.text, expected_text);
+
+        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Rendered);
+        let fragments =
+            display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
+        let atom = fragments
+            .iter()
+            .find_map(|fragment| match fragment {
+                DisplayInlineFragment::Atom(atom) => Some(atom),
+                DisplayInlineFragment::Text(_) => None,
+            })
+            .expect("expected empty-alt inline image atom fragment");
+
+        assert_eq!(atom.kind, DisplayInlineAtomKind::InlineImage);
+        assert_eq!(atom.fallback_text, INLINE_IMAGE_PLACEHOLDER);
+        assert_eq!(
+            atom.image_url.as_deref(),
+            Some("https://example.com/cat.png")
+        );
+        assert_eq!(atom.display_range, 7..7 + INLINE_IMAGE_PLACEHOLDER.len());
+        assert_eq!(atom.height, INLINE_IMAGE_ATOM_SIZE);
+        assert_eq!(
+            text_segments_for_fragments(&fragments)
+                .iter()
+                .map(|segment| segment.text.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                "Before ".to_string(),
+                INLINE_IMAGE_PLACEHOLDER.to_string(),
+                " after".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn inline_atom_display_boundaries_map_to_source_boundaries() {
         let mut buffer = Buffer::local("Before $x + y$ after\n");
         let snapshot = buffer.snapshot();
@@ -4759,6 +4907,36 @@ mod tests {
         assert_eq!(source_offset_for_display_offset(&row, &fragments, 7), 7);
         assert_eq!(source_offset_for_display_offset(&row, &fragments, 12), 14);
         assert_eq!(source_offset_for_display_offset(&row, &fragments, 0), 0);
+    }
+
+    #[test]
+    fn empty_alt_inline_image_display_boundaries_map_to_source_boundaries() {
+        let mut buffer = Buffer::local("Before ![](https://example.com/cat.png) after\n");
+        let snapshot = buffer.snapshot();
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&collapsed_selection(Point::new(0, 0))),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Rendered);
+        let fragments =
+            display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
+        let display_start = "Before ".len();
+        let display_end = display_start + INLINE_IMAGE_PLACEHOLDER.len();
+        let source_start = "Before ".len();
+        let source_end = "Before ![](https://example.com/cat.png)".len();
+
+        assert_eq!(
+            source_offset_for_display_offset(&row, &fragments, display_start),
+            source_start
+        );
+        assert_eq!(
+            source_offset_for_display_offset(&row, &fragments, display_end),
+            source_end
+        );
     }
 
     #[test]
@@ -4923,6 +5101,45 @@ mod tests {
             ),
             INLINE_IMAGE_ATOM_SIZE
         );
+    }
+
+    #[test]
+    fn line_fragments_for_wrapping_uses_empty_alt_inline_image_atom_size() {
+        let placeholder_end = 7 + INLINE_IMAGE_PLACEHOLDER.len();
+        let display_text = format!("Before {INLINE_IMAGE_PLACEHOLDER} after");
+        let fragments = vec![
+            DisplayInlineFragment::Text(StyledDisplaySegment {
+                display_range: 0..7,
+                text: "Before ".to_string(),
+                style: DisplayTextStyle::default(),
+            }),
+            DisplayInlineFragment::Atom(DisplayInlineAtom {
+                kind: DisplayInlineAtomKind::InlineImage,
+                source_range: 7..39,
+                display_range: 7..placeholder_end,
+                fallback_text: INLINE_IMAGE_PLACEHOLDER.to_string(),
+                image_url: Some("https://example.com/cat.png".to_string()),
+                style: inline_style(MarkdownInlineKind::Image),
+                height: INLINE_IMAGE_ATOM_SIZE,
+                width: INLINE_IMAGE_ATOM_SIZE,
+            }),
+            DisplayInlineFragment::Text(StyledDisplaySegment {
+                display_range: placeholder_end..placeholder_end + " after".len(),
+                text: " after".to_string(),
+                style: DisplayTextStyle::default(),
+            }),
+        ];
+        let Some(line_fragments) = line_fragments_for_wrapping(&display_text, &fragments) else {
+            panic!("expected valid line fragments");
+        };
+
+        assert_eq!(line_fragments.len(), 3);
+        assert!(matches!(
+            &line_fragments[1],
+            LineFragment::Element { width, len_utf8 }
+                if *width == INLINE_IMAGE_ATOM_SIZE
+                    && *len_utf8 == INLINE_IMAGE_PLACEHOLDER.len()
+        ));
     }
 
     #[test]

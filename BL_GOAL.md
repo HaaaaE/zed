@@ -473,15 +473,24 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Inline images now reuse the same atom path as inline math for wrapping, row height, selection bounds, cursor snapping, mouse hit testing, and keyboard movement.
 - The atom renders a fixed-size image placeholder/image element using the parsed image URL while keeping the visible alt text as the display-mapping fallback text.
 - Added GPUI draw-path regression coverage for Rendered-mode inline image atoms.
-- Empty-alt inline images and loaded-image aspect-ratio sizing remain future work.
+- Loaded-image aspect-ratio sizing remains future work.
+
+### 2026-05-25 - Empty-alt inline images use inline atom placeholders
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Rendered-mode inline images with empty alt text now insert an internal object-replacement placeholder into the display row so they can reuse the same inline atom layout path as visible-alt images.
+- The placeholder participates in display text, fragment-aware wrapping, atom height, source/display offset mapping, and GPUI draw-path rendering while preserving the parsed image URL for the rendered atom.
+- Source-to-display and display-to-source row mapping now account for display insertions so caret placement, selection bounds, mouse hit testing, and keyboard movement can map the placeholder back to the full Markdown image source range.
+- Added focused coverage for empty-alt inline image atom creation, display-boundary source mapping, wrapping line-fragment sizing, and GPUI drawing.
 
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 93/93 tests.
+- `cargo test -p md_editor` passed: 97/97 tests.
 - `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo test -p md_editor rendered_mode_draws_inline_image_atom` passed and covers drawing a Rendered-mode inline image atom through the GPUI path.
+- `cargo test -p md_editor rendered_mode_draws_empty_alt_inline_image_atom` passed and covers drawing a Rendered-mode empty-alt inline image atom through the GPUI path.
 - `cargo check -p markdown_editor` passed.
 - `git diff --check` passed with only LF/CRLF warnings for touched files.
 - `cargo run -p markdown_editor --bin markdown-editor -- tmp-markdown-editor-test.md` was started twice for 12-second smoke windows after the fix; neither run exited with the previous panic, though both were stopped before completion because the short window was still compiling.
