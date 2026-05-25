@@ -2785,9 +2785,15 @@ pub fn selection_byte_range(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Range<usize> {
-    let selection = clip_selection(snapshot, selection);
-    let text_snapshot = snapshot.as_text_snapshot();
-    text_snapshot.point_to_offset(selection.start)..text_snapshot.point_to_offset(selection.end)
+    selection_byte_range_in_text_snapshot(snapshot.as_text_snapshot(), selection)
+}
+
+fn selection_byte_range_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+) -> Range<usize> {
+    let selection = clip_selection_in_text_snapshot(snapshot, selection);
+    snapshot.point_to_offset(selection.start)..snapshot.point_to_offset(selection.end)
 }
 
 pub fn replace_selection(
@@ -2795,22 +2801,23 @@ pub fn replace_selection(
     selection: &Selection<Point>,
     text: &str,
 ) -> (Selection<Point>, Option<md_text::TransactionId>) {
-    let snapshot = buffer.snapshot();
-    let selection = clip_selection(&snapshot, selection);
-    let range = selection_byte_range(&snapshot, &selection);
+    let (selection, range) = {
+        let snapshot = buffer.as_text_snapshot();
+        let selection = clip_selection_in_text_snapshot(snapshot, selection);
+        let range = selection_byte_range_in_text_snapshot(snapshot, &selection);
+        (selection, range)
+    };
 
     if range.is_empty() && text.is_empty() {
         return (selection, None);
     }
 
+    let cursor_offset = range.start.saturating_add(text.len());
     buffer.start_transaction();
-    buffer.edit([(range.clone(), text)]);
+    buffer.edit([(range, text)]);
     let transaction_id = buffer.end_transaction();
 
-    let snapshot = buffer.snapshot();
-    let cursor = snapshot
-        .as_text_snapshot()
-        .offset_to_point(range.start.saturating_add(text.len()));
+    let cursor = buffer.as_text_snapshot().offset_to_point(cursor_offset);
     (collapsed_selection(cursor), transaction_id)
 }
 
@@ -2819,9 +2826,9 @@ fn backspace_selection_in_mode(
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
 ) -> (Selection<Point>, Option<md_text::TransactionId>) {
-    let snapshot = buffer.snapshot();
-    let selection = clip_selection(&snapshot, selection);
+    let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
+        let snapshot = buffer.snapshot();
         if let Some(range) =
             rendered_element_range_at_cursor(&snapshot, selection.head(), HorizontalDirection::Left)
         {
@@ -2840,13 +2847,12 @@ pub fn backspace_selection(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
 ) -> (Selection<Point>, Option<md_text::TransactionId>) {
-    let snapshot = buffer.snapshot();
-    let selection = clip_selection(&snapshot, selection);
+    let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if !selection.is_empty() {
         return replace_selection(buffer, &selection, "");
     }
 
-    let text_snapshot = snapshot.as_text_snapshot();
+    let text_snapshot = buffer.as_text_snapshot();
     let offset = text_snapshot.point_to_offset(selection.head());
     if offset == 0 {
         return (selection, None);
@@ -2873,9 +2879,9 @@ fn delete_selection_in_mode(
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
 ) -> (Selection<Point>, Option<md_text::TransactionId>) {
-    let snapshot = buffer.snapshot();
-    let selection = clip_selection(&snapshot, selection);
+    let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
+        let snapshot = buffer.snapshot();
         if let Some(range) = rendered_element_range_at_cursor(
             &snapshot,
             selection.head(),
@@ -2896,13 +2902,12 @@ pub fn delete_selection(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
 ) -> (Selection<Point>, Option<md_text::TransactionId>) {
-    let snapshot = buffer.snapshot();
-    let selection = clip_selection(&snapshot, selection);
+    let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if !selection.is_empty() {
         return replace_selection(buffer, &selection, "");
     }
 
-    let text_snapshot = snapshot.as_text_snapshot();
+    let text_snapshot = buffer.as_text_snapshot();
     let offset = text_snapshot.point_to_offset(selection.head());
     if offset >= text_snapshot.len() {
         return (selection, None);
