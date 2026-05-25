@@ -411,6 +411,13 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Removed the old high-level image-block geometry helpers, leaving the remaining image-specific x/source-offset mapping as the remote-image variant implementation detail.
 - Added focused coverage for block line-boundary targets while updating existing image-block geometry tests to assert through `DisplayBlockLayout`.
 
+### 2026-05-25 - Inline atom layout uses atom interface
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Moved inline atom height, padded width, fallback measurement, GPUI measurement rendering, normal rendering, and selected-state checks onto `DisplayInlineAtom` / `DisplayInlineAtomKind`.
+- Removed the old free-function inline atom geometry and render helpers, keeping inline math as the current atom variant while giving future inline GPUI elements a shared implementation point.
+- Updated existing inline atom coverage to assert through the atom interface without changing rendered behavior.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.

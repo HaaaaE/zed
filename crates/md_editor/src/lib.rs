@@ -181,6 +181,134 @@ enum DisplayInlineAtomKind {
     InlineMath,
 }
 
+impl DisplayInlineAtomKind {
+    fn height(self, row_style: RowDisplayStyle) -> gpui::Pixels {
+        match self {
+            Self::InlineMath => row_style.line_height + INLINE_MATH_ATOM_EXTRA_HEIGHT,
+        }
+    }
+
+    fn width_for_content(self, content_width: gpui::Pixels) -> gpui::Pixels {
+        content_width + self.horizontal_padding() * 2.
+    }
+
+    fn horizontal_padding(self) -> gpui::Pixels {
+        match self {
+            Self::InlineMath => INLINE_MATH_ATOM_HORIZONTAL_PADDING,
+        }
+    }
+}
+
+impl DisplayInlineAtom {
+    fn fallback_size(
+        &self,
+        shaped_line: &gpui::ShapedLine,
+        row_style: RowDisplayStyle,
+    ) -> gpui::Size<gpui::Pixels> {
+        let content_width = self.fallback_content_width(shaped_line);
+        gpui::size(
+            self.kind.width_for_content(content_width),
+            self.kind.height(row_style),
+        )
+    }
+
+    fn fallback_content_width(&self, shaped_line: &gpui::ShapedLine) -> gpui::Pixels {
+        let start_x = shaped_line.x_for_index(self.display_range.start);
+        let end_x = shaped_line.x_for_index(self.display_range.end);
+        (end_x - start_x).max(px(1.))
+    }
+
+    fn measure_size(
+        &self,
+        fallback_size: gpui::Size<gpui::Pixels>,
+        row_style: RowDisplayStyle,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> gpui::Size<gpui::Pixels> {
+        let mut element = self.render_measurement_piece(self.fallback_text.clone(), row_style);
+        let size = element.layout_as_root(
+            gpui::size(
+                gpui::AvailableSpace::MaxContent,
+                gpui::AvailableSpace::MaxContent,
+            ),
+            window,
+            cx,
+        );
+
+        gpui::size(
+            size.width.max(fallback_size.width).max(px(1.)),
+            size.height.max(fallback_size.height).max(px(1.)),
+        )
+    }
+
+    fn render_piece(
+        &self,
+        text: String,
+        row_style: RowDisplayStyle,
+        selected: bool,
+    ) -> gpui::AnyElement {
+        self.render_element(
+            text,
+            row_style,
+            Some(gpui::size(self.width, self.height)),
+            selected,
+        )
+    }
+
+    fn render_measurement_piece(
+        &self,
+        text: String,
+        row_style: RowDisplayStyle,
+    ) -> gpui::AnyElement {
+        self.render_element(text, row_style, None, false)
+    }
+
+    fn render_element(
+        &self,
+        text: String,
+        row_style: RowDisplayStyle,
+        size: Option<gpui::Size<gpui::Pixels>>,
+        selected: bool,
+    ) -> gpui::AnyElement {
+        match self.kind {
+            DisplayInlineAtomKind::InlineMath => {
+                let palette = editor_palette();
+                let mut style = self.style.clone();
+                if selected {
+                    style.color = Some(palette.selection_text);
+                }
+                let mut element = div()
+                    .min_h(self.height)
+                    .px(self.kind.horizontal_padding())
+                    .flex()
+                    .items_center()
+                    .font_family(EDITOR_FONT_FAMILY)
+                    .text_size(row_style.text_size)
+                    .line_height(row_style.line_height)
+                    .whitespace_nowrap()
+                    .rounded_sm()
+                    .bg(if selected {
+                        palette.selection_background
+                    } else {
+                        palette.inline_math_text.opacity(0.08)
+                    })
+                    .child(render_text_piece(text, &style));
+                if let Some(size) = size {
+                    element = element.w(size.width).h(size.height);
+                }
+                element.into_any_element()
+            }
+        }
+    }
+
+    fn is_selected(&self, selected_range: Option<&Range<usize>>) -> bool {
+        selected_range.is_some_and(|selected_range| {
+            selected_range.start <= self.display_range.start
+                && selected_range.end >= self.display_range.end
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct VisualDisplayRow {
     display_range: Range<usize>,
@@ -2373,7 +2501,7 @@ fn assign_inline_atom_fallback_sizes(
         let DisplayInlineFragment::Atom(atom) = fragment else {
             continue;
         };
-        let size = fallback_inline_atom_size(atom, shaped_line, row_style);
+        let size = atom.fallback_size(shaped_line, row_style);
         atom.width = size.width;
         atom.height = size.height;
     }
@@ -2390,56 +2518,11 @@ fn measure_inline_atom_sizes(
         let DisplayInlineFragment::Atom(atom) = fragment else {
             continue;
         };
-        let fallback_size = fallback_inline_atom_size(atom, shaped_line, row_style);
-        let measured_size = measure_inline_atom_size(atom, fallback_size, row_style, window, cx);
+        let fallback_size = atom.fallback_size(shaped_line, row_style);
+        let measured_size = atom.measure_size(fallback_size, row_style, window, cx);
         atom.width = measured_size.width;
         atom.height = measured_size.height;
     }
-}
-
-fn fallback_inline_atom_size(
-    atom: &DisplayInlineAtom,
-    shaped_line: &gpui::ShapedLine,
-    row_style: RowDisplayStyle,
-) -> gpui::Size<gpui::Pixels> {
-    let content_width = fallback_inline_atom_content_width(atom, shaped_line);
-    gpui::size(
-        inline_atom_width(atom.kind, content_width),
-        inline_atom_height(atom.kind, row_style),
-    )
-}
-
-fn fallback_inline_atom_content_width(
-    atom: &DisplayInlineAtom,
-    shaped_line: &gpui::ShapedLine,
-) -> gpui::Pixels {
-    let start_x = shaped_line.x_for_index(atom.display_range.start);
-    let end_x = shaped_line.x_for_index(atom.display_range.end);
-    (end_x - start_x).max(px(1.))
-}
-
-fn measure_inline_atom_size(
-    atom: &DisplayInlineAtom,
-    fallback_size: gpui::Size<gpui::Pixels>,
-    row_style: RowDisplayStyle,
-    window: &mut Window,
-    cx: &mut App,
-) -> gpui::Size<gpui::Pixels> {
-    let mut element =
-        render_inline_atom_measurement_piece(atom, atom.fallback_text.clone(), row_style);
-    let size = element.layout_as_root(
-        gpui::size(
-            gpui::AvailableSpace::MaxContent,
-            gpui::AvailableSpace::MaxContent,
-        ),
-        window,
-        cx,
-    );
-
-    gpui::size(
-        size.width.max(fallback_size.width).max(px(1.)),
-        size.height.max(fallback_size.height).max(px(1.)),
-    )
 }
 
 fn has_inline_atoms(fragments: &[DisplayInlineFragment]) -> bool {
@@ -2853,12 +2936,7 @@ fn render_fragments_for_visual_row(
                 ) else {
                     continue;
                 };
-                elements.push(render_inline_atom_piece(
-                    atom,
-                    text,
-                    row_style,
-                    inline_atom_is_selected(atom, selected_range),
-                ));
+                elements.push(atom.render_piece(text, row_style, atom.is_selected(selected_range)));
             }
         }
     }
@@ -3420,77 +3498,6 @@ fn render_text_piece(text: String, style: &DisplayTextStyle) -> gpui::AnyElement
     element.into_any_element()
 }
 
-fn render_inline_atom_piece(
-    atom: &DisplayInlineAtom,
-    text: String,
-    row_style: RowDisplayStyle,
-    selected: bool,
-) -> gpui::AnyElement {
-    render_inline_atom_element(
-        atom,
-        text,
-        row_style,
-        Some(gpui::size(atom.width, atom.height)),
-        selected,
-    )
-}
-
-fn render_inline_atom_measurement_piece(
-    atom: &DisplayInlineAtom,
-    text: String,
-    row_style: RowDisplayStyle,
-) -> gpui::AnyElement {
-    render_inline_atom_element(atom, text, row_style, None, false)
-}
-
-fn render_inline_atom_element(
-    atom: &DisplayInlineAtom,
-    text: String,
-    row_style: RowDisplayStyle,
-    size: Option<gpui::Size<gpui::Pixels>>,
-    selected: bool,
-) -> gpui::AnyElement {
-    match atom.kind {
-        DisplayInlineAtomKind::InlineMath => {
-            let palette = editor_palette();
-            let mut style = atom.style.clone();
-            if selected {
-                style.color = Some(palette.selection_text);
-            }
-            let mut element = div()
-                .min_h(atom.height)
-                .px(inline_atom_horizontal_padding(atom.kind))
-                .flex()
-                .items_center()
-                .font_family(EDITOR_FONT_FAMILY)
-                .text_size(row_style.text_size)
-                .line_height(row_style.line_height)
-                .whitespace_nowrap()
-                .rounded_sm()
-                .bg(if selected {
-                    palette.selection_background
-                } else {
-                    palette.inline_math_text.opacity(0.08)
-                })
-                .child(render_text_piece(text, &style));
-            if let Some(size) = size {
-                element = element.w(size.width).h(size.height);
-            }
-            element.into_any_element()
-        }
-    }
-}
-
-fn inline_atom_is_selected(
-    atom: &DisplayInlineAtom,
-    selected_range: Option<&Range<usize>>,
-) -> bool {
-    selected_range.is_some_and(|selected_range| {
-        selected_range.start <= atom.display_range.start
-            && selected_range.end >= atom.display_range.end
-    })
-}
-
 fn display_inline_fragments(
     snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
@@ -3663,25 +3670,9 @@ fn inline_math_atom_for_span(
         display_range,
         fallback_text,
         style: inline_style(MarkdownInlineKind::InlineMath),
-        height: inline_atom_height(DisplayInlineAtomKind::InlineMath, row_style),
+        height: DisplayInlineAtomKind::InlineMath.height(row_style),
         width: px(0.),
     })
-}
-
-fn inline_atom_height(kind: DisplayInlineAtomKind, row_style: RowDisplayStyle) -> gpui::Pixels {
-    match kind {
-        DisplayInlineAtomKind::InlineMath => row_style.line_height + INLINE_MATH_ATOM_EXTRA_HEIGHT,
-    }
-}
-
-fn inline_atom_width(kind: DisplayInlineAtomKind, content_width: gpui::Pixels) -> gpui::Pixels {
-    content_width + inline_atom_horizontal_padding(kind) * 2.
-}
-
-fn inline_atom_horizontal_padding(kind: DisplayInlineAtomKind) -> gpui::Pixels {
-    match kind {
-        DisplayInlineAtomKind::InlineMath => INLINE_MATH_ATOM_HORIZONTAL_PADDING,
-    }
 }
 
 fn markdown_style_ranges_for_row(
@@ -4338,7 +4329,7 @@ mod tests {
         let selected_range = 0.."Before x + y after".len();
 
         assert!(atom.is_some_and(|atom| {
-            atom.display_range == (7..12) && inline_atom_is_selected(atom, Some(&selected_range))
+            atom.display_range == (7..12) && atom.is_selected(Some(&selected_range))
         }));
     }
 
@@ -4538,17 +4529,17 @@ mod tests {
             width: px(50.),
         };
 
-        assert!(inline_atom_is_selected(&atom, Some(&(7..12))));
-        assert!(inline_atom_is_selected(&atom, Some(&(0..18))));
-        assert!(!inline_atom_is_selected(&atom, Some(&(7..11))));
-        assert!(!inline_atom_is_selected(&atom, Some(&(8..12))));
-        assert!(!inline_atom_is_selected(&atom, None));
+        assert!(atom.is_selected(Some(&(7..12))));
+        assert!(atom.is_selected(Some(&(0..18))));
+        assert!(!atom.is_selected(Some(&(7..11))));
+        assert!(!atom.is_selected(Some(&(8..12))));
+        assert!(!atom.is_selected(None));
     }
 
     #[test]
     fn inline_atom_width_includes_horizontal_padding() {
         assert_eq!(
-            inline_atom_width(DisplayInlineAtomKind::InlineMath, px(30.)),
+            DisplayInlineAtomKind::InlineMath.width_for_content(px(30.)),
             px(30.) + INLINE_MATH_ATOM_HORIZONTAL_PADDING * 2.
         );
     }
