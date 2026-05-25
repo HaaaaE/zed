@@ -432,6 +432,12 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Row rendering now only distinguishes text rows from block rows; remote image rendering remains the current block variant implementation.
 - This keeps selected-state and caret rendering calculation beside the rest of the block geometry interface.
 
+### 2026-05-25 - Block row height tracking uses row layout interface
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Added a `DisplayRowLayout::block_height` accessor so the render loop no longer matches block rows directly when deciding whether a list row needs remeasurement.
+- Remote image block height tracking behaves the same, but the row-level pipeline now has one shared height entry point for future block variants.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.

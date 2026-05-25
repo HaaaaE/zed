@@ -513,6 +513,13 @@ enum DisplayRowLayout {
 }
 
 impl DisplayRowLayout {
+    fn block_height(&self) -> Option<gpui::Pixels> {
+        match self {
+            Self::Text(_) => None,
+            Self::Block(block_layout) => Some(block_layout.height()),
+        }
+    }
+
     fn row_min_height(&self, row_style: RowDisplayStyle) -> gpui::Pixels {
         match self {
             Self::Text(text_layout) => row_style.min_height.max(text_layout.height(row_style)),
@@ -1585,10 +1592,7 @@ impl Render for MarkdownEditor {
                             window,
                             _cx,
                         );
-                        let block_height_changed = if let DisplayRowLayout::Block(block_layout) =
-                            &row_layout
-                        {
-                            let height = block_layout.height();
+                        let block_height_changed = if let Some(height) = row_layout.block_height() {
                             this.block_row_heights.insert(display_row.row, height) != Some(height)
                         } else {
                             false
