@@ -553,6 +553,13 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Added focused GPUI coverage that default size hints set total height for unmeasured rows and newly spliced rows.
 - Updated existing `HighlightStyle` test literals to use default values for newly added fields so the focused GPUI test target compiles.
 
+### 2026-05-25 - Width changes avoid duplicate list remeasure
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Markdown editor render no longer calls `ListState::remeasure()` when the window wrap width changes.
+- Width changes still clear the editor row layout cache and drop stale wrapped selection goals, while GPUI `List` continues to invalidate item heights when its actual layout bounds width changes.
+- This removes one redundant full-list remeasure during resize/reflow, reducing duplicated long-document work while preserving width-aware row layout invalidation.
+
 ## Verification
 
 - `cargo fmt -p gpui -p markdown_wysiwyg -p md_buffer -p md_editor -p markdown_editor` passed.

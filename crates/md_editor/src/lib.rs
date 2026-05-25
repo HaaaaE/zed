@@ -1706,7 +1706,6 @@ impl Render for MarkdownEditor {
             wrap_width,
         ) {
             self.clear_row_layout_cache();
-            self.display_list_state.remeasure();
         }
         let snapshot = self.buffer.snapshot();
         let selection = clip_selection(&snapshot, &self.selection);
