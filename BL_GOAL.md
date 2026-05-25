@@ -41,6 +41,7 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Display rows are cached across render and interaction paths by buffer version, row, mode, and marker-visibility dependencies, with projection state built once per pass and reused for row layout cache keys.
 - Rendered row inline span queries are range-local and backed by an indexed span-start structure, avoiding full-document inline span scans for each visible row.
 - Source rows use a plain-fragment fast path that bypasses Rendered-mode style, atom, hidden-range, and fallback-measurement work.
+- Source-mode display-row cache lookup now reuses the text-snapshot source-row fast path, avoiding the generic projection construction path for Source rows.
 - Display rows carry their original source text/range so row layout paths can avoid re-reading the buffer for row-local Markdown checks.
 - The render frame snapshots the buffer and clips the selection once per frame, and buffer snapshots share the cached Markdown syntax tree through `Arc`.
 - Text-only editor paths such as row counts, row text reads, cursor clipping, Source-mode horizontal and visual movement/selection, wrapped Home/End, ordinary replace/backspace/delete edits, cursor reveal, auto-indent, and Source edit cache invalidation now use the buffer's text snapshot directly instead of refreshing the Markdown syntax tree through a full buffer snapshot.
@@ -58,7 +59,7 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 ## Verification
 
 - Formatting and checks have passed across the touched crates, including `cargo fmt` for the Markdown editor path and `cargo check -p md_editor` / `cargo check -p markdown_editor`.
-- Full unit suites have passed for `markdown_wysiwyg`, `md_buffer`, and `md_editor` (currently 116 tests), with focused coverage for wrapped movement, inline atoms/images, source edit cache invalidation, default list size hints, and Rendered image block drawing and mouse interaction.
+- Full unit suites have passed for `markdown_wysiwyg`, `md_buffer`, and `md_editor` (currently 117 tests), with focused coverage for wrapped movement, inline atoms/images, source display-row/cache fast paths, source edit cache invalidation, default list size hints, and Rendered image block drawing and mouse interaction.
 - `git diff --check` passed with only LF/CRLF warnings for touched files.
 - `cargo run -p markdown_editor --bin markdown-editor -- tmp-markdown-editor-test.md` was started twice for 12-second smoke windows after the Rendered image block fix; neither run exited with the previous panic, though both were stopped before completion because the short window was still compiling.
 

@@ -1948,6 +1948,10 @@ impl MarkdownEditor {
         mode: MarkdownEditorMode,
         display_row_state: &DisplayRowProjectionState,
     ) -> Option<Arc<DisplayRow>> {
+        if mode == MarkdownEditorMode::Source {
+            return self.cached_source_display_row(snapshot.as_text_snapshot(), row);
+        }
+
         let row_count = snapshot.row_count() as usize;
         if row >= row_count {
             return None;
@@ -7993,6 +7997,31 @@ mod tests {
             ),
             Some(4..5)
         );
+    }
+
+    #[gpui::test]
+    fn source_cached_display_row_reuses_text_snapshot_fast_path(cx: &mut gpui::TestAppContext) {
+        let editor = cx.update(|cx| cx.new(|cx| MarkdownEditor::for_text("one\n**two**", cx)));
+
+        editor.update(cx, |editor, _| {
+            let snapshot = editor.buffer.snapshot();
+            let display_row_state = DisplayRowProjectionState::new(
+                &snapshot,
+                Some(&editor.selection),
+                MarkdownEditorMode::Source,
+            );
+
+            let display_row = editor
+                .cached_display_row(&snapshot, 1, MarkdownEditorMode::Source, &display_row_state)
+                .expect("source row should exist");
+            let source_display_row = editor
+                .cached_source_display_row(snapshot.as_text_snapshot(), 1)
+                .expect("source row should exist");
+
+            assert!(Arc::ptr_eq(&display_row, &source_display_row));
+            assert_eq!(display_row.text, "**two**");
+            assert_eq!(display_row.source_text, "**two**");
+        });
     }
 
     #[gpui::test]
