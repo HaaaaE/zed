@@ -1,6 +1,7 @@
 use std::{
-    cmp, mem,
+    cmp,
     future::Future,
+    mem,
     ops::{Deref, Range},
     sync::{
         Arc,
@@ -22,14 +23,14 @@ pub struct Buffer {
     text: TextBuffer,
     saved_version: Global,
     preview_version: Global,
-    cached_syntax_tree: MarkdownSyntaxTree,
+    cached_syntax_tree: Arc<MarkdownSyntaxTree>,
     cached_syntax_version: Global,
 }
 
 #[derive(Clone)]
 pub struct BufferSnapshot {
     text: TextBufferSnapshot,
-    syntax_tree: MarkdownSyntaxTree,
+    syntax_tree: Arc<MarkdownSyntaxTree>,
     saved_version: Global,
     has_unsaved_edits: bool,
 }
@@ -37,7 +38,7 @@ pub struct BufferSnapshot {
 impl Buffer {
     pub fn local<T: Into<String>>(base_text: T) -> Self {
         let text = TextBuffer::new(ReplicaId::LOCAL, next_buffer_id(), base_text.into());
-        let cached_syntax_tree = parse_markdown(text.snapshot());
+        let cached_syntax_tree = Arc::new(parse_markdown(text.snapshot()));
         let saved_version = text.version();
         let preview_version = saved_version.clone();
         let cached_syntax_version = saved_version.clone();
@@ -57,7 +58,7 @@ impl Buffer {
             line_ending,
             base_text_normalized,
         );
-        let cached_syntax_tree = parse_markdown(text.snapshot());
+        let cached_syntax_tree = Arc::new(parse_markdown(text.snapshot()));
         let saved_version = text.version();
         let preview_version = saved_version.clone();
         let cached_syntax_version = saved_version.clone();
@@ -90,7 +91,7 @@ impl Buffer {
 
     pub fn syntax_tree(&mut self) -> &MarkdownSyntaxTree {
         self.refresh_syntax_tree();
-        &self.cached_syntax_tree
+        self.cached_syntax_tree.as_ref()
     }
 
     pub fn as_text_buffer(&self) -> &TextBuffer {
@@ -222,7 +223,9 @@ impl Buffer {
     }
 
     pub fn end_transaction_at(&mut self, now: Instant) -> Option<TransactionId> {
-        self.text.end_transaction_at(now).map(|(transaction_id, _)| transaction_id)
+        self.text
+            .end_transaction_at(now)
+            .map(|(transaction_id, _)| transaction_id)
     }
 
     pub fn finalize_last_transaction(&mut self) -> Option<&Transaction> {
@@ -279,7 +282,10 @@ impl Buffer {
         self.text.set_group_interval(group_interval);
     }
 
-    pub fn wait_for_version(&mut self, version: Global) -> impl Future<Output = Result<()>> + use<> {
+    pub fn wait_for_version(
+        &mut self,
+        version: Global,
+    ) -> impl Future<Output = Result<()>> + use<> {
         self.text.wait_for_version(version)
     }
 
@@ -336,7 +342,7 @@ impl Buffer {
         if self.cached_syntax_version == current_version {
             return;
         }
-        self.cached_syntax_tree = parse_markdown(self.text.snapshot());
+        self.cached_syntax_tree = Arc::new(parse_markdown(self.text.snapshot()));
         self.cached_syntax_version = current_version;
     }
 }
@@ -347,7 +353,7 @@ impl BufferSnapshot {
     }
 
     pub fn syntax_tree(&self) -> &MarkdownSyntaxTree {
-        &self.syntax_tree
+        self.syntax_tree.as_ref()
     }
 
     pub fn text(&self) -> String {
@@ -439,6 +445,30 @@ mod tests {
         assert_eq!(
             snapshot.syntax_tree().blocks()[0].kind,
             MarkdownBlockKind::AtxHeading { level: 1 }
+        );
+    }
+
+    #[test]
+    fn snapshots_share_cached_syntax_tree_until_text_changes() {
+        let mut buffer = Buffer::local("# One\n");
+
+        let first = buffer.snapshot();
+        let second = buffer.snapshot();
+
+        assert!(Arc::ptr_eq(&first.syntax_tree, &second.syntax_tree));
+
+        assert!(buffer.append("\n## Two\n").is_some());
+        let third = buffer.snapshot();
+
+        assert!(!Arc::ptr_eq(&first.syntax_tree, &third.syntax_tree));
+        assert_eq!(
+            third
+                .syntax_tree()
+                .blocks()
+                .iter()
+                .filter(|block| matches!(block.kind, MarkdownBlockKind::AtxHeading { .. }))
+                .count(),
+            2
         );
     }
 
@@ -695,4 +725,3 @@ mod tests {
         assert!(matches!(poll_once(future.as_mut()), Poll::Ready(Err(_))));
     }
 }
-

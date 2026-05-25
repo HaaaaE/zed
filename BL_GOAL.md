@@ -536,10 +536,19 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - List item rendering reuses that frame snapshot/selection instead of calling `buffer.snapshot()` and `clip_selection()` for every visible or overdraw row.
 - This removes repeated syntax-tree snapshot cloning and selection clipping from each rendered list item, reducing fixed per-frame row rendering overhead in large documents.
 
+### 2026-05-25 - Buffer snapshots share Markdown syntax trees
+
+- Scope: `crates/md_buffer/src/md_buffer.rs`.
+- `Buffer` now stores the cached `MarkdownSyntaxTree` behind `Arc`, and `BufferSnapshot` clones that shared handle instead of deep-cloning the full syntax tree.
+- Repeated snapshots without text edits now reuse the same parsed Markdown tree; edits still rebuild and publish a fresh tree for subsequent snapshots.
+- This removes a document-size-dependent snapshot cost from render and movement paths, which matters for 300KB-class Markdown files with many blocks and inline spans.
+- Added coverage that snapshots share the cached syntax tree until text changes.
+
 ## Verification
 
-- `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
+- `cargo fmt -p markdown_wysiwyg -p md_buffer -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 15/15 tests.
+- `cargo test -p md_buffer` passed: 16/16 tests.
 - `cargo test -p md_editor` passed: 103/103 tests.
 - `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo test -p md_editor rendered_mode_draws_inline_image_atom` passed and covers drawing a Rendered-mode inline image atom through the GPUI path.
