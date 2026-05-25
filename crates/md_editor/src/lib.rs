@@ -2059,7 +2059,7 @@ impl MarkdownEditor {
             window,
             cx,
         );
-        if measure_inline_atoms && layout.cacheable() {
+        if layout.cacheable() {
             self.row_layout_cache.insert(cache_key, layout.clone());
         }
         layout
@@ -5711,6 +5711,57 @@ mod tests {
             assert_eq!(editor.row_layout_cache.len(), 1);
 
             editor.move_up(&MoveUp, window, cx);
+            assert_eq!(editor.row_layout_cache.len(), 1);
+        });
+    }
+
+    #[gpui::test]
+    fn rendered_interaction_layouts_cache_plain_text_rows(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.simulate_resize(gpui::size(px(90.), px(200.)));
+        let editor = cx.new(|cx| {
+            let mut editor = MarkdownEditor::for_text("abcdefghijklmnopqrst\nsecond", cx);
+            editor.set_mode(MarkdownEditorMode::Rendered, cx);
+            editor
+        });
+
+        editor.update_in(cx, |editor, window, cx| {
+            assert_eq!(editor.row_layout_cache.len(), 0);
+
+            let snapshot = editor.buffer.snapshot();
+            let display_row_state =
+                DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            let display_row = editor
+                .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
+                .expect("display row should exist");
+            let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+            let wrap_width = text_wrap_width(window);
+            let selection = editor.selection.clone();
+
+            let _ = editor.cached_row_layout(
+                &snapshot,
+                &display_row,
+                &selection,
+                editor.mode,
+                row_style,
+                wrap_width,
+                false,
+                window,
+                cx,
+            );
+            assert_eq!(editor.row_layout_cache.len(), 1);
+
+            let _ = editor.cached_row_layout(
+                &snapshot,
+                &display_row,
+                &selection,
+                editor.mode,
+                row_style,
+                wrap_width,
+                false,
+                window,
+                cx,
+            );
             assert_eq!(editor.row_layout_cache.len(), 1);
         });
     }
