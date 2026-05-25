@@ -425,6 +425,13 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Wrapping, atom-aware hit testing, and visual movement still behave the same, but future inline atom variants now have a narrower geometry surface to implement.
 - Updated the focused inline atom boundary test to assert through the atom method instead of a free helper.
 
+### 2026-05-25 - Block rendering uses shared block interface
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Moved block rendering dispatch onto `DisplayBlockLayout::render`.
+- Row rendering now only distinguishes text rows from block rows; remote image rendering remains the current block variant implementation.
+- This keeps selected-state and caret rendering calculation beside the rest of the block geometry interface.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.

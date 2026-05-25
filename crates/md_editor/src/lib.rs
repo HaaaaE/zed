@@ -482,6 +482,28 @@ impl DisplayBlockLayout {
                 self.source_range(),
             )
     }
+
+    fn render(
+        self,
+        snapshot: &BufferSnapshot,
+        selection: &Selection<Point>,
+        row_style: RowDisplayStyle,
+        cx: &mut Context<MarkdownEditor>,
+    ) -> Vec<gpui::AnyElement> {
+        let selected = self.is_whole_selected(snapshot, selection);
+        let caret_x = self.caret_x(snapshot, selection);
+        match self {
+            Self::RemoteImage(image_layout) => {
+                vec![render_image_block(
+                    image_layout,
+                    selected,
+                    caret_x,
+                    row_style,
+                    cx,
+                )]
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -2374,19 +2396,7 @@ fn render_display_row_layout(
             render_row_text(snapshot, display_row, text_layout, selection, row_style, cx)
         }
         DisplayRowLayout::Block(block_layout) => {
-            let selected = block_layout.is_whole_selected(snapshot, selection);
-            let caret_x = block_layout.caret_x(snapshot, selection);
-            match block_layout {
-                DisplayBlockLayout::RemoteImage(image_layout) => {
-                    vec![render_image_block(
-                        image_layout,
-                        selected,
-                        caret_x,
-                        row_style,
-                        cx,
-                    )]
-                }
-            }
+            block_layout.render(snapshot, selection, row_style, cx)
         }
     }
 }
