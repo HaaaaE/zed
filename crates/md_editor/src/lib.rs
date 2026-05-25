@@ -898,7 +898,7 @@ impl MarkdownEditor {
     }
 
     pub fn display_rows(&mut self, range: Range<usize>) -> Vec<DisplayRow> {
-        display_rows(&self.buffer.snapshot(), range)
+        display_rows_in_text_snapshot(self.buffer.as_text_snapshot(), range)
     }
 
     pub fn cursor(&self) -> Point {
@@ -2501,9 +2501,22 @@ fn render_editor_row(
 }
 
 pub fn display_rows(snapshot: &BufferSnapshot, range: Range<usize>) -> Vec<DisplayRow> {
-    display_rows_in_mode(snapshot, range, None, MarkdownEditorMode::Source)
+    display_rows_in_text_snapshot(snapshot.as_text_snapshot(), range)
 }
 
+fn display_rows_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    range: Range<usize>,
+) -> Vec<DisplayRow> {
+    let row_count = snapshot.row_count() as usize;
+    let start = range.start.min(row_count);
+    let end = range.end.min(row_count);
+    (start..end)
+        .map(|row| source_display_row_in_text_snapshot(snapshot, row as u32))
+        .collect()
+}
+
+#[cfg(test)]
 fn display_rows_in_mode(
     snapshot: &BufferSnapshot,
     range: Range<usize>,
@@ -5607,6 +5620,39 @@ mod tests {
                 (3, String::new()),
             ]
         );
+    }
+
+    #[gpui::test]
+    fn source_display_rows_uses_text_snapshot_without_refreshing_markdown_syntax(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let editor = cx.update(|cx| cx.new(|cx| MarkdownEditor::for_text("# Heading\nBody\n", cx)));
+
+        editor.update(cx, |editor, _| {
+            let _snapshot = editor.buffer.snapshot();
+            let cached_syntax_version = editor.buffer.cached_syntax_version_for_tests();
+            assert_eq!(
+                &cached_syntax_version,
+                editor.buffer.as_text_snapshot().version()
+            );
+
+            assert!(editor.buffer.edit([(0..0, "Plain text\n")]).is_some());
+            let edited_text_version = editor.buffer.as_text_snapshot().version().clone();
+            assert_ne!(cached_syntax_version, edited_text_version);
+
+            let display_rows = editor.display_rows(0..2);
+            assert_eq!(
+                display_rows
+                    .into_iter()
+                    .map(|row| row.text)
+                    .collect::<Vec<_>>(),
+                vec!["Plain text".to_string(), "# Heading".to_string()]
+            );
+            assert_eq!(
+                editor.buffer.cached_syntax_version_for_tests(),
+                cached_syntax_version
+            );
+        });
     }
 
     #[gpui::test]
