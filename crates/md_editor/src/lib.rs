@@ -1706,7 +1706,9 @@ impl Render for MarkdownEditor {
             self.clear_row_layout_cache();
             self.display_list_state.remeasure();
         }
-        let selection = self.selection.clone();
+        let snapshot = self.buffer.snapshot();
+        let selection = clip_selection(&snapshot, &self.selection);
+        let cursor = selection.head();
 
         div()
             .id("md-editor")
@@ -1743,9 +1745,6 @@ impl Render for MarkdownEditor {
                 list(
                     self.display_list_state.clone(),
                     cx.processor(move |this, row, window, _cx| {
-                        let snapshot = this.buffer.snapshot();
-                        let selection = clip_selection(&snapshot, &selection);
-                        let cursor = selection.head();
                         let Some(display_row) = display_rows_in_mode(
                             &snapshot,
                             row..row.saturating_add(1),

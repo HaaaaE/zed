@@ -529,6 +529,13 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - The same previous/current active source rows are merged before remeasurement, keeping cursor movement from invalidating unrelated Rendered rows.
 - Added focused coverage for active-range row merging and for cache keys ignoring non-intersecting rows.
 
+### 2026-05-25 - Render frame reuses snapshot and clipped selection
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- The editor render path now snapshots the buffer and clips the current selection once per render frame before constructing the row list.
+- List item rendering reuses that frame snapshot/selection instead of calling `buffer.snapshot()` and `clip_selection()` for every visible or overdraw row.
+- This removes repeated syntax-tree snapshot cloning and selection clipping from each rendered list item, reducing fixed per-frame row rendering overhead in large documents.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
