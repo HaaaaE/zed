@@ -435,8 +435,8 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 ### 2026-05-25 - Block row height tracking uses row layout interface
 
 - Scope: `crates/md_editor/src/lib.rs`.
-- Added a `DisplayRowLayout::block_height` accessor so the render loop no longer matches block rows directly when deciding whether a list row needs remeasurement.
-- Remote image block height tracking behaves the same, but the row-level pipeline now has one shared height entry point for future block variants.
+- Superseded by the Rendered-mode crash fix below.
+- The previous render-time block height tracking called `ListState::remeasure_items` while GPUI's list was already laying out that item, which could re-enter the same list state borrow.
 
 ### 2026-05-25 - Block layout construction uses shared entry point
 
@@ -445,13 +445,29 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Remote image blocks remain the only concrete block variant today, but `compute_display_row_layout` no longer constructs that variant inline.
 - This keeps future preview/custom GPUI block variants aligned with the same row layout decision path instead of adding more ad hoc branches.
 
+### 2026-05-25 - Block layout construction lives on block types
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Moved row-to-block layout construction onto `DisplayBlockLayout::for_display_row`.
+- Moved remote-image width, asset lookup, and height calculation into `RenderedImageBlockLayout::new`.
+- This keeps block detection and variant construction beside the block layout interface, leaving `compute_display_row_layout` responsible only for choosing block vs text layout.
+
+### 2026-05-25 - Rendered-mode list remeasure crash fixed
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Reproduced `cargo run -p markdown_editor --bin markdown-editor -- tmp-markdown-editor-test.md` with `RUST_BACKTRACE=full`; the panic was `RefCell already borrowed` in `ListState::remeasure_items`, called from the markdown row render closure while GPUI list layout was already measuring visible items.
+- Removed render-time block height tracking and the now-unused `DisplayRowLayout::block_height` helper.
+- Block rows are already measured by the current `layout_as_root` pass, so this avoids re-entering `ListState` from item rendering and keeps block layout measurement in the list's normal layout pass.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 87/87 tests.
+- `cargo test -p md_editor` passed: 88/88 tests.
+- `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo check -p markdown_editor` passed.
-- `git diff --check` passed with only the existing LF/CRLF warning for `crates/md_editor/src/lib.rs`.
+- `git diff --check` passed with only LF/CRLF warnings for touched files.
+- `cargo run -p markdown_editor --bin markdown-editor -- tmp-markdown-editor-test.md` was started twice for 12-second smoke windows after the fix; neither run exited with the previous panic, though both were stopped before completion because the short window was still compiling.
 
 ## Known Remaining Work
 

@@ -96,7 +96,6 @@ pub struct MarkdownEditor {
     settings: EditorSettings,
     last_text_wrap_width: Option<gpui::Pixels>,
     row_layout_cache: HashMap<RowLayoutCacheKey, DisplayRowLayout>,
-    block_row_heights: HashMap<u32, gpui::Pixels>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -378,6 +377,25 @@ enum DisplayBlockLayout {
 }
 
 impl DisplayBlockLayout {
+    fn for_display_row(
+        snapshot: &BufferSnapshot,
+        display_row: &DisplayRow,
+        selection: &Selection<Point>,
+        mode: MarkdownEditorMode,
+        wrap_width: gpui::Pixels,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Self> {
+        rendered_image_block_for_row(snapshot, display_row, selection, mode).map(|image_block| {
+            Self::RemoteImage(RenderedImageBlockLayout::new(
+                image_block,
+                wrap_width,
+                window,
+                cx,
+            ))
+        })
+    }
+
     fn height(&self) -> gpui::Pixels {
         match self {
             Self::RemoteImage(image_layout) => image_layout.height(),
@@ -513,13 +531,6 @@ enum DisplayRowLayout {
 }
 
 impl DisplayRowLayout {
-    fn block_height(&self) -> Option<gpui::Pixels> {
-        match self {
-            Self::Text(_) => None,
-            Self::Block(block_layout) => Some(block_layout.height()),
-        }
-    }
-
     fn row_min_height(&self, row_style: RowDisplayStyle) -> gpui::Pixels {
         match self {
             Self::Text(text_layout) => row_style.min_height.max(text_layout.height(row_style)),
@@ -550,6 +561,30 @@ struct RenderedImageBlockLayout {
 }
 
 impl RenderedImageBlockLayout {
+    fn new(
+        image_block: RenderedImageBlock,
+        wrap_width: gpui::Pixels,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self {
+        let width = wrap_width.max(px(1.)).min(RENDERED_IMAGE_BLOCK_MAX_WIDTH);
+        let resource = Resource::Uri(image_block.url.clone().into());
+        let height = window
+            .use_asset::<ImgResourceLoader>(&resource, cx)
+            .and_then(|image| {
+                let image = image.ok()?;
+                let size = image.size(0);
+                image_block_height_for_size(width, size.width.0, size.height.0)
+            })
+            .unwrap_or(RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT);
+
+        Self {
+            image_block,
+            width,
+            image_height: height,
+        }
+    }
+
     fn image_height(&self) -> gpui::Pixels {
         self.image_height
     }
@@ -607,7 +642,6 @@ impl MarkdownEditor {
             settings: EditorSettings::default(),
             last_text_wrap_width: None,
             row_layout_cache: HashMap::default(),
-            block_row_heights: HashMap::default(),
         }
     }
 
@@ -1314,7 +1348,6 @@ impl MarkdownEditor {
 
     fn clear_row_layout_cache(&mut self) {
         self.row_layout_cache.clear();
-        self.block_row_heights.clear();
     }
 
     fn reveal_cursor_row(&mut self) {
@@ -1592,15 +1625,6 @@ impl Render for MarkdownEditor {
                             window,
                             _cx,
                         );
-                        let block_height_changed = if let Some(height) = row_layout.block_height() {
-                            this.block_row_heights.insert(display_row.row, height) != Some(height)
-                        } else {
-                            false
-                        };
-                        if block_height_changed {
-                            this.display_list_state
-                                .remeasure_items(row..row.saturating_add(1));
-                        }
                         let row_min_height = row_layout.row_min_height(row_style);
                         let content_min_height = row_layout.content_min_height(row_style);
                         let row_contents = render_display_row_layout(
@@ -2420,7 +2444,7 @@ fn compute_display_row_layout(
     window: &mut Window,
     cx: &mut App,
 ) -> DisplayRowLayout {
-    if let Some(block_layout) = display_block_layout_for_row(
+    if let Some(block_layout) = DisplayBlockLayout::for_display_row(
         snapshot,
         display_row,
         selection,
@@ -2442,49 +2466,6 @@ fn compute_display_row_layout(
         window,
         cx,
     ))
-}
-
-fn display_block_layout_for_row(
-    snapshot: &BufferSnapshot,
-    display_row: &DisplayRow,
-    selection: &Selection<Point>,
-    mode: MarkdownEditorMode,
-    wrap_width: gpui::Pixels,
-    window: &mut Window,
-    cx: &mut App,
-) -> Option<DisplayBlockLayout> {
-    rendered_image_block_for_row(snapshot, display_row, selection, mode).map(|image_block| {
-        DisplayBlockLayout::RemoteImage(rendered_image_block_layout(
-            image_block,
-            wrap_width,
-            window,
-            cx,
-        ))
-    })
-}
-
-fn rendered_image_block_layout(
-    image_block: RenderedImageBlock,
-    wrap_width: gpui::Pixels,
-    window: &mut Window,
-    cx: &mut App,
-) -> RenderedImageBlockLayout {
-    let width = wrap_width.max(px(1.)).min(RENDERED_IMAGE_BLOCK_MAX_WIDTH);
-    let resource = Resource::Uri(image_block.url.clone().into());
-    let height = window
-        .use_asset::<ImgResourceLoader>(&resource, cx)
-        .and_then(|image| {
-            let image = image.ok()?;
-            let size = image.size(0);
-            image_block_height_for_size(width, size.width.0, size.height.0)
-        })
-        .unwrap_or(RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT);
-
-    RenderedImageBlockLayout {
-        image_block,
-        width,
-        image_height: height,
-    }
 }
 
 fn image_block_height_for_size(
@@ -4180,6 +4161,27 @@ mod tests {
                 (2, "beta".to_string()),
                 (3, String::new()),
             ]
+        );
+    }
+
+    #[gpui::test]
+    fn rendered_mode_draws_image_block_without_reentering_list_state(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let cx = cx.add_empty_window();
+        let editor = cx.new(|cx| {
+            let mut editor = MarkdownEditor::for_text(
+                "# Heading\n\n![Test Image](https://example.com/cat.png)\n\nAfter image",
+                cx,
+            );
+            editor.set_mode(MarkdownEditorMode::Rendered, cx);
+            editor
+        });
+
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(500.), px(400.)),
+            |_, _| editor.clone().into_any_element(),
         );
     }
 
