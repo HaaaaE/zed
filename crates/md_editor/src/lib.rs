@@ -222,6 +222,12 @@ struct DisplayInlineAtom {
     width: gpui::Pixels,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DisplayInlineAtomMeasurement {
+    size: gpui::Size<gpui::Pixels>,
+    cacheable: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DisplayInlineAtomKind {
     InlineMath,
@@ -276,9 +282,9 @@ impl DisplayInlineAtom {
         row_style: RowDisplayStyle,
         window: &mut Window,
         cx: &mut App,
-    ) -> gpui::Size<gpui::Pixels> {
+    ) -> DisplayInlineAtomMeasurement {
         if self.kind == DisplayInlineAtomKind::InlineImage {
-            return fallback_size;
+            return self.measure_inline_image_size(fallback_size, window, cx);
         }
 
         let mut element = self.render_measurement_piece(self.fallback_text.clone(), row_style);
@@ -291,10 +297,48 @@ impl DisplayInlineAtom {
             cx,
         );
 
-        gpui::size(
-            size.width.max(fallback_size.width).max(px(1.)),
-            size.height.max(fallback_size.height).max(px(1.)),
-        )
+        DisplayInlineAtomMeasurement {
+            size: gpui::size(
+                size.width.max(fallback_size.width).max(px(1.)),
+                size.height.max(fallback_size.height).max(px(1.)),
+            ),
+            cacheable: true,
+        }
+    }
+
+    fn measure_inline_image_size(
+        &self,
+        fallback_size: gpui::Size<gpui::Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> DisplayInlineAtomMeasurement {
+        let Some(image_url) = self.image_url.as_ref() else {
+            return DisplayInlineAtomMeasurement {
+                size: fallback_size,
+                cacheable: true,
+            };
+        };
+
+        let resource = Resource::Uri(image_url.clone().into());
+        let Some(image) = window.use_asset::<ImgResourceLoader>(&resource, cx) else {
+            return DisplayInlineAtomMeasurement {
+                size: fallback_size,
+                cacheable: false,
+            };
+        };
+
+        let size = image
+            .ok()
+            .and_then(|image| {
+                let size = image.size(0);
+                inline_image_atom_size_for_size(size.width.0, size.height.0)
+            })
+            .unwrap_or(fallback_size);
+
+        DisplayInlineAtomMeasurement {
+            size,
+            cacheable: true,
+        }
     }
 
     fn render_piece(
@@ -357,8 +401,10 @@ impl DisplayInlineAtom {
             DisplayInlineAtomKind::InlineImage => {
                 let palette = editor_palette();
                 let image_url = self.image_url.clone().unwrap_or(text);
+                let size = size.unwrap_or_else(|| gpui::size(self.width, self.height));
                 let mut element = div()
-                    .size(INLINE_IMAGE_ATOM_SIZE)
+                    .w(size.width)
+                    .h(size.height)
                     .flex_none()
                     .overflow_hidden()
                     .rounded_sm()
@@ -438,6 +484,7 @@ struct DisplayRowTextLayout {
     visual_rows: Vec<VisualDisplayRow>,
     shaped_line: gpui::ShapedLine,
     text_len: usize,
+    cacheable: bool,
 }
 
 impl DisplayRowTextLayout {
@@ -457,6 +504,7 @@ const RENDERED_IMAGE_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(4.);
 const INLINE_MATH_ATOM_EXTRA_HEIGHT: gpui::Pixels = px(4.);
 const INLINE_MATH_ATOM_HORIZONTAL_PADDING: gpui::Pixels = px(4.);
 const INLINE_IMAGE_ATOM_SIZE: gpui::Pixels = px(24.);
+const INLINE_IMAGE_ATOM_MAX_WIDTH: gpui::Pixels = px(96.);
 const INLINE_IMAGE_PLACEHOLDER: &str = "\u{fffc}";
 
 #[derive(Clone, Debug, PartialEq)]
@@ -619,6 +667,13 @@ enum DisplayRowLayout {
 }
 
 impl DisplayRowLayout {
+    fn cacheable(&self) -> bool {
+        match self {
+            Self::Text(text_layout) => text_layout.cacheable,
+            Self::Block(_) => false,
+        }
+    }
+
     fn row_min_height(&self, row_style: RowDisplayStyle) -> gpui::Pixels {
         match self {
             Self::Text(text_layout) => row_style.min_height.max(text_layout.height(row_style)),
@@ -1627,7 +1682,7 @@ impl MarkdownEditor {
             window,
             cx,
         );
-        if measure_inline_atoms && matches!(layout, DisplayRowLayout::Text(_)) {
+        if measure_inline_atoms && layout.cacheable() {
             self.row_layout_cache.insert(cache_key, layout.clone());
         }
         layout
@@ -2862,6 +2917,29 @@ fn image_block_height_for_size(
     Some(width * (image_height as f32 / image_width as f32))
 }
 
+fn inline_image_atom_size_for_size(
+    image_width: i32,
+    image_height: i32,
+) -> Option<gpui::Size<gpui::Pixels>> {
+    if image_width <= 0 || image_height <= 0 {
+        return None;
+    }
+
+    let aspect_ratio = image_width as f32 / image_height as f32;
+    let width_at_default_height = INLINE_IMAGE_ATOM_SIZE * aspect_ratio;
+    if width_at_default_height <= INLINE_IMAGE_ATOM_MAX_WIDTH {
+        return Some(gpui::size(
+            width_at_default_height.max(px(1.)),
+            INLINE_IMAGE_ATOM_SIZE,
+        ));
+    }
+
+    Some(gpui::size(
+        INLINE_IMAGE_ATOM_MAX_WIDTH,
+        (INLINE_IMAGE_ATOM_MAX_WIDTH / aspect_ratio).max(px(1.)),
+    ))
+}
+
 fn text_layout_for_display_row(
     snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
@@ -2882,11 +2960,14 @@ fn text_layout_for_display_row(
         None,
     );
     let has_inline_atoms = has_inline_atoms(&fragments);
+    let mut cacheable = true;
     if has_inline_atoms {
         if measure_inline_atoms {
-            measure_inline_atom_sizes(&mut fragments, &shaped_line, row_style, window, cx);
+            cacheable =
+                measure_inline_atom_sizes(&mut fragments, &shaped_line, row_style, window, cx);
         } else {
             assign_inline_atom_fallback_sizes(&mut fragments, &shaped_line, row_style);
+            cacheable = false;
         }
     }
     let visual_rows = if has_inline_atoms {
@@ -2931,6 +3012,7 @@ fn text_layout_for_display_row(
         visual_rows,
         shaped_line,
         text_len: display_row.text.len(),
+        cacheable,
     }
 }
 
@@ -2986,16 +3068,19 @@ fn measure_inline_atom_sizes(
     row_style: RowDisplayStyle,
     window: &mut Window,
     cx: &mut App,
-) {
+) -> bool {
+    let mut cacheable = true;
     for fragment in fragments {
         let DisplayInlineFragment::Atom(atom) = fragment else {
             continue;
         };
         let fallback_size = atom.fallback_size(shaped_line, row_style);
-        let measured_size = atom.measure_size(fallback_size, row_style, window, cx);
-        atom.width = measured_size.width;
-        atom.height = measured_size.height;
+        let measurement = atom.measure_size(fallback_size, row_style, window, cx);
+        atom.width = measurement.size.width;
+        atom.height = measurement.size.height;
+        cacheable &= measurement.cacheable;
     }
+    cacheable
 }
 
 fn has_inline_atoms(fragments: &[DisplayInlineFragment]) -> bool {
@@ -4753,6 +4838,28 @@ mod tests {
     }
 
     #[gpui::test]
+    fn rendered_mode_does_not_cache_loading_inline_image_layout(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        let editor = cx.new(|cx| {
+            let mut editor =
+                MarkdownEditor::for_text("Before ![alt](https://example.com/cat.png) after", cx);
+            editor.set_mode(MarkdownEditorMode::Rendered, cx);
+            editor
+        });
+
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(500.), px(120.)),
+            |_, _| editor.clone().into_any_element(),
+        );
+
+        assert_eq!(
+            editor.read_with(cx, |editor, _| editor.row_layout_cache.len()),
+            0
+        );
+    }
+
+    #[gpui::test]
     fn rendered_mode_draws_empty_alt_inline_image_atom(cx: &mut gpui::TestAppContext) {
         let cx = cx.add_empty_window();
         let editor = cx.new(|cx| {
@@ -5375,6 +5482,29 @@ mod tests {
     }
 
     #[test]
+    fn inline_image_atom_size_preserves_loaded_image_aspect_ratio() {
+        assert_eq!(
+            inline_image_atom_size_for_size(80, 40),
+            Some(gpui::size(px(48.), INLINE_IMAGE_ATOM_SIZE))
+        );
+        assert_eq!(
+            inline_image_atom_size_for_size(40, 80),
+            Some(gpui::size(px(12.), INLINE_IMAGE_ATOM_SIZE))
+        );
+        assert_eq!(
+            inline_image_atom_size_for_size(1200, 120),
+            Some(gpui::size(INLINE_IMAGE_ATOM_MAX_WIDTH, px(9.6)))
+        );
+    }
+
+    #[test]
+    fn inline_image_atom_size_rejects_invalid_image_dimensions() {
+        assert_eq!(inline_image_atom_size_for_size(0, 40), None);
+        assert_eq!(inline_image_atom_size_for_size(80, 0), None);
+        assert_eq!(inline_image_atom_size_for_size(0, 0), None);
+    }
+
+    #[test]
     fn line_fragments_for_wrapping_uses_inline_atom_element_width() {
         let fragments = vec![
             DisplayInlineFragment::Text(StyledDisplaySegment {
@@ -5621,6 +5751,7 @@ mod tests {
             visual_rows: vec![first_visual_row.clone(), second_visual_row],
             shaped_line,
             text_len: display_row.text.len(),
+            cacheable: true,
         };
 
         let row_end_x = display_x_for_offset(
@@ -5686,6 +5817,7 @@ mod tests {
             visual_rows: vec![second_visual_row.clone()],
             shaped_line,
             text_len: display_row.text.len(),
+            cacheable: true,
         };
         let local_x = display_x_for_offset(&text_layout.fragments, &text_layout.shaped_line, 7)
             - second_visual_row.line_start_x;
@@ -6542,6 +6674,7 @@ mod tests {
             visual_rows: vec![visual_row.clone()],
             shaped_line: gpui::ShapedLine::default(),
             text_len: 0,
+            cacheable: true,
         };
         let crossing_selection = Selection {
             id: 1,
@@ -6594,6 +6727,7 @@ mod tests {
             visual_rows: vec![visual_row.clone()],
             shaped_line: gpui::ShapedLine::default(),
             text_len: 10,
+            cacheable: true,
         };
 
         assert_eq!(
@@ -6652,6 +6786,7 @@ mod tests {
             visual_rows: visual_rows.clone(),
             shaped_line,
             text_len: 15,
+            cacheable: true,
         };
         let selected_range = 2..13;
 

@@ -599,6 +599,14 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Source-mode text rows keep the existing plain-fragment fast path and still avoid Rendered Markdown style/atom work.
 - Added focused coverage that a single Rendered row input pass preserves both inline styling and inline math atom construction.
 
+### 2026-05-25 - Inline image atoms use loaded image dimensions
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Rendered inline image atoms now use `ImgResourceLoader` during measured layout to derive their inline box from loaded image dimensions instead of always staying fixed at the 24px fallback square.
+- Inline image atom sizing preserves image aspect ratio within a bounded inline atom width, and the measured width/height feed the same wrapping, row-height, selection, cursor, and hit-testing geometry as other inline atoms.
+- Text row layouts now carry a cacheability flag, so rows with still-loading inline image atoms use the fallback size for the current render but do not cache that fallback layout as the final measured row.
+- Added focused coverage for loaded-image aspect-ratio sizing, invalid image dimensions, and the loading-state cache guard.
+
 ## Verification
 
 - `cargo fmt -p gpui -p markdown_wysiwyg -p md_buffer -p md_editor -p markdown_editor` passed.
@@ -607,8 +615,10 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - `cargo test -p markdown_wysiwyg` passed: 15/15 tests.
 - `cargo test -p md_buffer` passed: 16/16 tests.
 - `cargo test -p gpui test_default_size_hint_sets_unmeasured_total_height` passed.
-- `cargo test -p md_editor` passed: 104/104 tests.
+- `cargo test -p md_editor` passed: 107/107 tests.
 - `cargo test -p md_editor rendered_inline_row_inputs_collect_styles_and_atoms_together` passed.
+- `cargo test -p md_editor inline_image_atom_size` passed.
+- `cargo test -p md_editor rendered_mode_does_not_cache_loading_inline_image_layout` passed.
 - `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo test -p md_editor rendered_mode_draws_inline_image_atom` passed and covers drawing a Rendered-mode inline image atom through the GPUI path.
 - `cargo test -p md_editor rendered_mode_draws_empty_alt_inline_image_atom` passed and covers drawing a Rendered-mode empty-alt inline image atom through the GPUI path.
