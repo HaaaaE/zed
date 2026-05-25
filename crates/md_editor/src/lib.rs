@@ -5697,6 +5697,61 @@ mod tests {
     }
 
     #[gpui::test]
+    fn rendered_image_block_mouse_events_select_source_boundaries(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.simulate_resize(gpui::size(px(500.), px(400.)));
+        let image_source = "![alt](https://example.com/cat.png)";
+        let editor = cx.new(|cx| {
+            let mut editor = MarkdownEditor::for_text(&format!("{image_source}\nnext\n"), cx);
+            editor.set_mode(MarkdownEditorMode::Rendered, cx);
+            editor.set_cursor(Point::new(1, 0));
+            editor
+        });
+
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(500.), px(400.)),
+            |_, _| editor.clone().into_any_element(),
+        );
+
+        let block_middle_y = (RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT
+            + RENDERED_IMAGE_BLOCK_VERTICAL_PADDING * 2.)
+            * 0.5;
+        let left_half = gpui::point(gutter_width() + px(20.), block_middle_y);
+        cx.simulate_mouse_down(left_half, MouseButton::Left, gpui::Modifiers::none());
+        cx.simulate_mouse_up(left_half, MouseButton::Left, gpui::Modifiers::none());
+
+        editor.read_with(cx, |editor, _| {
+            assert!(editor.selection.is_empty());
+            assert_eq!(editor.cursor(), Point::new(0, 0));
+            assert_eq!(editor.selection.goal, SelectionGoal::HorizontalPosition(0.));
+        });
+
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(500.), px(400.)),
+            |_, _| editor.clone().into_any_element(),
+        );
+
+        let right_half = gpui::point(gutter_width() + px(360.), block_middle_y);
+        cx.simulate_mouse_down(right_half, MouseButton::Left, gpui::Modifiers::shift());
+        cx.simulate_mouse_up(right_half, MouseButton::Left, gpui::Modifiers::shift());
+
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(editor.selection.start, Point::new(0, 0));
+            assert_eq!(
+                editor.selection.end,
+                Point::new(0, image_source.len() as u32)
+            );
+            assert!(!editor.selection.reversed);
+            assert!(matches!(
+                editor.selection.goal,
+                SelectionGoal::WrappedHorizontalPosition((0, x)) if x > 0.
+            ));
+        });
+    }
+
+    #[gpui::test]
     fn rendered_mode_draws_inline_image_atom(cx: &mut gpui::TestAppContext) {
         let cx = cx.add_empty_window();
         let editor = cx.new(|cx| {
