@@ -438,6 +438,13 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Added a `DisplayRowLayout::block_height` accessor so the render loop no longer matches block rows directly when deciding whether a list row needs remeasurement.
 - Remote image block height tracking behaves the same, but the row-level pipeline now has one shared height entry point for future block variants.
 
+### 2026-05-25 - Block layout construction uses shared entry point
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Added `display_block_layout_for_row` as the single row-level constructor entry point for block layouts.
+- Remote image blocks remain the only concrete block variant today, but `compute_display_row_layout` no longer constructs that variant inline.
+- This keeps future preview/custom GPUI block variants aligned with the same row layout decision path instead of adding more ad hoc branches.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.

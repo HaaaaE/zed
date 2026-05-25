@@ -2420,11 +2420,16 @@ fn compute_display_row_layout(
     window: &mut Window,
     cx: &mut App,
 ) -> DisplayRowLayout {
-    if let Some(image_block) = rendered_image_block_for_row(snapshot, display_row, selection, mode)
-    {
-        return DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(
-            rendered_image_block_layout(image_block, wrap_width, window, cx),
-        ));
+    if let Some(block_layout) = display_block_layout_for_row(
+        snapshot,
+        display_row,
+        selection,
+        mode,
+        wrap_width,
+        window,
+        cx,
+    ) {
+        return DisplayRowLayout::Block(block_layout);
     }
 
     DisplayRowLayout::Text(text_layout_for_display_row(
@@ -2437,6 +2442,25 @@ fn compute_display_row_layout(
         window,
         cx,
     ))
+}
+
+fn display_block_layout_for_row(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+    wrap_width: gpui::Pixels,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<DisplayBlockLayout> {
+    rendered_image_block_for_row(snapshot, display_row, selection, mode).map(|image_block| {
+        DisplayBlockLayout::RemoteImage(rendered_image_block_layout(
+            image_block,
+            wrap_width,
+            window,
+            cx,
+        ))
+    })
 }
 
 fn rendered_image_block_layout(
