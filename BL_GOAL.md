@@ -591,14 +591,24 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Row layout cache keys reuse those stored ranges instead of recomputing marker-visibility dependencies for the same row.
 - This removes duplicate dependency-range scanning from render, mouse hit testing, and visual movement cache lookup paths while preserving the same invalidation semantics.
 
+### 2026-05-25 - Rendered inline row inputs are built once
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Added `DisplayInlineRowInputs` so Rendered text-row fragment construction collects block style ranges, inline style ranges, and inline atom ranges through one row-local input object.
+- Rendered rows now query row-local inline spans once while building fragments instead of separately scanning the same row for styled segments and inline atoms.
+- Source-mode text rows keep the existing plain-fragment fast path and still avoid Rendered Markdown style/atom work.
+- Added focused coverage that a single Rendered row input pass preserves both inline styling and inline math atom construction.
+
 ## Verification
 
 - `cargo fmt -p gpui -p markdown_wysiwyg -p md_buffer -p md_editor -p markdown_editor` passed.
+- `cargo fmt -p md_editor` passed.
 - `cargo check -p md_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 15/15 tests.
 - `cargo test -p md_buffer` passed: 16/16 tests.
 - `cargo test -p gpui test_default_size_hint_sets_unmeasured_total_height` passed.
-- `cargo test -p md_editor` passed: 103/103 tests.
+- `cargo test -p md_editor` passed: 104/104 tests.
+- `cargo test -p md_editor rendered_inline_row_inputs_collect_styles_and_atoms_together` passed.
 - `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo test -p md_editor rendered_mode_draws_inline_image_atom` passed and covers drawing a Rendered-mode inline image atom through the GPUI path.
 - `cargo test -p md_editor rendered_mode_draws_empty_alt_inline_image_atom` passed and covers drawing a Rendered-mode empty-alt inline image atom through the GPUI path.
@@ -608,9 +618,12 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 
 ## Known Remaining Work
 
+The bullets below are categories, not priority order or execution order.
+
 - Profile 300KB-class Markdown files in Source and Rendered modes to identify the remaining source-row-local hot paths before making further performance changes.
 - Continue optimizing within the source-row architecture: cheaper row layout, less string/fragment churn, stronger row-layout cache reuse, narrower remeasure and cache invalidation, and better behavior for large but non-extreme documents.
 - Generalize inline atom measurement beyond the current inactive inline math atom path, and add invalidation if future atom content can resize after the row is cached.
 - Implement general block-level GPUI elements as measured list items or subitems. Remote image blocks now update from loaded image dimensions, but arbitrary GPUI block measurement is not solved.
+- Continue code architecture cleanup within the existing source-row virtualization constraint. `crates/md_editor/src/lib.rs` is now large enough that display-row projection, row layout/cache, inline atoms, block layout/rendering, selection/movement, mouse hit testing, rendering, and tests should be split into clearer internal module boundaries before more general GPUI inline/block content is added. This does not imply switching away from source-row virtualization or immediately splitting `md_editor` into more crates.
 - Add stronger runtime or visual tests for visual-row keyboard movement, especially Rendered-mode marker reveal/hide transitions.
 - Add stronger runtime or visual tests for resize reflow, wrapped hit testing, selection across visual rows, mode switching at wrapped positions, and general Rendered image/block behavior.

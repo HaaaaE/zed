@@ -204,6 +204,12 @@ enum DisplayInlineFragment {
     Atom(DisplayInlineAtom),
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+struct DisplayInlineRowInputs {
+    style_ranges: Vec<(Range<usize>, DisplayTextStyle)>,
+    atom_ranges: Vec<DisplayInlineAtom>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct DisplayInlineAtom {
     kind: DisplayInlineAtomKind,
@@ -3930,6 +3936,10 @@ fn display_inline_fragments(
     mode: MarkdownEditorMode,
     row_style: RowDisplayStyle,
 ) -> Vec<DisplayInlineFragment> {
+    if mode != MarkdownEditorMode::Rendered {
+        return source_display_fragments(display_row);
+    }
+
     let source_range = display_row.source_range.clone();
     let source_text = &display_row.source_text;
     if source_text.is_empty() {
@@ -3940,19 +3950,18 @@ fn display_inline_fragments(
         })];
     }
 
-    let style_ranges = markdown_style_ranges_for_row(snapshot, source_range.clone(), mode);
-    let atom_ranges = inline_atom_ranges_for_row(snapshot, display_row, mode, row_style);
+    let row_inputs = display_inline_row_inputs(snapshot, display_row, row_style);
     let hidden_ranges = display_row.projection.hidden_ranges();
     let mut breakpoints = vec![source_range.start, source_range.end];
     for hidden_range in hidden_ranges {
         breakpoints.push(hidden_range.start.max(source_range.start));
         breakpoints.push(hidden_range.end.min(source_range.end));
     }
-    for (style_range, _) in &style_ranges {
+    for (style_range, _) in &row_inputs.style_ranges {
         breakpoints.push(style_range.start);
         breakpoints.push(style_range.end);
     }
-    for atom_range in &atom_ranges {
+    for atom_range in &row_inputs.atom_ranges {
         breakpoints.push(atom_range.source_range.start);
         breakpoints.push(atom_range.source_range.end);
     }
@@ -3966,7 +3975,8 @@ fn display_inline_fragments(
             continue;
         }
 
-        if let Some(atom) = atom_ranges
+        if let Some(atom) = row_inputs
+            .atom_ranges
             .iter()
             .find(|atom| range_contains(&atom.source_range, &interval))
         {
@@ -3995,7 +4005,7 @@ fn display_inline_fragments(
             continue;
         }
 
-        let style = combined_style_for_range(&style_ranges, &interval);
+        let style = combined_style_for_range(&row_inputs.style_ranges, &interval);
         let display_range = display_row.source_to_display(interval.start)
             ..display_row.source_to_display(interval.end);
 
@@ -4051,49 +4061,66 @@ fn text_segments_for_fragments(fragments: &[DisplayInlineFragment]) -> Vec<Style
     segments
 }
 
-fn inline_atom_ranges_for_row(
+fn display_inline_row_inputs(
     snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
-    mode: MarkdownEditorMode,
     row_style: RowDisplayStyle,
-) -> Vec<DisplayInlineAtom> {
-    if mode != MarkdownEditorMode::Rendered {
-        return Vec::new();
-    }
+) -> DisplayInlineRowInputs {
+    let row_source_range = &display_row.source_range;
+    let mut inputs = DisplayInlineRowInputs::default();
 
-    let row_source_range = display_row.source_range.clone();
+    collect_block_style_ranges_for_row(
+        snapshot,
+        row_source_range.clone(),
+        &mut inputs.style_ranges,
+    );
+
     let hidden_ranges = display_row.projection.hidden_ranges();
-    snapshot
+    for span in snapshot
         .syntax_tree()
         .inline_spans_in_source_range(row_source_range.clone())
-        .filter_map(|span| {
-            if !range_contains(&row_source_range, &span.source_range)
-                || !span.marker_ranges.iter().any(|marker_range| {
-                    hidden_ranges
-                        .iter()
-                        .any(|hidden_range| ranges_overlap(marker_range, hidden_range))
-                })
-            {
-                return None;
-            }
+    {
+        let style = inline_style(span.kind);
+        for content_range in &span.content_ranges {
+            push_style_range(
+                &mut inputs.style_ranges,
+                row_source_range.clone(),
+                content_range.clone(),
+                style.clone(),
+            );
+        }
 
-            match span.kind {
-                MarkdownInlineKind::InlineMath => {
-                    inline_math_atom_for_span(display_row, span, row_style)
-                }
-                MarkdownInlineKind::Image
-                    if !rendered_remote_image_span_is_block_in_row(
-                        span,
-                        &display_row.source_text,
-                        &display_row.source_range,
-                    ) =>
-                {
-                    inline_image_atom_for_span(display_row, span, row_style)
-                }
-                _ => None,
+        if !range_contains(row_source_range, &span.source_range)
+            || !span.marker_ranges.iter().any(|marker_range| {
+                hidden_ranges
+                    .iter()
+                    .any(|hidden_range| ranges_overlap(marker_range, hidden_range))
+            })
+        {
+            continue;
+        }
+
+        let atom = match span.kind {
+            MarkdownInlineKind::InlineMath => {
+                inline_math_atom_for_span(display_row, span, row_style)
             }
-        })
-        .collect()
+            MarkdownInlineKind::Image
+                if !rendered_remote_image_span_is_block_in_row(
+                    span,
+                    &display_row.source_text,
+                    &display_row.source_range,
+                ) =>
+            {
+                inline_image_atom_for_span(display_row, span, row_style)
+            }
+            _ => None,
+        };
+        if let Some(atom) = atom {
+            inputs.atom_ranges.push(atom);
+        }
+    }
+
+    inputs
 }
 
 fn inline_math_atom_for_span(
@@ -4144,16 +4171,11 @@ fn inline_image_atom_for_span(
     })
 }
 
-fn markdown_style_ranges_for_row(
+fn collect_block_style_ranges_for_row(
     snapshot: &BufferSnapshot,
     row_source_range: Range<usize>,
-    mode: MarkdownEditorMode,
-) -> Vec<(Range<usize>, DisplayTextStyle)> {
-    if mode == MarkdownEditorMode::Source {
-        return Vec::new();
-    }
-
-    let mut style_ranges = Vec::new();
+    style_ranges: &mut Vec<(Range<usize>, DisplayTextStyle)>,
+) {
     for block in snapshot
         .syntax_tree()
         .blocks_in_source_range(row_source_range.clone())
@@ -4161,7 +4183,7 @@ fn markdown_style_ranges_for_row(
         match block.kind {
             MarkdownBlockKind::AtxHeading { level } => {
                 push_style_range(
-                    &mut style_ranges,
+                    style_ranges,
                     row_source_range.clone(),
                     block.content_range.clone(),
                     heading_style(level),
@@ -4169,7 +4191,7 @@ fn markdown_style_ranges_for_row(
             }
             MarkdownBlockKind::FencedCodeBlock => {
                 push_style_range(
-                    &mut style_ranges,
+                    style_ranges,
                     row_source_range.clone(),
                     block.content_range.clone(),
                     fenced_code_style(),
@@ -4177,7 +4199,7 @@ fn markdown_style_ranges_for_row(
             }
             MarkdownBlockKind::PipeTable => {
                 push_style_range(
-                    &mut style_ranges,
+                    style_ranges,
                     row_source_range.clone(),
                     block.content_range.clone(),
                     pipe_table_style(),
@@ -4186,23 +4208,6 @@ fn markdown_style_ranges_for_row(
             MarkdownBlockKind::Blank | MarkdownBlockKind::Paragraph => {}
         }
     }
-
-    for span in snapshot
-        .syntax_tree()
-        .inline_spans_in_source_range(row_source_range.clone())
-    {
-        let style = inline_style(span.kind);
-        for content_range in &span.content_ranges {
-            push_style_range(
-                &mut style_ranges,
-                row_source_range.clone(),
-                content_range.clone(),
-                style.clone(),
-            );
-        }
-    }
-
-    style_ranges
 }
 
 fn push_style_range(
@@ -5045,6 +5050,37 @@ mod tests {
             segments[3].style.color,
             Some(md_theme::editor_palette().inline_code_text)
         );
+    }
+
+    #[test]
+    fn rendered_inline_row_inputs_collect_styles_and_atoms_together() {
+        let source = "Before **bold** and $x$ after\n";
+        let mut buffer = Buffer::local(source);
+        let snapshot = buffer.snapshot();
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&collapsed_selection(Point::new(0, source.len() as u32))),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        let row_style =
+            row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
+        let inputs = display_inline_row_inputs(&snapshot, &row, row_style);
+        let bold_start = source.find("bold").expect("expected bold content");
+        let bold_range = bold_start..bold_start + "bold".len();
+        let math_start = source.find("$x$").expect("expected inline math");
+        let math_source_range = math_start..math_start + "$x$".len();
+
+        assert!(inputs.style_ranges.iter().any(|(range, style)| {
+            range == &bold_range && style.font_weight == Some(FontWeight::BOLD)
+        }));
+        assert!(inputs.atom_ranges.iter().any(|atom| {
+            atom.kind == DisplayInlineAtomKind::InlineMath
+                && atom.source_range == math_source_range
+                && atom.fallback_text == "x"
+        }));
     }
 
     #[test]
