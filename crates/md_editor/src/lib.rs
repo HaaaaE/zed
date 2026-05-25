@@ -921,15 +921,29 @@ impl MarkdownEditor {
 
     pub fn move_left(&mut self, _: &MoveLeft, _: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
-        self.selection =
-            move_selection_left_in_mode(&self.buffer.snapshot(), &self.selection, self.mode);
+        self.selection = match self.mode {
+            MarkdownEditorMode::Source => move_selection_left_in_text_snapshot(
+                self.buffer.as_text_snapshot(),
+                &self.selection,
+            ),
+            MarkdownEditorMode::Rendered => {
+                move_selection_left_in_mode(&self.buffer.snapshot(), &self.selection, self.mode)
+            }
+        };
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn move_right(&mut self, _: &MoveRight, _: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
-        self.selection =
-            move_selection_right_in_mode(&self.buffer.snapshot(), &self.selection, self.mode);
+        self.selection = match self.mode {
+            MarkdownEditorMode::Source => move_selection_right_in_text_snapshot(
+                self.buffer.as_text_snapshot(),
+                &self.selection,
+            ),
+            MarkdownEditorMode::Rendered => {
+                move_selection_right_in_mode(&self.buffer.snapshot(), &self.selection, self.mode)
+            }
+        };
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
@@ -971,13 +985,27 @@ impl MarkdownEditor {
 
     pub fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
-        self.selection = select_left_in_mode(&self.buffer.snapshot(), &self.selection, self.mode);
+        self.selection = match self.mode {
+            MarkdownEditorMode::Source => {
+                select_left_in_text_snapshot(self.buffer.as_text_snapshot(), &self.selection)
+            }
+            MarkdownEditorMode::Rendered => {
+                select_left_in_mode(&self.buffer.snapshot(), &self.selection, self.mode)
+            }
+        };
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
     pub fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
-        self.selection = select_right_in_mode(&self.buffer.snapshot(), &self.selection, self.mode);
+        self.selection = match self.mode {
+            MarkdownEditorMode::Source => {
+                select_right_in_text_snapshot(self.buffer.as_text_snapshot(), &self.selection)
+            }
+            MarkdownEditorMode::Rendered => {
+                select_right_in_mode(&self.buffer.snapshot(), &self.selection, self.mode)
+            }
+        };
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
@@ -2215,8 +2243,15 @@ fn clip_cursor_in_text_snapshot(snapshot: &TextBufferSnapshot, cursor: Point) ->
 }
 
 pub fn clip_selection(snapshot: &BufferSnapshot, selection: &Selection<Point>) -> Selection<Point> {
-    let head = clip_cursor(snapshot, selection.head());
-    let tail = clip_cursor(snapshot, selection.tail());
+    clip_selection_in_text_snapshot(snapshot.as_text_snapshot(), selection)
+}
+
+fn clip_selection_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+) -> Selection<Point> {
+    let head = clip_cursor_in_text_snapshot(snapshot, selection.head());
+    let tail = clip_cursor_in_text_snapshot(snapshot, selection.tail());
     let mut clipped = selection.clone();
     clipped.set_head_tail(head, tail, selection.goal);
     clipped.id = selection.id;
@@ -2357,28 +2392,34 @@ fn source_rows_for_active_range_change(
 }
 
 pub fn move_left(snapshot: &BufferSnapshot, cursor: Point) -> Point {
-    let text_snapshot = snapshot.as_text_snapshot();
-    let offset = text_snapshot.point_to_offset(clip_cursor(snapshot, cursor));
+    move_left_in_text_snapshot(snapshot.as_text_snapshot(), cursor)
+}
+
+fn move_left_in_text_snapshot(snapshot: &TextBufferSnapshot, cursor: Point) -> Point {
+    let offset = snapshot.point_to_offset(clip_cursor_in_text_snapshot(snapshot, cursor));
     if offset == 0 {
         return Point::zero();
     }
 
-    text_snapshot.offset_to_point(
-        text_snapshot
+    snapshot.offset_to_point(
+        snapshot
             .as_rope()
             .floor_char_boundary(offset.saturating_sub(1)),
     )
 }
 
 pub fn move_right(snapshot: &BufferSnapshot, cursor: Point) -> Point {
-    let text_snapshot = snapshot.as_text_snapshot();
-    let offset = text_snapshot.point_to_offset(clip_cursor(snapshot, cursor));
-    if offset >= text_snapshot.len() {
-        return text_snapshot.max_point();
+    move_right_in_text_snapshot(snapshot.as_text_snapshot(), cursor)
+}
+
+fn move_right_in_text_snapshot(snapshot: &TextBufferSnapshot, cursor: Point) -> Point {
+    let offset = snapshot.point_to_offset(clip_cursor_in_text_snapshot(snapshot, cursor));
+    if offset >= snapshot.len() {
+        return snapshot.max_point();
     }
 
-    text_snapshot.offset_to_point(
-        text_snapshot
+    snapshot.offset_to_point(
+        snapshot
             .as_rope()
             .ceil_char_boundary(offset.saturating_add(1)),
     )
@@ -2410,9 +2451,16 @@ pub fn move_selection_left(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Selection<Point> {
-    let selection = clip_selection(snapshot, selection);
+    move_selection_left_in_text_snapshot(snapshot.as_text_snapshot(), selection)
+}
+
+fn move_selection_left_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+) -> Selection<Point> {
+    let selection = clip_selection_in_text_snapshot(snapshot, selection);
     if selection.is_empty() {
-        collapsed_selection(move_left(snapshot, selection.head()))
+        collapsed_selection(move_left_in_text_snapshot(snapshot, selection.head()))
     } else {
         collapsed_selection(selection.start)
     }
@@ -2422,9 +2470,16 @@ pub fn move_selection_right(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Selection<Point> {
-    let selection = clip_selection(snapshot, selection);
+    move_selection_right_in_text_snapshot(snapshot.as_text_snapshot(), selection)
+}
+
+fn move_selection_right_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+) -> Selection<Point> {
+    let selection = clip_selection_in_text_snapshot(snapshot, selection);
     if selection.is_empty() {
-        collapsed_selection(move_right(snapshot, selection.head()))
+        collapsed_selection(move_right_in_text_snapshot(snapshot, selection.head()))
     } else {
         collapsed_selection(selection.end)
     }
@@ -2435,6 +2490,10 @@ fn move_selection_left_in_mode(
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
 ) -> Selection<Point> {
+    if mode == MarkdownEditorMode::Source {
+        return move_selection_left_in_text_snapshot(snapshot.as_text_snapshot(), selection);
+    }
+
     let selection = clip_selection(snapshot, selection);
     if selection.is_empty() {
         collapsed_selection(move_horizontal_in_mode(
@@ -2453,6 +2512,10 @@ fn move_selection_right_in_mode(
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
 ) -> Selection<Point> {
+    if mode == MarkdownEditorMode::Source {
+        return move_selection_right_in_text_snapshot(snapshot.as_text_snapshot(), selection);
+    }
+
     let selection = clip_selection(snapshot, selection);
     if selection.is_empty() {
         collapsed_selection(move_horizontal_in_mode(
@@ -2492,11 +2555,33 @@ pub fn move_selection_to_end_of_line(
 }
 
 pub fn select_left(snapshot: &BufferSnapshot, selection: &Selection<Point>) -> Selection<Point> {
-    select_to_point(snapshot, selection, move_left(snapshot, selection.head()))
+    select_left_in_text_snapshot(snapshot.as_text_snapshot(), selection)
 }
 
 pub fn select_right(snapshot: &BufferSnapshot, selection: &Selection<Point>) -> Selection<Point> {
-    select_to_point(snapshot, selection, move_right(snapshot, selection.head()))
+    select_right_in_text_snapshot(snapshot.as_text_snapshot(), selection)
+}
+
+fn select_left_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+) -> Selection<Point> {
+    select_to_point_in_text_snapshot(
+        snapshot,
+        selection,
+        move_left_in_text_snapshot(snapshot, selection.head()),
+    )
+}
+
+fn select_right_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+) -> Selection<Point> {
+    select_to_point_in_text_snapshot(
+        snapshot,
+        selection,
+        move_right_in_text_snapshot(snapshot, selection.head()),
+    )
 }
 
 fn select_left_in_mode(
@@ -2504,6 +2589,10 @@ fn select_left_in_mode(
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
 ) -> Selection<Point> {
+    if mode == MarkdownEditorMode::Source {
+        return select_left_in_text_snapshot(snapshot.as_text_snapshot(), selection);
+    }
+
     select_to_point(
         snapshot,
         selection,
@@ -2516,6 +2605,10 @@ fn select_right_in_mode(
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
 ) -> Selection<Point> {
+    if mode == MarkdownEditorMode::Source {
+        return select_right_in_text_snapshot(snapshot.as_text_snapshot(), selection);
+    }
+
     select_to_point(
         snapshot,
         selection,
@@ -2571,7 +2664,24 @@ fn select_to_point_with_goal(
     head: Point,
     goal: SelectionGoal,
 ) -> Selection<Point> {
-    let selection = clip_selection(snapshot, selection);
+    select_to_point_in_text_snapshot_with_goal(snapshot.as_text_snapshot(), selection, head, goal)
+}
+
+fn select_to_point_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+    head: Point,
+) -> Selection<Point> {
+    select_to_point_in_text_snapshot_with_goal(snapshot, selection, head, SelectionGoal::None)
+}
+
+fn select_to_point_in_text_snapshot_with_goal(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+    head: Point,
+    goal: SelectionGoal,
+) -> Selection<Point> {
+    let selection = clip_selection_in_text_snapshot(snapshot, selection);
     let mut updated = selection.clone();
     updated.set_head(head, goal);
     updated
