@@ -5516,6 +5516,77 @@ mod tests {
     }
 
     #[gpui::test]
+    fn source_mouse_events_hit_and_select_wrapped_visual_rows(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.simulate_resize(gpui::size(px(90.), px(200.)));
+        let editor = cx.new(|cx| MarkdownEditor::for_text("abcdefghijklmnopqrst\n", cx));
+
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(90.), px(200.)),
+            |_, _| editor.clone().into_any_element(),
+        );
+
+        let line_height = default_row_metrics().line_height;
+        let second_visual_row = gpui::point(gutter_width() + px(2.), line_height * 1.5);
+        cx.simulate_mouse_move(second_visual_row, None, gpui::Modifiers::none());
+        cx.simulate_mouse_down(
+            second_visual_row,
+            MouseButton::Left,
+            gpui::Modifiers::none(),
+        );
+        cx.simulate_mouse_up(
+            second_visual_row,
+            MouseButton::Left,
+            gpui::Modifiers::none(),
+        );
+
+        editor.read_with(cx, |editor, _| {
+            assert!(editor.selection.is_empty());
+            assert_eq!(editor.cursor().row, 0);
+            assert!(editor.cursor().column > 0);
+            assert!(editor.cursor().column < editor.buffer.as_text_snapshot().line_len(0));
+            assert!(matches!(
+                editor.selection.goal,
+                SelectionGoal::WrappedHorizontalPosition((1, _))
+            ));
+        });
+
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(90.), px(200.)),
+            |_, _| editor.clone().into_any_element(),
+        );
+
+        let third_visual_row = gpui::point(gutter_width() + px(30.), line_height * 2.5);
+        cx.simulate_mouse_down(
+            third_visual_row,
+            MouseButton::Left,
+            gpui::Modifiers::shift(),
+        );
+        cx.simulate_mouse_up(
+            third_visual_row,
+            MouseButton::Left,
+            gpui::Modifiers::shift(),
+        );
+
+        editor.read_with(cx, |editor, _| {
+            assert!(
+                !editor.selection.is_empty(),
+                "expected extended selection, got {:?}",
+                editor.selection
+            );
+            assert_eq!(editor.selection.start.row, 0);
+            assert_eq!(editor.selection.end.row, 0);
+            assert!(editor.selection.end.column > editor.selection.start.column);
+            assert!(matches!(
+                editor.selection.goal,
+                SelectionGoal::WrappedHorizontalPosition((2, _))
+            ));
+        });
+    }
+
+    #[gpui::test]
     fn rendered_mode_actions_update_marker_visibility(cx: &mut gpui::TestAppContext) {
         let cx = cx.add_empty_window();
         cx.simulate_resize(gpui::size(px(400.), px(200.)));

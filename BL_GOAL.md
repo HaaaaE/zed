@@ -53,12 +53,12 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 
 - Inline atom layout, atom hit geometry, block rendering, and block layout construction have been moved onto their respective atom/block interfaces to reduce ad hoc branching in the row pipeline.
 - `md_editor` still needs internal module boundary cleanup; `lib.rs` now carries projection, row layout/cache, inline atom, block layout/rendering, selection/movement, hit-testing, rendering, and extensive tests.
-- Coverage now includes focused unit and GPUI-path tests for wrapped movement, action-level Source wrapped keyboard movement, Rendered marker reveal/hide transitions, resize reflow, mode switching at wrapped positions, visual-row bounds, rendered inline math, inline images, empty-alt inline images, remote image blocks, cache dependency keys, range-local span queries, source-row fast paths, snapshot sharing, default list size hints, and the rendered image block crash path.
+- Coverage now includes focused unit and GPUI-path tests for wrapped movement, action-level Source wrapped keyboard movement, Source wrapped mouse hit testing and shift-selection across visual rows, Rendered marker reveal/hide transitions, resize reflow, mode switching at wrapped positions, visual-row bounds, rendered inline math, inline images, empty-alt inline images, remote image blocks, cache dependency keys, range-local span queries, source-row fast paths, snapshot sharing, default list size hints, and the rendered image block crash path.
 
 ## Verification
 
 - Formatting and checks have passed across the touched crates, including `cargo fmt` for the Markdown editor path and `cargo check -p md_editor` / `cargo check -p markdown_editor`.
-- Full unit suites have passed for `markdown_wysiwyg` (15/15), `md_buffer` (16/16), and `md_editor` (114/114), with focused coverage for wrapped movement, inline atoms/images, source edit cache invalidation, default list size hints, and Rendered image block drawing.
+- Full unit suites have passed for `markdown_wysiwyg`, `md_buffer`, and `md_editor` (currently 115 tests), with focused coverage for wrapped movement, inline atoms/images, source edit cache invalidation, default list size hints, and Rendered image block drawing.
 - `git diff --check` passed with only LF/CRLF warnings for touched files.
 - `cargo run -p markdown_editor --bin markdown-editor -- tmp-markdown-editor-test.md` was started twice for 12-second smoke windows after the Rendered image block fix; neither run exited with the previous panic, though both were stopped before completion because the short window was still compiling.
 
@@ -72,4 +72,4 @@ The bullets below are categories, not priority order or execution order.
 - Implement general block-level GPUI elements as measured list items or subitems. Remote image blocks now update from loaded image dimensions, but arbitrary GPUI block measurement is not solved.
 - Continue code architecture cleanup within the existing source-row virtualization constraint. `crates/md_editor/src/lib.rs` is now large enough that display-row projection, row layout/cache, inline atoms, block layout/rendering, selection/movement, mouse hit testing, rendering, and tests should be split into clearer internal module boundaries before more general GPUI inline/block content is added. This does not imply switching away from source-row virtualization or immediately splitting `md_editor` into more crates.
 - Add stronger runtime or visual tests for visual-row keyboard movement, especially Rendered-mode marker reveal/hide transitions.
-- Add stronger runtime or visual tests for resize reflow, wrapped hit testing, selection across visual rows, mode switching at wrapped positions, and general Rendered image/block behavior.
+- Add stronger runtime or visual tests for general Rendered image/block behavior and any remaining wrapped-layout interaction gaps found during profiling or manual use.
