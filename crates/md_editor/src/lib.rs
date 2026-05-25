@@ -124,6 +124,8 @@ impl MarkdownEditorMode {
 pub struct DisplayRow {
     pub row: u32,
     pub text: String,
+    source_text: String,
+    source_range: Range<usize>,
     projection: MarkdownProjectionMap,
     insertions: Vec<DisplayInsertion>,
 }
@@ -965,7 +967,7 @@ impl MarkdownEditor {
         )
         .into_iter()
         .next()?;
-        let row_style = row_display_style(snapshot, display_row.row, self.mode);
+        let row_style = row_display_style_for_display_row(snapshot, &display_row, self.mode);
         let wrap_width = text_wrap_width(window);
         let layout = self.cached_row_layout(
             snapshot,
@@ -1033,7 +1035,7 @@ impl MarkdownEditor {
         )
         .into_iter()
         .next()?;
-        let row_style = row_display_style(snapshot, display_row.row, self.mode);
+        let row_style = row_display_style_for_display_row(snapshot, &display_row, self.mode);
         let wrap_width = text_wrap_width(window);
         let current_layout = self.cached_row_layout(
             snapshot,
@@ -1112,7 +1114,8 @@ impl MarkdownEditor {
         )
         .into_iter()
         .next()?;
-        let target_row_style = row_display_style(snapshot, target_display_row.row, self.mode);
+        let target_row_style =
+            row_display_style_for_display_row(snapshot, &target_display_row, self.mode);
         let target_layout = self.cached_row_layout(
             snapshot,
             &target_display_row,
@@ -1569,7 +1572,7 @@ impl MarkdownEditor {
 
         let snapshot = self.buffer.snapshot();
         let wrap_width = text_wrap_width(window);
-        let row_style = row_display_style(&snapshot, display_row.row, self.mode);
+        let row_style = row_display_style_for_display_row(&snapshot, display_row, self.mode);
         let selection = self.selection.clone();
         let (point, goal) = match self.cached_row_layout(
             &snapshot,
@@ -1619,7 +1622,7 @@ impl MarkdownEditor {
 
         let snapshot = self.buffer.snapshot();
         let wrap_width = text_wrap_width(window);
-        let row_style = row_display_style(&snapshot, display_row.row, self.mode);
+        let row_style = row_display_style_for_display_row(&snapshot, display_row, self.mode);
         let selection = self.selection.clone();
         let (point, goal) = match self.cached_row_layout(
             &snapshot,
@@ -1766,7 +1769,8 @@ impl Render for MarkdownEditor {
                         };
 
                         let is_cursor_row = display_row.row == cursor.row;
-                        let row_style = row_display_style(&snapshot, display_row.row, mode);
+                        let row_style =
+                            row_display_style_for_display_row(&snapshot, &display_row, mode);
                         let row_layout = this.cached_row_layout(
                             &snapshot,
                             &display_row,
@@ -1862,8 +1866,7 @@ fn display_rows_in_mode(
     (start..end)
         .map(|row| {
             let row = row as u32;
-            let source_text = row_text(snapshot, row);
-            let source_range = row_source_range(snapshot, row);
+            let (source_text, source_range) = row_text_and_source_range(snapshot, row);
             let projection = match mode {
                 MarkdownEditorMode::Source => MarkdownProjectionMap::new(
                     snapshot.as_text_snapshot().len(),
@@ -1880,10 +1883,12 @@ fn display_rows_in_mode(
             };
 
             let (text, insertions) =
-                project_display_row_text(snapshot, row, &source_text, &projection, mode);
+                project_display_row_text(snapshot, &source_text, &source_range, &projection, mode);
             DisplayRow {
                 row,
                 text,
+                source_text,
+                source_range,
                 projection,
                 insertions,
             }
@@ -1892,31 +1897,32 @@ fn display_rows_in_mode(
 }
 
 pub fn row_text(snapshot: &BufferSnapshot, row: u32) -> String {
-    let text_snapshot = snapshot.as_text_snapshot();
-    if row >= text_snapshot.row_count() {
-        return String::new();
-    }
-
-    let start = text_snapshot.point_to_offset(Point::new(row, 0));
-    let end = start + text_snapshot.line_len(row) as usize;
-    text_snapshot.text_for_range(start..end).collect()
+    row_text_and_source_range(snapshot, row).0
 }
 
 fn row_source_range(snapshot: &BufferSnapshot, row: u32) -> Range<usize> {
+    row_text_and_source_range(snapshot, row).1
+}
+
+fn row_text_and_source_range(snapshot: &BufferSnapshot, row: u32) -> (String, Range<usize>) {
     let text_snapshot = snapshot.as_text_snapshot();
     if row >= text_snapshot.row_count() {
-        return text_snapshot.len()..text_snapshot.len();
+        let end = text_snapshot.len();
+        return (String::new(), end..end);
     }
 
     let start = text_snapshot.point_to_offset(Point::new(row, 0));
     let end = start + text_snapshot.line_len(row) as usize;
-    start..end
+    (
+        text_snapshot.text_for_range(start..end).collect(),
+        start..end,
+    )
 }
 
 fn project_display_row_text(
     snapshot: &BufferSnapshot,
-    row: u32,
     source_text: &str,
+    row_source_range: &Range<usize>,
     projection: &MarkdownProjectionMap,
     mode: MarkdownEditorMode,
 ) -> (String, Vec<DisplayInsertion>) {
@@ -1925,14 +1931,13 @@ fn project_display_row_text(
         return (display_text, Vec::new());
     }
 
-    let row_source_range = row_source_range(snapshot, row);
     let mut insertions = Vec::new();
     for span in snapshot
         .syntax_tree()
         .inline_spans_in_source_range(row_source_range.clone())
     {
         if span.kind != MarkdownInlineKind::Image
-            || rendered_remote_image_span_is_block(snapshot, span)
+            || rendered_remote_image_span_is_block_in_row(span, source_text, row_source_range)
             || !range_contains(&row_source_range, &span.source_range)
             || !span.marker_ranges.iter().any(|marker_range| {
                 projection
@@ -3764,19 +3769,14 @@ fn rendered_image_block_for_row(
         return None;
     }
 
-    let row_source_range = row_source_range(snapshot, display_row.row);
-    let source_text = row_text(snapshot, display_row.row);
+    let row_source_range = &display_row.source_range;
+    let source_text = &display_row.source_text;
     let mut matching_spans = snapshot
         .syntax_tree()
         .inline_spans_in_source_range(row_source_range.clone())
         .filter(|span| {
             span.kind == MarkdownInlineKind::Image
-                && span
-                    .url
-                    .as_ref()
-                    .is_some_and(|url| is_remote_image_url(url))
-                && span.source_range.start >= row_source_range.start
-                && span.source_range.end <= row_source_range.end
+                && rendered_remote_image_span_is_block_in_row(span, source_text, row_source_range)
         });
 
     let span = matching_spans.next()?;
@@ -3784,13 +3784,6 @@ fn rendered_image_block_for_row(
         return None;
     }
     if rendered_element_source_range_is_active(snapshot, selection, &span.source_range) {
-        return None;
-    }
-
-    let local_start = span.source_range.start - row_source_range.start;
-    let local_end = span.source_range.end - row_source_range.start;
-    if !source_text[..local_start].trim().is_empty() || !source_text[local_end..].trim().is_empty()
-    {
         return None;
     }
 
@@ -3835,8 +3828,8 @@ fn display_inline_fragments(
     mode: MarkdownEditorMode,
     row_style: RowDisplayStyle,
 ) -> Vec<DisplayInlineFragment> {
-    let source_range = display_row.projection.visible_source_range();
-    let source_text = row_text(snapshot, display_row.row);
+    let source_range = display_row.source_range.clone();
+    let source_text = &display_row.source_text;
     if source_text.is_empty() {
         return vec![DisplayInlineFragment::Text(StyledDisplaySegment {
             display_range: 0..0,
@@ -3892,7 +3885,10 @@ fn display_inline_fragments(
 
         let local_start = interval.start - source_range.start;
         let local_end = interval.end - source_range.start;
-        let text = source_text[local_start..local_end].to_string();
+        let Some(text) = source_text.get(local_start..local_end) else {
+            continue;
+        };
+        let text = text.to_string();
         if text.is_empty() {
             continue;
         }
@@ -3963,7 +3959,7 @@ fn inline_atom_ranges_for_row(
         return Vec::new();
     }
 
-    let row_source_range = display_row.projection.visible_source_range();
+    let row_source_range = display_row.source_range.clone();
     let hidden_ranges = display_row.projection.hidden_ranges();
     snapshot
         .syntax_tree()
@@ -3984,7 +3980,11 @@ fn inline_atom_ranges_for_row(
                     inline_math_atom_for_span(display_row, span, row_style)
                 }
                 MarkdownInlineKind::Image
-                    if !rendered_remote_image_span_is_block(snapshot, span) =>
+                    if !rendered_remote_image_span_is_block_in_row(
+                        span,
+                        &display_row.source_text,
+                        &display_row.source_range,
+                    ) =>
                 {
                     inline_image_atom_for_span(display_row, span, row_style)
                 }
@@ -4159,13 +4159,13 @@ fn heading_style(level: u8) -> DisplayTextStyle {
     }
 }
 
-fn row_display_style(
+fn row_display_style_for_display_row(
     snapshot: &BufferSnapshot,
-    display_row: u32,
+    display_row: &DisplayRow,
     mode: MarkdownEditorMode,
 ) -> RowDisplayStyle {
     if mode == MarkdownEditorMode::Rendered {
-        if let Some(level) = heading_level_for_row(snapshot, display_row) {
+        if let Some(level) = heading_level_for_display_row(snapshot, display_row) {
             return heading_row_metrics(level).into();
         }
     }
@@ -4173,9 +4173,22 @@ fn row_display_style(
     default_row_metrics().into()
 }
 
-fn heading_level_for_row(snapshot: &BufferSnapshot, row: u32) -> Option<u8> {
-    let source_range = row_source_range(snapshot, row);
-    let row = row as usize;
+fn heading_level_for_display_row(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+) -> Option<u8> {
+    heading_level_for_source_range(
+        snapshot,
+        display_row.source_range.clone(),
+        display_row.row as usize,
+    )
+}
+
+fn heading_level_for_source_range(
+    snapshot: &BufferSnapshot,
+    source_range: Range<usize>,
+    row: usize,
+) -> Option<u8> {
     snapshot
         .syntax_tree()
         .blocks_in_source_range(source_range)
@@ -4425,24 +4438,30 @@ fn rendered_remote_image_span_is_block(
     snapshot: &BufferSnapshot,
     span: &markdown_wysiwyg::MarkdownInlineSpan,
 ) -> bool {
-    if !span
-        .url
-        .as_ref()
-        .is_some_and(|url| is_remote_image_url(url))
-    {
-        return false;
-    }
-
     let row = snapshot
         .as_text_snapshot()
         .offset_to_point(span.source_range.start)
         .row;
     let row_source_range = row_source_range(snapshot, row);
-    if !range_contains(&row_source_range, &span.source_range) {
+    let source_text = row_text(snapshot, row);
+
+    rendered_remote_image_span_is_block_in_row(span, &source_text, &row_source_range)
+}
+
+fn rendered_remote_image_span_is_block_in_row(
+    span: &markdown_wysiwyg::MarkdownInlineSpan,
+    source_text: &str,
+    row_source_range: &Range<usize>,
+) -> bool {
+    if !span
+        .url
+        .as_ref()
+        .is_some_and(|url| is_remote_image_url(url))
+        || !range_contains(row_source_range, &span.source_range)
+    {
         return false;
     }
 
-    let source_text = row_text(snapshot, row);
     let local_start = span.source_range.start - row_source_range.start;
     let local_end = span.source_range.end - row_source_range.start;
     let Some(before) = source_text.get(..local_start) else {
@@ -4594,6 +4613,18 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![(1, "two".to_string())]
         );
+    }
+
+    #[test]
+    fn display_rows_cache_source_text_and_range() {
+        let mut buffer = Buffer::local("first\nsecond\nthird");
+        let snapshot = buffer.snapshot();
+
+        let row = display_rows(&snapshot, 1..2).remove(0);
+
+        assert_eq!(row.text, "second");
+        assert_eq!(row.source_text, "second");
+        assert_eq!(row.source_range, "first\n".len().."first\nsecond".len());
     }
 
     #[test]
@@ -4755,7 +4786,8 @@ mod tests {
             Some(0.."Before x + y after".len())
         );
 
-        let row_style = row_display_style(&snapshot, rows[0].row, MarkdownEditorMode::Rendered);
+        let row_style =
+            row_display_style_for_display_row(&snapshot, &rows[0], MarkdownEditorMode::Rendered);
         let fragments =
             display_inline_fragments(&snapshot, &rows[0], MarkdownEditorMode::Rendered, row_style);
         let atom = fragments.iter().find_map(|fragment| match fragment {
@@ -4804,7 +4836,8 @@ mod tests {
         )
         .remove(0);
 
-        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Rendered);
+        let row_style =
+            row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
         let fragments =
             display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
         let segments = text_segments_for_fragments(&fragments);
@@ -4830,7 +4863,8 @@ mod tests {
         )
         .remove(0);
 
-        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Rendered);
+        let row_style =
+            row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
         let fragments =
             display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
         let segments = text_segments_for_fragments(&fragments);
@@ -4862,7 +4896,8 @@ mod tests {
         )
         .remove(0);
 
-        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Source);
+        let row_style =
+            row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Source);
         let fragments = display_fragments_for_text_layout(
             &snapshot,
             &row,
@@ -4894,7 +4929,8 @@ mod tests {
 
         assert_eq!(row.text, "Before x + y after");
 
-        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Rendered);
+        let row_style =
+            row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
         let fragments =
             display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
         let atom = fragments
@@ -4935,7 +4971,8 @@ mod tests {
 
         assert_eq!(row.text, "Before alt after");
 
-        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Rendered);
+        let row_style =
+            row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
         let fragments =
             display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
         let atom = fragments
@@ -4978,7 +5015,8 @@ mod tests {
 
         assert_eq!(row.text, expected_text);
 
-        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Rendered);
+        let row_style =
+            row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
         let fragments =
             display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
         let atom = fragments
@@ -5022,7 +5060,8 @@ mod tests {
         )
         .remove(0);
 
-        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Rendered);
+        let row_style =
+            row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
         let fragments =
             display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
 
@@ -5043,7 +5082,8 @@ mod tests {
         )
         .remove(0);
 
-        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Rendered);
+        let row_style =
+            row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
         let fragments =
             display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
         let display_start = "Before ".len();
@@ -5497,21 +5537,41 @@ mod tests {
     fn rendered_row_display_style_scales_headings() {
         let mut buffer = Buffer::local("# Title\n## Subtitle\nBody\n");
         let snapshot = buffer.snapshot();
+        let rendered_rows = display_rows_in_mode(
+            &snapshot,
+            0..3,
+            Some(&collapsed_selection(Point::new(2, 0))),
+            MarkdownEditorMode::Rendered,
+        );
+        let source_row =
+            display_rows_in_mode(&snapshot, 0..1, None, MarkdownEditorMode::Source).remove(0);
 
         assert_eq!(
-            row_display_style(&snapshot, 0, MarkdownEditorMode::Rendered),
+            row_display_style_for_display_row(
+                &snapshot,
+                &rendered_rows[0],
+                MarkdownEditorMode::Rendered
+            ),
             md_theme::heading_row_metrics(1).into()
         );
         assert_eq!(
-            row_display_style(&snapshot, 1, MarkdownEditorMode::Rendered),
+            row_display_style_for_display_row(
+                &snapshot,
+                &rendered_rows[1],
+                MarkdownEditorMode::Rendered
+            ),
             md_theme::heading_row_metrics(2).into()
         );
         assert_eq!(
-            row_display_style(&snapshot, 2, MarkdownEditorMode::Rendered),
+            row_display_style_for_display_row(
+                &snapshot,
+                &rendered_rows[2],
+                MarkdownEditorMode::Rendered
+            ),
             md_theme::default_row_metrics().into()
         );
         assert_eq!(
-            row_display_style(&snapshot, 0, MarkdownEditorMode::Source),
+            row_display_style_for_display_row(&snapshot, &source_row, MarkdownEditorMode::Source),
             md_theme::default_row_metrics().into()
         );
     }

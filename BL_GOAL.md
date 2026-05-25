@@ -513,11 +513,19 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Rows with inline atoms and rows wider than the wrap width keep the existing wrapping path, so atom-aware geometry and wrapped long-line behavior are unchanged.
 - Added focused coverage for the fit/no-fit boundary of the new fast path.
 
+### 2026-05-25 - Display rows cache source text and range
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- `DisplayRow` now carries the original source row text and source byte range computed during row projection.
+- Row layout paths reuse that cached source text/range for heading style lookup, rendered inline fragment construction, inline atom collection, empty-alt image placeholder insertion, and remote image block detection instead of re-reading the same row from the buffer.
+- Remote image block checks now share a row-local helper so code that already has the source row can avoid another row lookup while preserving the existing general helper for cursor/selection paths.
+- Added coverage that display rows retain their source text and source range.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 15/15 tests.
-- `cargo test -p md_editor` passed: 100/100 tests.
+- `cargo test -p md_editor` passed: 101/101 tests.
 - `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo test -p md_editor rendered_mode_draws_inline_image_atom` passed and covers drawing a Rendered-mode inline image atom through the GPUI path.
 - `cargo test -p md_editor rendered_mode_draws_empty_alt_inline_image_atom` passed and covers drawing a Rendered-mode empty-alt inline image atom through the GPUI path.
