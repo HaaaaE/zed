@@ -2100,6 +2100,36 @@ impl MarkdownEditor {
         window.focus(&self.focus_handle.clone(), cx);
         self.is_selecting_with_mouse = true;
 
+        if self.mode == MarkdownEditorMode::Source {
+            let snapshot = self.buffer.text_snapshot();
+            let wrap_width = text_wrap_width(window);
+            let row_style = default_row_metrics().into();
+            let text_layout = self.cached_source_text_layout(
+                display_row,
+                row_style,
+                wrap_width,
+                false,
+                window,
+                cx,
+            );
+            let (point, goal) = mouse_target_for_text_layout(
+                &snapshot,
+                display_row,
+                visual_row_index,
+                visual_row,
+                event.position.x,
+                &text_layout,
+            );
+            let previous_selection = self.selection.clone();
+            self.selection = if event.modifiers.shift {
+                select_to_point_in_text_snapshot_with_goal(&snapshot, &self.selection, point, goal)
+            } else {
+                collapsed_selection_with_goal(point, goal)
+            };
+            self.notify_after_selection_change(&previous_selection, cx);
+            return;
+        }
+
         let snapshot = self.buffer.snapshot();
         let wrap_width = text_wrap_width(window);
         let row_style = row_display_style_for_display_row(&snapshot, display_row, self.mode);
@@ -2116,7 +2146,7 @@ impl MarkdownEditor {
             cx,
         ) {
             DisplayRowLayout::Text(text_layout) => mouse_target_for_text_layout(
-                &snapshot,
+                snapshot.as_text_snapshot(),
                 display_row,
                 visual_row_index,
                 visual_row,
@@ -2150,6 +2180,33 @@ impl MarkdownEditor {
             return;
         }
 
+        if self.mode == MarkdownEditorMode::Source {
+            let snapshot = self.buffer.text_snapshot();
+            let wrap_width = text_wrap_width(window);
+            let row_style = default_row_metrics().into();
+            let text_layout = self.cached_source_text_layout(
+                display_row,
+                row_style,
+                wrap_width,
+                false,
+                window,
+                cx,
+            );
+            let (point, goal) = mouse_target_for_text_layout(
+                &snapshot,
+                display_row,
+                visual_row_index,
+                visual_row,
+                event.position.x,
+                &text_layout,
+            );
+            let previous_selection = self.selection.clone();
+            self.selection =
+                select_to_point_in_text_snapshot_with_goal(&snapshot, &self.selection, point, goal);
+            self.notify_after_selection_change(&previous_selection, cx);
+            return;
+        }
+
         let snapshot = self.buffer.snapshot();
         let wrap_width = text_wrap_width(window);
         let row_style = row_display_style_for_display_row(&snapshot, display_row, self.mode);
@@ -2166,7 +2223,7 @@ impl MarkdownEditor {
             cx,
         ) {
             DisplayRowLayout::Text(text_layout) => mouse_target_for_text_layout(
-                &snapshot,
+                snapshot.as_text_snapshot(),
                 display_row,
                 visual_row_index,
                 visual_row,
@@ -2246,43 +2303,63 @@ impl Render for MarkdownEditor {
         ) {
             self.clear_row_layout_cache();
         }
-        let snapshot = self.buffer.snapshot();
-        let selection = clip_selection(&snapshot, &self.selection);
-        let display_row_state = DisplayRowProjectionState::new(&snapshot, Some(&selection), mode);
-        let cursor = selection.head();
+        let list_element = match mode {
+            MarkdownEditorMode::Source => {
+                let snapshot = self.buffer.text_snapshot();
+                let selection = clip_selection_in_text_snapshot(&snapshot, &self.selection);
+                let cursor = selection.head();
 
-        div()
-            .id("md-editor")
-            .size_full()
-            .key_context("MarkdownEditor")
-            .track_focus(&self.focus_handle(cx))
-            .on_action(cx.listener(Self::move_left))
-            .on_action(cx.listener(Self::move_right))
-            .on_action(cx.listener(Self::move_up))
-            .on_action(cx.listener(Self::move_down))
-            .on_action(cx.listener(Self::move_to_beginning_of_line))
-            .on_action(cx.listener(Self::move_to_end_of_line))
-            .on_action(cx.listener(Self::select_left))
-            .on_action(cx.listener(Self::select_right))
-            .on_action(cx.listener(Self::select_up))
-            .on_action(cx.listener(Self::select_down))
-            .on_action(cx.listener(Self::select_to_beginning_of_line))
-            .on_action(cx.listener(Self::select_to_end_of_line))
-            .on_action(cx.listener(Self::select_all))
-            .on_action(cx.listener(Self::backspace))
-            .on_action(cx.listener(Self::delete))
-            .on_action(cx.listener(Self::insert_newline))
-            .on_action(cx.listener(Self::tab))
-            .on_action(cx.listener(Self::undo))
-            .on_action(cx.listener(Self::redo))
-            .on_key_down(cx.listener(Self::key_down))
-            .bg(palette.background)
-            .text_color(palette.text)
-            .font_family(EDITOR_FONT_FAMILY)
-            .text_size(default_metrics.text_size)
-            .line_height(default_metrics.line_height)
-            .overflow_hidden()
-            .child(
+                list(
+                    self.display_list_state.clone(),
+                    cx.processor(move |this, row, window, _cx| {
+                        let Some(display_row) = this.cached_source_display_row(&snapshot, row)
+                        else {
+                            return div().into_any_element();
+                        };
+
+                        let is_cursor_row = display_row.row == cursor.row;
+                        let row_style = default_metrics.into();
+                        let text_layout = this.cached_source_text_layout(
+                            &display_row,
+                            row_style,
+                            wrap_width,
+                            true,
+                            window,
+                            _cx,
+                        );
+                        let content_min_height = text_layout.height(row_style);
+                        let row_min_height = row_style.min_height.max(content_min_height);
+                        let row_contents = render_row_text(
+                            &snapshot,
+                            &display_row,
+                            text_layout,
+                            &selection,
+                            row_style,
+                            _cx,
+                        );
+
+                        render_editor_row(
+                            &display_row,
+                            is_cursor_row,
+                            row_style,
+                            row_min_height,
+                            content_min_height,
+                            row_contents,
+                            _cx,
+                        )
+                    }),
+                )
+                .with_sizing_behavior(ListSizingBehavior::Auto)
+                .size_full()
+                .into_any_element()
+            }
+            MarkdownEditorMode::Rendered => {
+                let snapshot = self.buffer.snapshot();
+                let selection = clip_selection(&snapshot, &self.selection);
+                let display_row_state =
+                    DisplayRowProjectionState::new(&snapshot, Some(&selection), mode);
+                let cursor = selection.head();
+
                 list(
                     self.display_list_state.clone(),
                     cx.processor(move |this, row, window, _cx| {
@@ -2317,46 +2394,110 @@ impl Render for MarkdownEditor {
                             _cx,
                         );
 
-                        div()
-                            .id(display_row.row as usize)
-                            .min_h(row_min_height)
-                            .flex()
-                            .items_center()
-                            .when(is_cursor_row, |this| {
-                                this.bg(palette.current_row_background)
-                            })
-                            .on_mouse_up(MouseButton::Left, _cx.listener(Self::mouse_left_up))
-                            .on_mouse_up_out(MouseButton::Left, _cx.listener(Self::mouse_left_up))
-                            .child(
-                                div()
-                                    .w(gutter_width())
-                                    .pr_2()
-                                    .text_align(TextAlign::Right)
-                                    .text_color(if is_cursor_row {
-                                        palette.gutter_current_text
-                                    } else {
-                                        palette.gutter_text
-                                    })
-                                    .child(SharedString::from((display_row.row + 1).to_string())),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .flex()
-                                    .flex_col()
-                                    .relative()
-                                    .text_size(row_style.text_size)
-                                    .line_height(row_style.line_height)
-                                    .min_h(content_min_height)
-                                    .children(row_contents),
-                            )
-                            .into_any_element()
+                        render_editor_row(
+                            &display_row,
+                            is_cursor_row,
+                            row_style,
+                            row_min_height,
+                            content_min_height,
+                            row_contents,
+                            _cx,
+                        )
                     }),
                 )
                 .with_sizing_behavior(ListSizingBehavior::Auto)
-                .size_full(),
-            )
+                .size_full()
+                .into_any_element()
+            }
+        };
+
+        div()
+            .id("md-editor")
+            .size_full()
+            .key_context("MarkdownEditor")
+            .track_focus(&self.focus_handle(cx))
+            .on_action(cx.listener(Self::move_left))
+            .on_action(cx.listener(Self::move_right))
+            .on_action(cx.listener(Self::move_up))
+            .on_action(cx.listener(Self::move_down))
+            .on_action(cx.listener(Self::move_to_beginning_of_line))
+            .on_action(cx.listener(Self::move_to_end_of_line))
+            .on_action(cx.listener(Self::select_left))
+            .on_action(cx.listener(Self::select_right))
+            .on_action(cx.listener(Self::select_up))
+            .on_action(cx.listener(Self::select_down))
+            .on_action(cx.listener(Self::select_to_beginning_of_line))
+            .on_action(cx.listener(Self::select_to_end_of_line))
+            .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::backspace))
+            .on_action(cx.listener(Self::delete))
+            .on_action(cx.listener(Self::insert_newline))
+            .on_action(cx.listener(Self::tab))
+            .on_action(cx.listener(Self::undo))
+            .on_action(cx.listener(Self::redo))
+            .on_key_down(cx.listener(Self::key_down))
+            .bg(palette.background)
+            .text_color(palette.text)
+            .font_family(EDITOR_FONT_FAMILY)
+            .text_size(default_metrics.text_size)
+            .line_height(default_metrics.line_height)
+            .overflow_hidden()
+            .child(list_element)
+            .into_any_element()
     }
+}
+
+fn render_editor_row(
+    display_row: &DisplayRow,
+    is_cursor_row: bool,
+    row_style: RowDisplayStyle,
+    row_min_height: gpui::Pixels,
+    content_min_height: gpui::Pixels,
+    row_contents: Vec<gpui::AnyElement>,
+    cx: &mut Context<MarkdownEditor>,
+) -> gpui::AnyElement {
+    let palette = editor_palette();
+
+    div()
+        .id(display_row.row as usize)
+        .min_h(row_min_height)
+        .flex()
+        .items_center()
+        .when(is_cursor_row, |this| {
+            this.bg(palette.current_row_background)
+        })
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(MarkdownEditor::mouse_left_up),
+        )
+        .on_mouse_up_out(
+            MouseButton::Left,
+            cx.listener(MarkdownEditor::mouse_left_up),
+        )
+        .child(
+            div()
+                .w(gutter_width())
+                .pr_2()
+                .text_align(TextAlign::Right)
+                .text_color(if is_cursor_row {
+                    palette.gutter_current_text
+                } else {
+                    palette.gutter_text
+                })
+                .child(SharedString::from((display_row.row + 1).to_string())),
+        )
+        .child(
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .relative()
+                .text_size(row_style.text_size)
+                .line_height(row_style.line_height)
+                .min_h(content_min_height)
+                .children(row_contents),
+        )
+        .into_any_element()
 }
 
 pub fn display_rows(snapshot: &BufferSnapshot, range: Range<usize>) -> Vec<DisplayRow> {
@@ -3381,7 +3522,7 @@ fn current_line_indent_in_text_snapshot(snapshot: &TextBufferSnapshot, cursor: P
 }
 
 fn mouse_target_for_text_layout(
-    snapshot: &BufferSnapshot,
+    snapshot: &TextBufferSnapshot,
     display_row: &DisplayRow,
     visual_row_index: usize,
     visual_row: &VisualDisplayRow,
@@ -3392,14 +3533,8 @@ fn mouse_target_for_text_layout(
     let display_offset = display_offset_for_visual_row_x(text_layout, visual_row, text_x);
     let source_offset =
         source_offset_for_display_offset(display_row, &text_layout.fragments, display_offset);
-    let source_offset = snapshot
-        .as_text_snapshot()
-        .as_rope()
-        .floor_char_boundary(source_offset);
-    let point = clip_cursor(
-        snapshot,
-        snapshot.as_text_snapshot().offset_to_point(source_offset),
-    );
+    let source_offset = snapshot.as_rope().floor_char_boundary(source_offset);
+    let point = clip_cursor_in_text_snapshot(snapshot, snapshot.offset_to_point(source_offset));
     let target_x = display_x_for_offset(
         &text_layout.fragments,
         &text_layout.shaped_line,
@@ -3413,7 +3548,7 @@ fn mouse_target_for_text_layout(
 }
 
 fn render_row_text(
-    snapshot: &BufferSnapshot,
+    snapshot: &TextBufferSnapshot,
     display_row: &DisplayRow,
     text_layout: DisplayRowTextLayout,
     selection: &Selection<Point>,
@@ -3423,7 +3558,7 @@ fn render_row_text(
     let selected_range = if selection.is_empty() {
         None
     } else {
-        selected_range_for_row(snapshot, display_row, selection)
+        selected_range_for_row_in_text_snapshot(snapshot, display_row, selection)
             .filter(|selected_range| !selected_range.is_empty())
     };
 
@@ -3453,9 +3588,14 @@ fn render_display_row_layout(
     cx: &mut Context<MarkdownEditor>,
 ) -> Vec<gpui::AnyElement> {
     match row_layout {
-        DisplayRowLayout::Text(text_layout) => {
-            render_row_text(snapshot, display_row, text_layout, selection, row_style, cx)
-        }
+        DisplayRowLayout::Text(text_layout) => render_row_text(
+            snapshot.as_text_snapshot(),
+            display_row,
+            text_layout,
+            selection,
+            row_style,
+            cx,
+        ),
         DisplayRowLayout::Block(block_layout) => {
             block_layout.render(snapshot, selection, row_style, cx)
         }
@@ -3972,7 +4112,7 @@ fn text_runs_for_segments(segments: &[StyledDisplaySegment]) -> Vec<TextRun> {
 }
 
 fn render_visual_text_row(
-    snapshot: &BufferSnapshot,
+    snapshot: &TextBufferSnapshot,
     display_row: &DisplayRow,
     text_layout: &DisplayRowTextLayout,
     visual_row_index: usize,
@@ -4162,7 +4302,7 @@ fn fragment_text_for_visual_row(
 }
 
 fn caret_position_for_visual_row(
-    snapshot: &BufferSnapshot,
+    snapshot: &TextBufferSnapshot,
     display_row: &DisplayRow,
     selection: &Selection<Point>,
     text_layout: &DisplayRowTextLayout,
@@ -4178,9 +4318,7 @@ fn caret_position_for_visual_row(
         return None;
     }
 
-    let cursor_offset = snapshot
-        .as_text_snapshot()
-        .point_to_offset(clip_cursor(snapshot, cursor));
+    let cursor_offset = snapshot.point_to_offset(clip_cursor_in_text_snapshot(snapshot, cursor));
     let display_offset = display_row
         .source_to_display(cursor_offset)
         .min(text_layout.text_len);
@@ -5125,8 +5263,8 @@ impl DisplayTextStyle {
     }
 }
 
-fn selected_range_for_row(
-    snapshot: &BufferSnapshot,
+fn selected_range_for_row_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
     display_row: &DisplayRow,
     selection: &Selection<Point>,
 ) -> Option<Range<usize>> {
@@ -5134,7 +5272,7 @@ fn selected_range_for_row(
         return None;
     }
 
-    let selection_range = selection_byte_range(snapshot, selection);
+    let selection_range = selection_byte_range_in_text_snapshot(snapshot, selection);
     let row_range = display_row.projection.visible_source_range();
     if !selection_intersects_visible_row_range(&selection_range, &row_range) {
         return None;
@@ -5516,6 +5654,51 @@ mod tests {
 
             editor.move_up(&MoveUp, window, cx);
             assert_eq!(editor.row_layout_cache.len(), 1);
+        });
+    }
+
+    #[gpui::test]
+    fn source_render_uses_text_snapshot_without_refreshing_markdown_syntax(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let cx = cx.add_empty_window();
+        cx.simulate_resize(gpui::size(px(240.), px(200.)));
+        let editor = cx.new(|cx| MarkdownEditor::for_text("# Heading\nBody\n", cx));
+
+        let (cached_syntax_version, edited_text_version) = editor.update(cx, |editor, _| {
+            let _snapshot = editor.buffer.snapshot();
+            let cached_syntax_version = editor.buffer.cached_syntax_version_for_tests();
+            assert_eq!(
+                &cached_syntax_version,
+                editor.buffer.as_text_snapshot().version()
+            );
+
+            assert!(editor.buffer.edit([(0..0, "Plain text\n")]).is_some());
+            let edited_text_version = editor.buffer.as_text_snapshot().version().clone();
+            assert_ne!(cached_syntax_version, edited_text_version);
+            assert_eq!(
+                editor.buffer.cached_syntax_version_for_tests(),
+                cached_syntax_version
+            );
+
+            (cached_syntax_version, edited_text_version)
+        });
+
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(240.), px(200.)),
+            |_, _| editor.clone().into_any_element(),
+        );
+
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(
+                editor.buffer.cached_syntax_version_for_tests(),
+                cached_syntax_version
+            );
+            assert_eq!(
+                editor.buffer.as_text_snapshot().version(),
+                &edited_text_version
+            );
         });
     }
 
@@ -5965,7 +6148,11 @@ mod tests {
 
         assert_eq!(rows[0].text, "Before x + y after");
         assert_eq!(
-            selected_range_for_row(&snapshot, &rows[0], &selection),
+            selected_range_for_row_in_text_snapshot(
+                snapshot.as_text_snapshot(),
+                &rows[0],
+                &selection
+            ),
             Some(7..12)
         );
     }
@@ -5992,7 +6179,11 @@ mod tests {
 
         assert_eq!(rows[0].text, "Before x + y after");
         assert_eq!(
-            selected_range_for_row(&snapshot, &rows[0], &selection),
+            selected_range_for_row_in_text_snapshot(
+                snapshot.as_text_snapshot(),
+                &rows[0],
+                &selection
+            ),
             Some(0.."Before x + y after".len())
         );
 
@@ -7580,15 +7771,27 @@ mod tests {
         };
 
         assert_eq!(
-            selected_range_for_row(&snapshot, &display_rows[0], &selection),
+            selected_range_for_row_in_text_snapshot(
+                snapshot.as_text_snapshot(),
+                &display_rows[0],
+                &selection
+            ),
             Some(2..4)
         );
         assert_eq!(
-            selected_range_for_row(&snapshot, &display_rows[1], &selection),
+            selected_range_for_row_in_text_snapshot(
+                snapshot.as_text_snapshot(),
+                &display_rows[1],
+                &selection
+            ),
             Some(0..2)
         );
         assert_eq!(
-            selected_range_for_row(&snapshot, &display_rows[2], &selection),
+            selected_range_for_row_in_text_snapshot(
+                snapshot.as_text_snapshot(),
+                &display_rows[2],
+                &selection
+            ),
             Some(0..1)
         );
     }
@@ -7634,7 +7837,11 @@ mod tests {
         };
 
         for selection in [crossing_selection, starting_at_empty_line] {
-            let selected_range = selected_range_for_row(&snapshot, &display_rows[1], &selection);
+            let selected_range = selected_range_for_row_in_text_snapshot(
+                snapshot.as_text_snapshot(),
+                &display_rows[1],
+                &selection,
+            );
 
             assert_eq!(selected_range, Some(0..0));
             assert_eq!(
@@ -7644,7 +7851,11 @@ mod tests {
         }
 
         assert_eq!(
-            selected_range_for_row(&snapshot, &display_rows[1], &ending_at_empty_line),
+            selected_range_for_row_in_text_snapshot(
+                snapshot.as_text_snapshot(),
+                &display_rows[1],
+                &ending_at_empty_line
+            ),
             None
         );
     }

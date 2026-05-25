@@ -42,8 +42,9 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Rendered row inline span queries are range-local and backed by an indexed span-start structure, avoiding full-document inline span scans for each visible row.
 - Source rows use a plain-fragment fast path that bypasses Rendered-mode style, atom, hidden-range, and fallback-measurement work.
 - Source-mode display-row cache lookup now reuses the text-snapshot source-row fast path, avoiding the generic projection construction path for Source rows.
+- Source-mode render now uses the buffer's text snapshot for row lookup, selection clipping, text layout, caret/selection drawing, and text-row mouse targeting, avoiding Markdown syntax refresh during Source render.
 - Display rows carry their original source text/range so row layout paths can avoid re-reading the buffer for row-local Markdown checks.
-- The render frame snapshots the buffer and clips the selection once per frame, and buffer snapshots share the cached Markdown syntax tree through `Arc`.
+- Rendered render frames snapshot the buffer and clip the selection once per frame, and buffer snapshots share the cached Markdown syntax tree through `Arc`.
 - Text-only editor paths such as row counts, row text reads, cursor clipping, Source-mode horizontal and visual movement/selection, wrapped Home/End, ordinary replace/backspace/delete edits, cursor reveal, auto-indent, and Source edit cache invalidation now use the buffer's text snapshot directly instead of refreshing the Markdown syntax tree through a full buffer snapshot.
 - Source-mode interaction paths now cache cacheable plain-text row layouts even when they do not need inline atom measurement, improving reuse for wrapped keyboard movement and wrapped Home/End.
 - `ListState::with_default_size_hint` gives long variable-height lists a default unmeasured-row height, reducing scrollbar collapse and scroll-position churn before rows are measured.
@@ -54,14 +55,13 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 
 - Inline atom layout, atom hit geometry, block rendering, and block layout construction have been moved onto their respective atom/block interfaces to reduce ad hoc branching in the row pipeline.
 - `md_editor` still needs internal module boundary cleanup; `lib.rs` now carries projection, row layout/cache, inline atom, block layout/rendering, selection/movement, hit-testing, rendering, and extensive tests.
-- Coverage now includes focused unit and GPUI-path tests for wrapped movement, action-level Source wrapped keyboard movement, Source wrapped mouse hit testing and shift-selection across visual rows, keybinding-level Rendered marker reveal/hide transitions, resize reflow, mode switching at wrapped positions, visual-row bounds, rendered inline math, inline images, empty-alt inline images, remote image blocks, Rendered image block mouse hit testing and shift-selection, cache dependency keys, range-local span queries, source-row fast paths, snapshot sharing, default list size hints, and the rendered image block crash path.
+- Coverage now includes focused unit and GPUI-path tests for wrapped movement, action-level Source wrapped keyboard movement, Source wrapped render without Markdown syntax refresh, Source wrapped mouse hit testing and shift-selection across visual rows, keybinding-level Rendered marker reveal/hide transitions, resize reflow, mode switching at wrapped positions, visual-row bounds, rendered inline math, inline images, empty-alt inline images, remote image blocks, Rendered image block mouse hit testing and shift-selection, cache dependency keys, range-local span queries, source-row fast paths, snapshot sharing, default list size hints, and the rendered image block crash path.
 
 ## Verification
 
-- Formatting and checks have passed across the touched crates, including `cargo fmt` for the Markdown editor path and `cargo check -p md_editor` / `cargo check -p markdown_editor`.
-- Full unit suites have passed for `markdown_wysiwyg`, `md_buffer`, and `md_editor` (currently 117 tests), with focused coverage for wrapped movement, inline atoms/images, source display-row/cache fast paths, source edit cache invalidation, default list size hints, and Rendered image block drawing and mouse interaction.
-- `git diff --check` passed with only LF/CRLF warnings for touched files.
-- `cargo run -p markdown_editor --bin markdown-editor -- tmp-markdown-editor-test.md` was started twice for 12-second smoke windows after the Rendered image block fix; neither run exited with the previous panic, though both were stopped before completion because the short window was still compiling.
+- Recent touched-crate checks have passed, including `cargo fmt -p md_buffer -p md_editor`, `cargo check -p md_buffer`, `cargo check -p md_editor`, `cargo test -p md_buffer`, and `cargo test -p md_editor` (currently 118 tests).
+- Focused coverage now exercises wrapped movement, inline atoms/images, source display-row/cache/render fast paths, source edit cache invalidation, default list size hints, Rendered image block drawing, and mouse interaction.
+- `git diff --check` passes with only LF/CRLF warnings on touched files; short markdown-editor smoke runs after the Rendered image block fix did not reproduce the previous panic.
 
 ## Known Remaining Work
 

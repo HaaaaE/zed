@@ -89,6 +89,11 @@ impl Buffer {
         self.text.snapshot().clone()
     }
 
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn cached_syntax_version_for_tests(&self) -> Global {
+        self.cached_syntax_version.clone()
+    }
+
     pub fn syntax_tree(&mut self) -> &MarkdownSyntaxTree {
         self.refresh_syntax_tree();
         self.cached_syntax_tree.as_ref()
