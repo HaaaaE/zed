@@ -5437,6 +5437,17 @@ mod tests {
         })
     }
 
+    fn cached_row_text_for_current_selection(editor: &mut MarkdownEditor, row: usize) -> String {
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        editor
+            .cached_display_row(&snapshot, row, editor.mode, &display_row_state)
+            .expect("display row should exist")
+            .text
+            .clone()
+    }
+
     #[test]
     fn display_rows_preserve_empty_lines_and_final_empty_row() {
         let mut buffer = Buffer::local("alpha\n\nbeta\n");
@@ -5454,6 +5465,60 @@ mod tests {
                 (3, String::new()),
             ]
         );
+    }
+
+    #[gpui::test]
+    fn source_mode_actions_follow_wrapped_visual_rows(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.simulate_resize(gpui::size(px(90.), px(200.)));
+        let editor = cx.new(|cx| MarkdownEditor::for_text("abcdefghijklmnopqrst\n", cx));
+
+        editor.update_in(cx, |editor, window, cx| {
+            let source_line_end = editor.buffer.as_text_snapshot().line_len(0);
+            editor.set_cursor(Point::new(0, 0));
+
+            editor.move_down(&MoveDown, window, cx);
+            let wrapped_row_start = editor.cursor();
+            assert_eq!(wrapped_row_start.row, 0);
+            assert!(wrapped_row_start.column > 0);
+            assert!(wrapped_row_start.column < source_line_end);
+
+            editor.move_to_end_of_line(&MoveToEndOfLine, window, cx);
+            let wrapped_row_end = editor.cursor();
+            assert_eq!(wrapped_row_end.row, 0);
+            assert!(wrapped_row_end.column > wrapped_row_start.column);
+            assert!(wrapped_row_end.column < source_line_end);
+
+            editor.move_to_beginning_of_line(&MoveToBeginningOfLine, window, cx);
+            assert_eq!(editor.cursor(), wrapped_row_start);
+
+            editor.move_up(&MoveUp, window, cx);
+            assert_eq!(editor.cursor(), Point::new(0, 0));
+        });
+    }
+
+    #[gpui::test]
+    fn rendered_mode_actions_update_marker_visibility(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.simulate_resize(gpui::size(px(400.), px(200.)));
+        let editor = cx.new(|cx| {
+            let mut editor = MarkdownEditor::for_text("# Title\nBody\n", cx);
+            editor.set_mode(MarkdownEditorMode::Rendered, cx);
+            editor.set_cursor(Point::new(1, 0));
+            editor
+        });
+
+        editor.update_in(cx, |editor, window, cx| {
+            assert_eq!(cached_row_text_for_current_selection(editor, 0), "Title");
+
+            editor.move_up(&MoveUp, window, cx);
+            assert_eq!(editor.cursor().row, 0);
+            assert_eq!(cached_row_text_for_current_selection(editor, 0), "# Title");
+
+            editor.move_down(&MoveDown, window, cx);
+            assert_eq!(editor.cursor().row, 1);
+            assert_eq!(cached_row_text_for_current_selection(editor, 0), "Title");
+        });
     }
 
     #[gpui::test]
