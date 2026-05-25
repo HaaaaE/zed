@@ -1003,8 +1003,10 @@ impl MarkdownEditor {
         cx: &mut Context<Self>,
     ) -> Option<(Point, SelectionGoal)> {
         let cursor = clip_cursor(snapshot, selection.head());
+        let display_row_state =
+            DisplayRowProjectionState::new(snapshot, Some(selection), self.mode);
         let display_row =
-            self.cached_display_row(snapshot, cursor.row as usize, selection, self.mode)?;
+            self.cached_display_row(snapshot, cursor.row as usize, self.mode, &display_row_state)?;
         let row_style = row_display_style_for_display_row(snapshot, &display_row, self.mode);
         let wrap_width = text_wrap_width(window);
         let layout = self.cached_row_layout(
@@ -1012,6 +1014,7 @@ impl MarkdownEditor {
             &display_row,
             selection,
             self.mode,
+            &display_row_state,
             row_style,
             wrap_width,
             false,
@@ -1065,8 +1068,10 @@ impl MarkdownEditor {
         }
 
         let cursor = clip_cursor(snapshot, selection.head());
+        let display_row_state =
+            DisplayRowProjectionState::new(snapshot, Some(selection), self.mode);
         let display_row =
-            self.cached_display_row(snapshot, cursor.row as usize, selection, self.mode)?;
+            self.cached_display_row(snapshot, cursor.row as usize, self.mode, &display_row_state)?;
         let row_style = row_display_style_for_display_row(snapshot, &display_row, self.mode);
         let wrap_width = text_wrap_width(window);
         let current_layout = self.cached_row_layout(
@@ -1074,6 +1079,7 @@ impl MarkdownEditor {
             &display_row,
             selection,
             self.mode,
+            &display_row_state,
             row_style,
             wrap_width,
             false,
@@ -1139,7 +1145,7 @@ impl MarkdownEditor {
             next_row
         };
         let target_display_row =
-            self.cached_display_row(snapshot, target_row as usize, selection, self.mode)?;
+            self.cached_display_row(snapshot, target_row as usize, self.mode, &display_row_state)?;
         let target_row_style =
             row_display_style_for_display_row(snapshot, &target_display_row, self.mode);
         let target_layout = self.cached_row_layout(
@@ -1147,6 +1153,7 @@ impl MarkdownEditor {
             &target_display_row,
             selection,
             self.mode,
+            &display_row_state,
             target_row_style,
             wrap_width,
             false,
@@ -1546,8 +1553,8 @@ impl MarkdownEditor {
         &mut self,
         snapshot: &BufferSnapshot,
         row: usize,
-        selection: &Selection<Point>,
         mode: MarkdownEditorMode,
+        display_row_state: &DisplayRowProjectionState,
     ) -> Option<Arc<DisplayRow>> {
         let row_count = snapshot.row_count() as usize;
         if row >= row_count {
@@ -1555,7 +1562,6 @@ impl MarkdownEditor {
         }
 
         let row = row as u32;
-        let display_row_state = DisplayRowProjectionState::new(snapshot, Some(selection), mode);
         let source_range = row_source_range(snapshot, row);
         let cache_key = DisplayRowCacheKey {
             version: snapshot.version().clone(),
@@ -1564,7 +1570,7 @@ impl MarkdownEditor {
             active_projection_source_ranges: active_projection_source_ranges(
                 snapshot,
                 &source_range,
-                &display_row_state,
+                display_row_state,
                 mode,
             ),
         };
@@ -1573,7 +1579,7 @@ impl MarkdownEditor {
             return Some(display_row.clone());
         }
 
-        let display_row = Arc::new(display_row_in_mode(snapshot, row, mode, &display_row_state));
+        let display_row = Arc::new(display_row_in_mode(snapshot, row, mode, display_row_state));
         self.display_row_cache
             .insert(cache_key, display_row.clone());
         Some(display_row)
@@ -1585,6 +1591,7 @@ impl MarkdownEditor {
         display_row: &DisplayRow,
         selection: &Selection<Point>,
         mode: MarkdownEditorMode,
+        display_row_state: &DisplayRowProjectionState,
         row_style: RowDisplayStyle,
         wrap_width: gpui::Pixels,
         measure_inline_atoms: bool,
@@ -1598,7 +1605,7 @@ impl MarkdownEditor {
             active_projection_source_ranges: active_projection_source_ranges(
                 snapshot,
                 &display_row.source_range,
-                &DisplayRowProjectionState::new(snapshot, Some(selection), mode),
+                display_row_state,
                 mode,
             ),
         };
@@ -1640,11 +1647,14 @@ impl MarkdownEditor {
         let wrap_width = text_wrap_width(window);
         let row_style = row_display_style_for_display_row(&snapshot, display_row, self.mode);
         let selection = self.selection.clone();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&selection), self.mode);
         let (point, goal) = match self.cached_row_layout(
             &snapshot,
             display_row,
             &selection,
             self.mode,
+            &display_row_state,
             row_style,
             wrap_width,
             false,
@@ -1690,11 +1700,14 @@ impl MarkdownEditor {
         let wrap_width = text_wrap_width(window);
         let row_style = row_display_style_for_display_row(&snapshot, display_row, self.mode);
         let selection = self.selection.clone();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&selection), self.mode);
         let (point, goal) = match self.cached_row_layout(
             &snapshot,
             display_row,
             &selection,
             self.mode,
+            &display_row_state,
             row_style,
             wrap_width,
             false,
@@ -1784,6 +1797,7 @@ impl Render for MarkdownEditor {
         }
         let snapshot = self.buffer.snapshot();
         let selection = clip_selection(&snapshot, &self.selection);
+        let display_row_state = DisplayRowProjectionState::new(&snapshot, Some(&selection), mode);
         let cursor = selection.head();
 
         div()
@@ -1822,7 +1836,7 @@ impl Render for MarkdownEditor {
                     self.display_list_state.clone(),
                     cx.processor(move |this, row, window, _cx| {
                         let Some(display_row) =
-                            this.cached_display_row(&snapshot, row, &selection, mode)
+                            this.cached_display_row(&snapshot, row, mode, &display_row_state)
                         else {
                             return div().into_any_element();
                         };
@@ -1835,6 +1849,7 @@ impl Render for MarkdownEditor {
                             &display_row,
                             &selection,
                             mode,
+                            &display_row_state,
                             row_style,
                             wrap_width,
                             true,
