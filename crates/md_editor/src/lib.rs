@@ -1494,10 +1494,12 @@ impl MarkdownEditor {
             };
 
         if changed {
-            self.clear_display_row_cache();
             if let Some(rows) = remeasure_rows.as_ref() {
+                let version = self.buffer.snapshot().version().clone();
+                self.rekey_source_display_row_cache_before_row(rows.start, version);
                 self.clear_row_layout_cache_for_rows(rows.clone());
             } else {
+                self.clear_display_row_cache();
                 self.clear_row_layout_cache();
             }
         }
@@ -1577,6 +1579,26 @@ impl MarkdownEditor {
 
     fn clear_display_row_cache(&mut self) {
         self.display_row_cache.clear();
+    }
+
+    fn rekey_source_display_row_cache_before_row(&mut self, row: usize, version: md_text::Global) {
+        self.display_row_cache = self
+            .display_row_cache
+            .drain()
+            .filter_map(|(key, display_row)| {
+                if key.mode != MarkdownEditorMode::Source || key.row as usize >= row {
+                    return None;
+                }
+
+                Some((
+                    DisplayRowCacheKey {
+                        version: version.clone(),
+                        ..key
+                    },
+                    display_row,
+                ))
+            })
+            .collect();
     }
 
     fn clear_display_row_cache_for_row_ranges(&mut self, row_ranges: &[Range<usize>]) {
@@ -7059,6 +7081,67 @@ mod tests {
             ),
             Some(4..5)
         );
+    }
+
+    #[gpui::test]
+    fn source_single_row_edit_rekeys_display_row_cache_before_edited_row(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let editor = cx.update(|cx| cx.new(|cx| MarkdownEditor::for_text("one\ntwo\nthree", cx)));
+
+        editor.update(cx, |editor, cx| {
+            let mode = editor.mode;
+            let snapshot = editor.buffer.snapshot();
+            let display_row_state =
+                DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+            let row_0 = editor
+                .cached_display_row(&snapshot, 0, mode, &display_row_state)
+                .expect("row 0 should exist");
+            let row_1 = editor
+                .cached_display_row(&snapshot, 1, mode, &display_row_state)
+                .expect("row 1 should exist");
+            let row_2 = editor
+                .cached_display_row(&snapshot, 2, mode, &display_row_state)
+                .expect("row 2 should exist");
+
+            let previous_selection = collapsed_selection(Point::new(1, 1));
+            editor.selection = previous_selection.clone();
+            let row_count_before = editor.display_list_state.item_count();
+            let (selection, transaction_id) =
+                replace_selection(&mut editor.buffer, &editor.selection, "XX");
+            assert!(transaction_id.is_some());
+            editor.selection = selection;
+
+            editor.notify_after_edit(
+                true,
+                row_count_before,
+                &previous_selection,
+                EditLayoutInvalidation::LocalSourceSelection,
+                cx,
+            );
+
+            let snapshot = editor.buffer.snapshot();
+            let display_row_state =
+                DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+            let cached_row_0 = editor
+                .cached_display_row(&snapshot, 0, mode, &display_row_state)
+                .expect("row 0 should exist after edit");
+            let cached_row_1 = editor
+                .cached_display_row(&snapshot, 1, mode, &display_row_state)
+                .expect("row 1 should exist after edit");
+            let cached_row_2 = editor
+                .cached_display_row(&snapshot, 2, mode, &display_row_state)
+                .expect("row 2 should exist after edit");
+
+            assert!(Arc::ptr_eq(&row_0, &cached_row_0));
+            assert!(!Arc::ptr_eq(&row_1, &cached_row_1));
+            assert!(!Arc::ptr_eq(&row_2, &cached_row_2));
+            assert_eq!(cached_row_1.text, "tXXwo");
+            assert_eq!(
+                cached_row_2.source_range.start,
+                row_2.source_range.start + "XX".len()
+            );
+        });
     }
 
     #[test]
