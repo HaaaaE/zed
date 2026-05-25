@@ -170,6 +170,7 @@ struct DisplayInlineAtom {
     source_range: Range<usize>,
     display_range: Range<usize>,
     fallback_text: String,
+    image_url: Option<String>,
     style: DisplayTextStyle,
     height: gpui::Pixels,
     width: gpui::Pixels,
@@ -178,22 +179,28 @@ struct DisplayInlineAtom {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DisplayInlineAtomKind {
     InlineMath,
+    InlineImage,
 }
 
 impl DisplayInlineAtomKind {
     fn height(self, row_style: RowDisplayStyle) -> gpui::Pixels {
         match self {
             Self::InlineMath => row_style.line_height + INLINE_MATH_ATOM_EXTRA_HEIGHT,
+            Self::InlineImage => INLINE_IMAGE_ATOM_SIZE,
         }
     }
 
     fn width_for_content(self, content_width: gpui::Pixels) -> gpui::Pixels {
-        content_width + self.horizontal_padding() * 2.
+        match self {
+            Self::InlineMath => content_width + self.horizontal_padding() * 2.,
+            Self::InlineImage => INLINE_IMAGE_ATOM_SIZE,
+        }
     }
 
     fn horizontal_padding(self) -> gpui::Pixels {
         match self {
             Self::InlineMath => INLINE_MATH_ATOM_HORIZONTAL_PADDING,
+            Self::InlineImage => px(0.),
         }
     }
 }
@@ -224,6 +231,10 @@ impl DisplayInlineAtom {
         window: &mut Window,
         cx: &mut App,
     ) -> gpui::Size<gpui::Pixels> {
+        if self.kind == DisplayInlineAtomKind::InlineImage {
+            return fallback_size;
+        }
+
         let mut element = self.render_measurement_piece(self.fallback_text.clone(), row_style);
         let size = element.layout_as_root(
             gpui::size(
@@ -294,6 +305,35 @@ impl DisplayInlineAtom {
                     .child(render_text_piece(text, &style));
                 if let Some(size) = size {
                     element = element.w(size.width).h(size.height);
+                }
+                element.into_any_element()
+            }
+            DisplayInlineAtomKind::InlineImage => {
+                let palette = editor_palette();
+                let image_url = self.image_url.clone().unwrap_or(text);
+                let mut element = div()
+                    .size(INLINE_IMAGE_ATOM_SIZE)
+                    .flex_none()
+                    .overflow_hidden()
+                    .rounded_sm()
+                    .border_1()
+                    .border_color(if selected {
+                        palette.selection_background
+                    } else {
+                        palette.gutter_text.opacity(0.45)
+                    })
+                    .child(img(image_url).size_full().with_fallback(|| {
+                        div()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_color(editor_palette().muted_text)
+                            .child("img")
+                            .into_any_element()
+                    }));
+                if selected {
+                    element = element.bg(palette.selection_background.opacity(0.32));
                 }
                 element.into_any_element()
             }
@@ -370,6 +410,7 @@ const RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT: gpui::Pixels = px(120.);
 const RENDERED_IMAGE_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(4.);
 const INLINE_MATH_ATOM_EXTRA_HEIGHT: gpui::Pixels = px(4.);
 const INLINE_MATH_ATOM_HORIZONTAL_PADDING: gpui::Pixels = px(4.);
+const INLINE_IMAGE_ATOM_SIZE: gpui::Pixels = px(24.);
 
 #[derive(Clone, Debug, PartialEq)]
 enum DisplayBlockLayout {
@@ -3757,16 +3798,29 @@ fn inline_atom_ranges_for_row(
         .syntax_tree()
         .inline_spans()
         .iter()
-        .filter(|span| {
-            span.kind == MarkdownInlineKind::InlineMath
-                && range_contains(&row_source_range, &span.source_range)
-                && span.marker_ranges.iter().any(|marker_range| {
+        .filter_map(|span| {
+            if !range_contains(&row_source_range, &span.source_range)
+                || !span.marker_ranges.iter().any(|marker_range| {
                     hidden_ranges
                         .iter()
                         .any(|hidden_range| ranges_overlap(marker_range, hidden_range))
                 })
+            {
+                return None;
+            }
+
+            match span.kind {
+                MarkdownInlineKind::InlineMath => {
+                    inline_math_atom_for_span(display_row, span, row_style)
+                }
+                MarkdownInlineKind::Image
+                    if !rendered_remote_image_span_is_block(snapshot, span) =>
+                {
+                    inline_image_atom_for_span(display_row, span, row_style)
+                }
+                _ => None,
+            }
         })
-        .filter_map(|span| inline_math_atom_for_span(display_row, span, row_style))
         .collect()
 }
 
@@ -3791,8 +3845,37 @@ fn inline_math_atom_for_span(
         source_range: span.source_range.clone(),
         display_range,
         fallback_text,
+        image_url: None,
         style: inline_style(MarkdownInlineKind::InlineMath),
         height: DisplayInlineAtomKind::InlineMath.height(row_style),
+        width: px(0.),
+    })
+}
+
+fn inline_image_atom_for_span(
+    display_row: &DisplayRow,
+    span: &markdown_wysiwyg::MarkdownInlineSpan,
+    row_style: RowDisplayStyle,
+) -> Option<DisplayInlineAtom> {
+    let display_range = display_row
+        .projection
+        .source_to_display(span.source_range.start)
+        ..display_row
+            .projection
+            .source_to_display(span.source_range.end);
+    let fallback_text = display_row.text.get(display_range.clone())?.to_string();
+    if fallback_text.is_empty() {
+        return None;
+    }
+
+    Some(DisplayInlineAtom {
+        kind: DisplayInlineAtomKind::InlineImage,
+        source_range: span.source_range.clone(),
+        display_range,
+        fallback_text,
+        image_url: span.url.clone(),
+        style: inline_style(MarkdownInlineKind::Image),
+        height: DisplayInlineAtomKind::InlineImage.height(row_style),
         width: px(0.),
     })
 }
@@ -4599,6 +4682,48 @@ mod tests {
     }
 
     #[test]
+    fn rendered_inline_fragments_create_inline_image_atom() {
+        let mut buffer = Buffer::local("Before ![alt](https://example.com/cat.png) after\n");
+        let snapshot = buffer.snapshot();
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&collapsed_selection(Point::new(0, 0))),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        assert_eq!(row.text, "Before alt after");
+
+        let row_style = row_display_style(&snapshot, row.row, MarkdownEditorMode::Rendered);
+        let fragments =
+            display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
+        let atom = fragments
+            .iter()
+            .find_map(|fragment| match fragment {
+                DisplayInlineFragment::Atom(atom) => Some(atom),
+                DisplayInlineFragment::Text(_) => None,
+            })
+            .expect("expected inline image atom fragment");
+
+        assert_eq!(atom.kind, DisplayInlineAtomKind::InlineImage);
+        assert_eq!(atom.fallback_text, "alt");
+        assert_eq!(
+            atom.image_url.as_deref(),
+            Some("https://example.com/cat.png")
+        );
+        assert_eq!(atom.display_range, 7..10);
+        assert_eq!(atom.height, INLINE_IMAGE_ATOM_SIZE);
+        assert_eq!(
+            text_segments_for_fragments(&fragments)
+                .iter()
+                .map(|segment| segment.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Before ", "alt", " after"]
+        );
+    }
+
+    #[test]
     fn inline_atom_display_boundaries_map_to_source_boundaries() {
         let mut buffer = Buffer::local("Before $x + y$ after\n");
         let snapshot = buffer.snapshot();
@@ -4634,6 +4759,7 @@ mod tests {
                 source_range: 8..15,
                 display_range: 7..12,
                 fallback_text: "x + y".to_string(),
+                image_url: None,
                 style: inline_style(MarkdownInlineKind::InlineMath),
                 height: atom_height,
                 width: px(50.),
@@ -4667,6 +4793,7 @@ mod tests {
             source_range: 8..15,
             display_range: 7..12,
             fallback_text: "x + y".to_string(),
+            image_url: None,
             style: inline_style(MarkdownInlineKind::InlineMath),
             height: row_style.line_height + INLINE_MATH_ATOM_EXTRA_HEIGHT,
             width: px(50.),
@@ -4685,6 +4812,10 @@ mod tests {
             DisplayInlineAtomKind::InlineMath.width_for_content(px(30.)),
             px(30.) + INLINE_MATH_ATOM_HORIZONTAL_PADDING * 2.
         );
+        assert_eq!(
+            DisplayInlineAtomKind::InlineImage.width_for_content(px(30.)),
+            INLINE_IMAGE_ATOM_SIZE
+        );
     }
 
     #[test]
@@ -4700,6 +4831,7 @@ mod tests {
                 source_range: 8..15,
                 display_range: 7..12,
                 fallback_text: "x + y".to_string(),
+                image_url: None,
                 style: inline_style(MarkdownInlineKind::InlineMath),
                 height: px(24.),
                 width: px(42.),
@@ -4732,6 +4864,51 @@ mod tests {
     }
 
     #[test]
+    fn line_fragments_for_wrapping_uses_inline_image_atom_size() {
+        let fragments = vec![
+            DisplayInlineFragment::Text(StyledDisplaySegment {
+                display_range: 0..7,
+                text: "Before ".to_string(),
+                style: DisplayTextStyle::default(),
+            }),
+            DisplayInlineFragment::Atom(DisplayInlineAtom {
+                kind: DisplayInlineAtomKind::InlineImage,
+                source_range: 7..42,
+                display_range: 7..10,
+                fallback_text: "alt".to_string(),
+                image_url: Some("https://example.com/cat.png".to_string()),
+                style: inline_style(MarkdownInlineKind::Image),
+                height: INLINE_IMAGE_ATOM_SIZE,
+                width: INLINE_IMAGE_ATOM_SIZE,
+            }),
+            DisplayInlineFragment::Text(StyledDisplaySegment {
+                display_range: 10..16,
+                text: " after".to_string(),
+                style: DisplayTextStyle::default(),
+            }),
+        ];
+        let Some(line_fragments) = line_fragments_for_wrapping("Before alt after", &fragments)
+        else {
+            panic!("expected valid line fragments");
+        };
+
+        assert_eq!(line_fragments.len(), 3);
+        assert!(matches!(
+            &line_fragments[1],
+            LineFragment::Element { width, len_utf8 }
+                if *width == INLINE_IMAGE_ATOM_SIZE && *len_utf8 == "alt".len()
+        ));
+        assert_eq!(
+            visual_row_height_for_range(
+                &fragments,
+                &(0..16),
+                md_theme::default_row_metrics().into()
+            ),
+            INLINE_IMAGE_ATOM_SIZE
+        );
+    }
+
+    #[test]
     fn line_fragments_for_wrapping_rejects_invalid_text_range() {
         let fragments = vec![DisplayInlineFragment::Text(StyledDisplaySegment {
             display_range: 0..10,
@@ -4749,6 +4926,7 @@ mod tests {
             source_range: 8..15,
             display_range: 7..12,
             fallback_text: "x + y".to_string(),
+            image_url: None,
             style: inline_style(MarkdownInlineKind::InlineMath),
             height: px(24.),
             width: px(50.),
@@ -4772,6 +4950,7 @@ mod tests {
             source_range: 8..15,
             display_range: 7..12,
             fallback_text: "x + y".to_string(),
+            image_url: None,
             style: inline_style(MarkdownInlineKind::InlineMath),
             height: px(24.),
             width: px(50.),

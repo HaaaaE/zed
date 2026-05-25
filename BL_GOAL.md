@@ -466,11 +466,19 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Rendered-mode edits, cross-row edits, row-count changes, undo, and redo remain conservative full-cache invalidations because Markdown projection and block structure can change beyond the immediate row.
 - Added tests for the local Source invalidation path and conservative fallback boundaries.
 
+### 2026-05-25 - Inline images participate in inline atom layout
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Added `DisplayInlineAtomKind::InlineImage` for Rendered-mode non-block images with visible alt text.
+- Inline images now reuse the same atom path as inline math for wrapping, row height, selection bounds, cursor snapping, mouse hit testing, and keyboard movement.
+- The atom renders a fixed-size image placeholder/image element using the parsed image URL while keeping the visible alt text as the display-mapping fallback text.
+- Empty-alt inline images and loaded-image aspect-ratio sizing remain future work.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 90/90 tests.
+- `cargo test -p md_editor` passed: 92/92 tests.
 - `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo check -p markdown_editor` passed.
 - `git diff --check` passed with only LF/CRLF warnings for touched files.
