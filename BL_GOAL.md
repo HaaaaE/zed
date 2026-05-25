@@ -521,11 +521,19 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Remote image block checks now share a row-local helper so code that already has the source row can avoid another row lookup while preserving the existing general helper for cursor/selection paths.
 - Added coverage that display rows retain their source text and source range.
 
+### 2026-05-25 - Rendered active range invalidates touched rows
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Rendered row layout cache keys now include the active source range only for rows whose source range intersects that active range.
+- Rendered selection changes clear cached row layouts only for the previous/current active source rows instead of clearing the entire row layout cache.
+- The same previous/current active source rows are merged before remeasurement, keeping cursor movement from invalidating unrelated Rendered rows.
+- Added focused coverage for active-range row merging and for cache keys ignoring non-intersecting rows.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 15/15 tests.
-- `cargo test -p md_editor` passed: 101/101 tests.
+- `cargo test -p md_editor` passed: 103/103 tests.
 - `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo test -p md_editor rendered_mode_draws_inline_image_atom` passed and covers drawing a Rendered-mode inline image atom through the GPUI path.
 - `cargo test -p md_editor rendered_mode_draws_empty_alt_inline_image_atom` passed and covers drawing a Rendered-mode empty-alt inline image atom through the GPUI path.

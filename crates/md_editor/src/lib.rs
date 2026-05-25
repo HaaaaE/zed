@@ -1455,39 +1455,19 @@ impl MarkdownEditor {
         let snapshot = self.buffer.snapshot();
         let previous_active = active_source_range_for_selection(&snapshot, previous_selection);
         let current_active = active_source_range_for_selection(&snapshot, &self.selection);
+        let active_rows = source_rows_for_active_range_change(
+            &snapshot,
+            previous_active.as_ref(),
+            current_active.as_ref(),
+        );
         if apply_rendered_active_source_range_change(
             &mut self.selection,
             previous_active.as_ref(),
             current_active.as_ref(),
         ) {
-            self.clear_row_layout_cache();
+            self.clear_row_layout_cache_for_row_ranges(&active_rows);
         }
-        self.remeasure_rows_from_source_ranges(
-            &snapshot,
-            previous_active.as_ref(),
-            current_active.as_ref(),
-        );
-    }
-
-    fn remeasure_rows_from_source_ranges(
-        &self,
-        snapshot: &BufferSnapshot,
-        previous_source_range: Option<&Range<usize>>,
-        current_source_range: Option<&Range<usize>>,
-    ) {
-        let mut ranges = Vec::new();
-        if let Some(previous_source_range) = previous_source_range
-            && let Some(rows) = source_range_to_row_range(snapshot, previous_source_range)
-        {
-            ranges.push(rows);
-        }
-        if let Some(current_source_range) = current_source_range
-            && let Some(rows) = source_range_to_row_range(snapshot, current_source_range)
-        {
-            ranges.push(rows);
-        }
-
-        for rows in merge_overlapping_row_ranges(ranges) {
+        for rows in active_rows {
             self.display_list_state.remeasure_items(rows);
         }
     }
@@ -1504,6 +1484,14 @@ impl MarkdownEditor {
     fn clear_row_layout_cache_for_rows(&mut self, rows: Range<usize>) {
         self.row_layout_cache
             .retain(|key, _| !rows.contains(&(key.row as usize)));
+    }
+
+    fn clear_row_layout_cache_for_row_ranges(&mut self, row_ranges: &[Range<usize>]) {
+        self.row_layout_cache.retain(|key, _| {
+            !row_ranges
+                .iter()
+                .any(|rows| rows.contains(&(key.row as usize)))
+        });
     }
 
     fn reveal_cursor_row(&mut self) {
@@ -1530,11 +1518,12 @@ impl MarkdownEditor {
             row: display_row.row,
             mode,
             wrap_width,
-            active_source_range: if mode == MarkdownEditorMode::Rendered {
-                active_source_range_for_selection(snapshot, selection)
-            } else {
-                None
-            },
+            active_source_range: row_layout_active_source_range(
+                snapshot,
+                display_row,
+                selection,
+                mode,
+            ),
         };
 
         if let Some(cached_layout) = self.row_layout_cache.get(&cache_key) {
@@ -2122,6 +2111,26 @@ fn apply_rendered_active_source_range_change(
 
     *selection = selection_without_wrapped_visual_row_goal(selection);
     true
+}
+
+fn source_rows_for_active_range_change(
+    snapshot: &BufferSnapshot,
+    previous_source_range: Option<&Range<usize>>,
+    current_source_range: Option<&Range<usize>>,
+) -> Vec<Range<usize>> {
+    let mut ranges = Vec::new();
+    if let Some(previous_source_range) = previous_source_range
+        && let Some(rows) = source_range_to_row_range(snapshot, previous_source_range)
+    {
+        ranges.push(rows);
+    }
+    if let Some(current_source_range) = current_source_range
+        && let Some(rows) = source_range_to_row_range(snapshot, current_source_range)
+    {
+        ranges.push(rows);
+    }
+
+    merge_overlapping_row_ranges(ranges)
 }
 
 pub fn move_left(snapshot: &BufferSnapshot, cursor: Point) -> Point {
@@ -4339,6 +4348,21 @@ fn active_source_range_for_selection(
             .floor_char_boundary(offset.saturating_sub(1));
         Some(start..offset)
     }
+}
+
+fn row_layout_active_source_range(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+) -> Option<Range<usize>> {
+    if mode != MarkdownEditorMode::Rendered {
+        return None;
+    }
+
+    active_source_range_for_selection(snapshot, selection).filter(|active_source_range| {
+        ranges_overlap(active_source_range, &display_row.source_range)
+    })
 }
 
 fn selection_range_is_whole_rendered_element(
@@ -6810,6 +6834,62 @@ mod tests {
         assert_eq!(
             selection.goal,
             SelectionGoal::WrappedHorizontalPosition((1, 24.))
+        );
+    }
+
+    #[test]
+    fn source_rows_for_active_range_change_returns_touched_rows() {
+        let mut buffer = Buffer::local("first\nsecond\nthird\n");
+        let snapshot = buffer.snapshot();
+
+        assert_eq!(
+            source_rows_for_active_range_change(&snapshot, Some(&(1..3)), Some(&(14..16))),
+            vec![0..1, 2..3]
+        );
+        assert_eq!(
+            source_rows_for_active_range_change(&snapshot, Some(&(1..3)), Some(&(7..10))),
+            vec![0..2]
+        );
+    }
+
+    #[test]
+    fn row_layout_active_source_range_only_affects_intersecting_rows() {
+        let mut buffer = Buffer::local("first\nsecond\nthird\n");
+        let snapshot = buffer.snapshot();
+        let rows = display_rows_in_mode(
+            &snapshot,
+            0..3,
+            Some(&collapsed_selection(Point::new(0, 2))),
+            MarkdownEditorMode::Rendered,
+        );
+        let selection = collapsed_selection(Point::new(0, 2));
+
+        assert_eq!(
+            row_layout_active_source_range(
+                &snapshot,
+                &rows[0],
+                &selection,
+                MarkdownEditorMode::Rendered
+            ),
+            Some(2..3)
+        );
+        assert_eq!(
+            row_layout_active_source_range(
+                &snapshot,
+                &rows[2],
+                &selection,
+                MarkdownEditorMode::Rendered
+            ),
+            None
+        );
+        assert_eq!(
+            row_layout_active_source_range(
+                &snapshot,
+                &rows[0],
+                &selection,
+                MarkdownEditorMode::Source
+            ),
+            None
         );
     }
 
