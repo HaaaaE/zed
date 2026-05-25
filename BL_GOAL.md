@@ -577,6 +577,13 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Cached display-row and row-layout key construction no longer reparses the same Rendered-mode active/inactive selection projection state for each visible row.
 - This removes a small but repeated per-row cost from long-document scrolling and movement while preserving the existing cache dependency key semantics.
 
+### 2026-05-25 - Row layouts reuse display row dependencies
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- `DisplayRow` now stores the active projection source ranges used to key its projected row cache entry.
+- Row layout cache keys reuse those stored ranges instead of recomputing marker-visibility dependencies for the same row.
+- This removes duplicate dependency-range scanning from render, mouse hit testing, and visual movement cache lookup paths while preserving the same invalidation semantics.
+
 ## Verification
 
 - `cargo fmt -p gpui -p markdown_wysiwyg -p md_buffer -p md_editor -p markdown_editor` passed.

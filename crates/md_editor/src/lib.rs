@@ -127,6 +127,7 @@ pub struct DisplayRow {
     pub text: String,
     source_text: String,
     source_range: Range<usize>,
+    active_projection_source_ranges: Vec<Range<usize>>,
     projection: MarkdownProjectionMap,
     insertions: Vec<DisplayInsertion>,
 }
@@ -1014,7 +1015,6 @@ impl MarkdownEditor {
             &display_row,
             selection,
             self.mode,
-            &display_row_state,
             row_style,
             wrap_width,
             false,
@@ -1079,7 +1079,6 @@ impl MarkdownEditor {
             &display_row,
             selection,
             self.mode,
-            &display_row_state,
             row_style,
             wrap_width,
             false,
@@ -1153,7 +1152,6 @@ impl MarkdownEditor {
             &target_display_row,
             selection,
             self.mode,
-            &display_row_state,
             target_row_style,
             wrap_width,
             false,
@@ -1563,23 +1561,27 @@ impl MarkdownEditor {
 
         let row = row as u32;
         let source_range = row_source_range(snapshot, row);
+        let active_projection_source_ranges =
+            active_projection_source_ranges(snapshot, &source_range, display_row_state, mode);
         let cache_key = DisplayRowCacheKey {
             version: snapshot.version().clone(),
             row,
             mode,
-            active_projection_source_ranges: active_projection_source_ranges(
-                snapshot,
-                &source_range,
-                display_row_state,
-                mode,
-            ),
+            active_projection_source_ranges: active_projection_source_ranges.clone(),
         };
 
         if let Some(display_row) = self.display_row_cache.get(&cache_key) {
             return Some(display_row.clone());
         }
 
-        let display_row = Arc::new(display_row_in_mode(snapshot, row, mode, display_row_state));
+        let display_row = Arc::new(display_row_in_mode(
+            snapshot,
+            row,
+            mode,
+            display_row_state,
+            source_range,
+            active_projection_source_ranges,
+        ));
         self.display_row_cache
             .insert(cache_key, display_row.clone());
         Some(display_row)
@@ -1591,7 +1593,6 @@ impl MarkdownEditor {
         display_row: &DisplayRow,
         selection: &Selection<Point>,
         mode: MarkdownEditorMode,
-        display_row_state: &DisplayRowProjectionState,
         row_style: RowDisplayStyle,
         wrap_width: gpui::Pixels,
         measure_inline_atoms: bool,
@@ -1602,12 +1603,7 @@ impl MarkdownEditor {
             row: display_row.row,
             mode,
             wrap_width,
-            active_projection_source_ranges: active_projection_source_ranges(
-                snapshot,
-                &display_row.source_range,
-                display_row_state,
-                mode,
-            ),
+            active_projection_source_ranges: display_row.active_projection_source_ranges.clone(),
         };
 
         if let Some(cached_layout) = self.row_layout_cache.get(&cache_key) {
@@ -1647,14 +1643,11 @@ impl MarkdownEditor {
         let wrap_width = text_wrap_width(window);
         let row_style = row_display_style_for_display_row(&snapshot, display_row, self.mode);
         let selection = self.selection.clone();
-        let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&selection), self.mode);
         let (point, goal) = match self.cached_row_layout(
             &snapshot,
             display_row,
             &selection,
             self.mode,
-            &display_row_state,
             row_style,
             wrap_width,
             false,
@@ -1700,14 +1693,11 @@ impl MarkdownEditor {
         let wrap_width = text_wrap_width(window);
         let row_style = row_display_style_for_display_row(&snapshot, display_row, self.mode);
         let selection = self.selection.clone();
-        let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&selection), self.mode);
         let (point, goal) = match self.cached_row_layout(
             &snapshot,
             display_row,
             &selection,
             self.mode,
-            &display_row_state,
             row_style,
             wrap_width,
             false,
@@ -1849,7 +1839,6 @@ impl Render for MarkdownEditor {
                             &display_row,
                             &selection,
                             mode,
-                            &display_row_state,
                             row_style,
                             wrap_width,
                             true,
@@ -1924,7 +1913,20 @@ fn display_rows_in_mode(
     let end = range.end.min(row_count);
     let display_row_state = DisplayRowProjectionState::new(snapshot, selection, mode);
     (start..end)
-        .map(|row| display_row_in_mode(snapshot, row as u32, mode, &display_row_state))
+        .map(|row| {
+            let row = row as u32;
+            let source_range = row_source_range(snapshot, row);
+            let active_projection_source_ranges =
+                active_projection_source_ranges(snapshot, &source_range, &display_row_state, mode);
+            display_row_in_mode(
+                snapshot,
+                row,
+                mode,
+                &display_row_state,
+                source_range,
+                active_projection_source_ranges,
+            )
+        })
         .collect()
 }
 
@@ -1933,8 +1935,13 @@ fn display_row_in_mode(
     row: u32,
     mode: MarkdownEditorMode,
     display_row_state: &DisplayRowProjectionState,
+    source_range: Range<usize>,
+    active_projection_source_ranges: Vec<Range<usize>>,
 ) -> DisplayRow {
-    let (source_text, source_range) = row_text_and_source_range(snapshot, row);
+    let source_text: String = snapshot
+        .as_text_snapshot()
+        .text_for_range(source_range.clone())
+        .collect();
     let projection = match mode {
         MarkdownEditorMode::Source => MarkdownProjectionMap::new(
             snapshot.as_text_snapshot().len(),
@@ -1957,6 +1964,7 @@ fn display_row_in_mode(
         text,
         source_text,
         source_range,
+        active_projection_source_ranges,
         projection,
         insertions,
     }
