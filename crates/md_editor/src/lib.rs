@@ -894,7 +894,7 @@ impl MarkdownEditor {
     }
 
     pub fn row_text(&mut self, row: u32) -> String {
-        row_text(&self.buffer.snapshot(), row)
+        row_text_in_text_snapshot(self.buffer.as_text_snapshot(), row)
     }
 
     pub fn display_rows(&mut self, range: Range<usize>) -> Vec<DisplayRow> {
@@ -2096,7 +2096,17 @@ fn display_row_in_mode(
 }
 
 pub fn row_text(snapshot: &BufferSnapshot, row: u32) -> String {
-    row_text_and_source_range(snapshot, row).0
+    row_text_in_text_snapshot(snapshot.as_text_snapshot(), row)
+}
+
+fn row_text_in_text_snapshot(snapshot: &TextBufferSnapshot, row: u32) -> String {
+    if row >= snapshot.row_count() {
+        return String::new();
+    }
+
+    let start = snapshot.point_to_offset(Point::new(row, 0));
+    let end = start + snapshot.line_len(row) as usize;
+    snapshot.text_for_range(start..end).collect()
 }
 
 fn row_source_range(snapshot: &BufferSnapshot, row: u32) -> Range<usize> {
@@ -2109,21 +2119,6 @@ fn row_source_range(snapshot: &BufferSnapshot, row: u32) -> Range<usize> {
     let start = text_snapshot.point_to_offset(Point::new(row, 0));
     let end = start + text_snapshot.line_len(row) as usize;
     start..end
-}
-
-fn row_text_and_source_range(snapshot: &BufferSnapshot, row: u32) -> (String, Range<usize>) {
-    let text_snapshot = snapshot.as_text_snapshot();
-    if row >= text_snapshot.row_count() {
-        let end = text_snapshot.len();
-        return (String::new(), end..end);
-    }
-
-    let start = text_snapshot.point_to_offset(Point::new(row, 0));
-    let end = start + text_snapshot.line_len(row) as usize;
-    (
-        text_snapshot.text_for_range(start..end).collect(),
-        start..end,
-    )
 }
 
 fn project_display_row_text(
