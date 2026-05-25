@@ -491,10 +491,17 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - This reduces one of the clearest long-document scrolling costs: newly visible rows no longer multiply their row layout work by the full document's inline span count.
 - Added coverage for range-local inline span filtering and for rendered-element boundary queries staying local to the cursor while still recognizing nearby inline atoms and image blocks.
 
+### 2026-05-25 - Inline span range queries use indexed starts
+
+- Scope: `crates/markdown_wysiwyg/src/markdown_wysiwyg.rs`.
+- Added a prefix maximum-end index for parsed inline spans so `inline_spans_in_source_range` can binary-search the first possibly overlapping span instead of linearly skipping from the start of the document.
+- The query still preserves spans that start before the requested range and overlap it, which matters for multi-line inline syntax.
+- Added coverage for a multi-line inline span that starts before the queried range and still needs to be returned.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
-- `cargo test -p markdown_wysiwyg` passed: 14/14 tests.
+- `cargo test -p markdown_wysiwyg` passed: 15/15 tests.
 - `cargo test -p md_editor` passed: 98/98 tests.
 - `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo test -p md_editor rendered_mode_draws_inline_image_atom` passed and covers drawing a Rendered-mode inline image atom through the GPUI path.

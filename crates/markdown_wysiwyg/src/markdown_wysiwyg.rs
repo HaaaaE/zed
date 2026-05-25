@@ -9,6 +9,7 @@ pub struct MarkdownSyntaxTree {
     line_starts: Vec<usize>,
     blocks: Vec<MarkdownBlock>,
     inline_spans: Vec<MarkdownInlineSpan>,
+    inline_span_prefix_maximum_ends: Vec<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -176,9 +177,9 @@ impl MarkdownSyntaxTree {
     ) -> impl Iterator<Item = &MarkdownInlineSpan> {
         let start = range.start;
         let end = range.end;
-        self.inline_spans
+        let start_index = self.partition_inline_spans_by_prefix_end(start);
+        self.inline_spans[start_index..]
             .iter()
-            .skip_while(move |span| span.source_range.end <= start)
             .take_while(move |span| span.source_range.start < end)
             .filter(move |span| span.source_range.start < end && span.source_range.end > start)
     }
@@ -278,6 +279,7 @@ impl MarkdownSyntaxTree {
         let line_starts = line_starts(source);
         let blocks = collect_blocks(source, &line_starts, tree.block_tree());
         let inline_spans = collect_inline_spans(source, &tree);
+        let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
 
         Self {
             tree,
@@ -285,12 +287,18 @@ impl MarkdownSyntaxTree {
             line_starts,
             blocks,
             inline_spans,
+            inline_span_prefix_maximum_ends,
         }
     }
 
     fn partition_blocks_by_end(&self, offset: usize) -> usize {
         self.blocks
             .partition_point(|block| block.source_range.end <= offset)
+    }
+
+    fn partition_inline_spans_by_prefix_end(&self, offset: usize) -> usize {
+        self.inline_span_prefix_maximum_ends
+            .partition_point(|end| *end <= offset)
     }
 }
 
@@ -506,6 +514,17 @@ fn collect_inline_spans(source: &str, parse_tree: &MarkdownParseTree) -> Vec<Mar
     }
     spans.sort_by_key(|span| (span.source_range.start, span.source_range.end));
     spans
+}
+
+fn inline_span_prefix_maximum_ends(inline_spans: &[MarkdownInlineSpan]) -> Vec<usize> {
+    let mut maximum_end = 0;
+    inline_spans
+        .iter()
+        .map(|span| {
+            maximum_end = maximum_end.max(span.source_range.end);
+            maximum_end
+        })
+        .collect()
 }
 
 fn collect_inline_span_nodes(source: &str, node: Node<'_>, spans: &mut Vec<MarkdownInlineSpan>) {
@@ -928,6 +947,20 @@ mod tests {
 
         assert_eq!(first_row_spans, vec![MarkdownInlineKind::Strong]);
         assert_eq!(second_row_spans, vec![MarkdownInlineKind::Link]);
+    }
+
+    #[test]
+    fn inline_spans_in_source_range_includes_spans_starting_before_range() {
+        let source = "before **bold\nstill bold** after\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let second_row_start = source.find("still").expect("expected second row");
+
+        let second_row_spans = tree
+            .inline_spans_in_source_range(second_row_start..source.len())
+            .map(|span| span.kind)
+            .collect::<Vec<_>>();
+
+        assert_eq!(second_row_spans, vec![MarkdownInlineKind::Strong]);
     }
 
     #[test]
