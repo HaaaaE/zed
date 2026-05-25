@@ -403,11 +403,19 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - This keeps keyboard movement, mouse selection, undo/redo, typing, and mode switching from leaving the caret on a row outside the visible list viewport.
 - Added coverage that cursor-row reveal clips the target to the current list item range before scrolling.
 
+### 2026-05-25 - Block layout geometry uses shared block interface
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Remote image block geometry now routes through `DisplayBlockLayout` for source ranges, visible x positions, x-to-point mapping, mouse hit targets, Home/End targets, caret x positions, and whole-block selected state.
+- Block mouse down and drag handlers now receive the shared block layout instead of image-specific source ranges and widths.
+- Removed the old high-level image-block geometry helpers, leaving the remaining image-specific x/source-offset mapping as the remote-image variant implementation detail.
+- Added focused coverage for block line-boundary targets while updating existing image-block geometry tests to assert through `DisplayBlockLayout`.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 86/86 tests.
+- `cargo test -p md_editor` passed: 87/87 tests.
 - `cargo check -p markdown_editor` passed.
 - `git diff --check` passed with only the existing LF/CRLF warning for `crates/md_editor/src/lib.rs`.
 

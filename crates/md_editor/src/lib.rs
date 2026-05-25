@@ -225,6 +225,105 @@ impl DisplayBlockLayout {
             Self::RemoteImage(image_layout) => image_layout.height(),
         }
     }
+
+    fn source_range(&self) -> &Range<usize> {
+        match self {
+            Self::RemoteImage(image_layout) => &image_layout.image_block.source_range,
+        }
+    }
+
+    fn visible_x_for_source_offset(&self, source_offset: usize) -> gpui::Pixels {
+        match self {
+            Self::RemoteImage(image_layout) => image_block_visible_x_for_source_offset(
+                &image_layout.image_block.source_range,
+                image_layout.width,
+                source_offset,
+            ),
+        }
+    }
+
+    fn source_offset_for_x(&self, x: gpui::Pixels) -> usize {
+        match self {
+            Self::RemoteImage(image_layout) => {
+                image_block_source_offset_for_x(&image_layout.image_block, image_layout.width, x)
+            }
+        }
+    }
+
+    fn point_for_x(&self, snapshot: &BufferSnapshot, x: gpui::Pixels) -> Point {
+        let offset = self.source_offset_for_x(x);
+        let offset = snapshot
+            .as_text_snapshot()
+            .as_rope()
+            .floor_char_boundary(offset);
+
+        clip_cursor(
+            snapshot,
+            snapshot.as_text_snapshot().offset_to_point(offset),
+        )
+    }
+
+    fn point_for_mouse_x(&self, snapshot: &BufferSnapshot, x: gpui::Pixels) -> Point {
+        self.point_for_x(snapshot, x - gutter_width())
+    }
+
+    fn mouse_target_for_x(
+        &self,
+        snapshot: &BufferSnapshot,
+        x: gpui::Pixels,
+    ) -> (Point, SelectionGoal) {
+        let point = self.point_for_mouse_x(snapshot, x);
+        let source_offset = snapshot.as_text_snapshot().point_to_offset(point);
+        (
+            point,
+            visual_horizontal_goal(0, self.visible_x_for_source_offset(source_offset)),
+        )
+    }
+
+    fn line_boundary_target(
+        &self,
+        snapshot: &BufferSnapshot,
+        boundary: VisualLineBoundary,
+    ) -> (Point, SelectionGoal) {
+        let source_range = self.source_range();
+        let source_offset = match boundary {
+            VisualLineBoundary::Start => source_range.start,
+            VisualLineBoundary::End => source_range.end,
+        };
+        let x = self.visible_x_for_source_offset(source_offset);
+        (
+            snapshot.as_text_snapshot().offset_to_point(source_offset),
+            visual_horizontal_goal(0, x),
+        )
+    }
+
+    fn caret_x(
+        &self,
+        snapshot: &BufferSnapshot,
+        selection: &Selection<Point>,
+    ) -> Option<gpui::Pixels> {
+        if !selection.is_empty() {
+            return None;
+        }
+
+        let source_offset = snapshot
+            .as_text_snapshot()
+            .point_to_offset(clip_cursor(snapshot, selection.head()));
+        let source_range = self.source_range();
+        if source_offset == source_range.start || source_offset == source_range.end {
+            Some(self.visible_x_for_source_offset(source_offset))
+        } else {
+            None
+        }
+    }
+
+    fn is_whole_selected(&self, snapshot: &BufferSnapshot, selection: &Selection<Point>) -> bool {
+        !selection.is_empty()
+            && range_contains(
+                &selection_byte_range(snapshot, selection),
+                self.source_range(),
+            )
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -603,17 +702,8 @@ impl MarkdownEditor {
                 ) - visual_row.line_start_x;
                 Some((point, visual_horizontal_goal(visual_row_index, target_x)))
             }
-            DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(image_layout)) => {
-                let source_offset = match boundary {
-                    VisualLineBoundary::Start => image_layout.image_block.source_range.start,
-                    VisualLineBoundary::End => image_layout.image_block.source_range.end,
-                };
-                let x = match boundary {
-                    VisualLineBoundary::Start => px(0.),
-                    VisualLineBoundary::End => image_layout.width,
-                };
-                let point = snapshot.as_text_snapshot().offset_to_point(source_offset);
-                Some((point, visual_horizontal_goal(0, x)))
+            DisplayRowLayout::Block(block_layout) => {
+                Some(block_layout.line_boundary_target(snapshot, boundary))
             }
         }
     }
@@ -696,12 +786,10 @@ impl MarkdownEditor {
 
                 desired_x
             }
-            DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(image_layout)) => {
-                desired_visual_x(
-                    selection.goal,
-                    image_block_x_for_source_offset(&image_layout, source_offset),
-                )
-            }
+            DisplayRowLayout::Block(block_layout) => desired_visual_x(
+                selection.goal,
+                block_layout.visible_x_for_source_offset(source_offset),
+            ),
         };
 
         let target_row = if delta_visual_rows.is_negative() {
@@ -759,13 +847,8 @@ impl MarkdownEditor {
                     )
                 })
             }
-            DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(image_layout)) => Some((
-                point_for_image_block_x(
-                    snapshot,
-                    &image_layout.image_block,
-                    image_layout.width,
-                    desired_x,
-                ),
+            DisplayRowLayout::Block(block_layout) => Some((
+                block_layout.point_for_x(snapshot, desired_x),
                 visual_horizontal_goal(0, desired_x),
             )),
         }
@@ -1194,10 +1277,9 @@ impl MarkdownEditor {
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
-    fn mouse_left_down_on_image_block(
+    fn mouse_left_down_on_block(
         &mut self,
-        image_block: &RenderedImageBlock,
-        image_width: gpui::Pixels,
+        block_layout: &DisplayBlockLayout,
         event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1206,8 +1288,7 @@ impl MarkdownEditor {
         self.is_selecting_with_mouse = true;
 
         let snapshot = self.buffer.snapshot();
-        let (point, goal) =
-            mouse_target_for_image_block(&snapshot, image_block, image_width, event.position.x);
+        let (point, goal) = block_layout.mouse_target_for_x(&snapshot, event.position.x);
         let previous_selection = self.selection.clone();
         self.selection = if event.modifiers.shift {
             select_to_point_with_goal(&snapshot, &self.selection, point, goal)
@@ -1217,10 +1298,9 @@ impl MarkdownEditor {
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
-    fn mouse_move_on_image_block(
+    fn mouse_move_on_block(
         &mut self,
-        image_block: &RenderedImageBlock,
-        image_width: gpui::Pixels,
+        block_layout: &DisplayBlockLayout,
         event: &MouseMoveEvent,
         _: &mut Window,
         cx: &mut Context<Self>,
@@ -1230,8 +1310,7 @@ impl MarkdownEditor {
         }
 
         let snapshot = self.buffer.snapshot();
-        let (point, goal) =
-            mouse_target_for_image_block(&snapshot, image_block, image_width, event.position.x);
+        let (point, goal) = block_layout.mouse_target_for_x(&snapshot, event.position.x);
         let previous_selection = self.selection.clone();
         self.selection = select_to_point_with_goal(&snapshot, &self.selection, point, goal);
         self.notify_after_selection_change(&previous_selection, cx);
@@ -2136,17 +2215,20 @@ fn render_display_row_layout(
         DisplayRowLayout::Text(text_layout) => {
             render_row_text(snapshot, display_row, text_layout, selection, row_style, cx)
         }
-        DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(image_layout)) => {
-            let selected =
-                image_block_is_whole_selected(snapshot, &image_layout.image_block, selection);
-            let caret_x = image_block_caret_x(snapshot, &image_layout, selection);
-            vec![render_image_block(
-                image_layout,
-                selected,
-                caret_x,
-                row_style,
-                cx,
-            )]
+        DisplayRowLayout::Block(block_layout) => {
+            let selected = block_layout.is_whole_selected(snapshot, selection);
+            let caret_x = block_layout.caret_x(snapshot, selection);
+            match block_layout {
+                DisplayBlockLayout::RemoteImage(image_layout) => {
+                    vec![render_image_block(
+                        image_layout,
+                        selected,
+                        caret_x,
+                        row_style,
+                        cx,
+                    )]
+                }
+            }
         }
     }
 }
@@ -3150,54 +3232,6 @@ fn inline_atom_boundary_for_x(
     }
 }
 
-fn point_for_image_block_mouse_x(
-    snapshot: &BufferSnapshot,
-    image_block: &RenderedImageBlock,
-    image_width: gpui::Pixels,
-    x: gpui::Pixels,
-) -> Point {
-    point_for_image_block_x(snapshot, image_block, image_width, x - gutter_width())
-}
-
-fn mouse_target_for_image_block(
-    snapshot: &BufferSnapshot,
-    image_block: &RenderedImageBlock,
-    image_width: gpui::Pixels,
-    x: gpui::Pixels,
-) -> (Point, SelectionGoal) {
-    let point = point_for_image_block_mouse_x(snapshot, image_block, image_width, x);
-    let source_offset = snapshot.as_text_snapshot().point_to_offset(point);
-    (
-        point,
-        visual_horizontal_goal(
-            0,
-            image_block_visible_x_for_source_offset(
-                &image_block.source_range,
-                image_width,
-                source_offset,
-            ),
-        ),
-    )
-}
-
-fn point_for_image_block_x(
-    snapshot: &BufferSnapshot,
-    image_block: &RenderedImageBlock,
-    image_width: gpui::Pixels,
-    x: gpui::Pixels,
-) -> Point {
-    let offset = image_block_source_offset_for_x(image_block, image_width, x);
-    let offset = snapshot
-        .as_text_snapshot()
-        .as_rope()
-        .floor_char_boundary(offset);
-
-    clip_cursor(
-        snapshot,
-        snapshot.as_text_snapshot().offset_to_point(offset),
-    )
-}
-
 fn image_block_source_offset_for_x(
     image_block: &RenderedImageBlock,
     image_width: gpui::Pixels,
@@ -3209,17 +3243,6 @@ fn image_block_source_offset_for_x(
     } else {
         image_block.source_range.end
     }
-}
-
-fn image_block_x_for_source_offset(
-    image_layout: &RenderedImageBlockLayout,
-    source_offset: usize,
-) -> gpui::Pixels {
-    image_block_visible_x_for_source_offset(
-        &image_layout.image_block.source_range,
-        image_layout.width,
-        source_offset,
-    )
 }
 
 fn image_block_visible_x_for_source_offset(
@@ -3244,11 +3267,10 @@ fn render_image_block(
     cx: &mut Context<MarkdownEditor>,
 ) -> gpui::AnyElement {
     let palette = editor_palette();
-    let image_width = image_layout.width;
     let image_height = image_layout.image_height();
+    let mouse_down_block_layout = DisplayBlockLayout::RemoteImage(image_layout.clone());
+    let mouse_move_block_layout = mouse_down_block_layout.clone();
     let image_block = image_layout.image_block;
-    let mouse_down_image_block = image_block.clone();
-    let mouse_move_image_block = image_block.clone();
     let fallback_label = if image_block.alt_text.trim().is_empty() {
         image_block
             .url
@@ -3270,17 +3292,11 @@ fn render_image_block(
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event, window, cx| {
-                this.mouse_left_down_on_image_block(
-                    &mouse_down_image_block,
-                    image_width,
-                    event,
-                    window,
-                    cx,
-                )
+                this.mouse_left_down_on_block(&mouse_down_block_layout, event, window, cx)
             }),
         )
         .on_mouse_move(cx.listener(move |this, event, window, cx| {
-            this.mouse_move_on_image_block(&mouse_move_image_block, image_width, event, window, cx)
+            this.mouse_move_on_block(&mouse_move_block_layout, event, window, cx)
         }))
         .child(
             div()
@@ -3316,38 +3332,6 @@ fn render_image_block(
             this.child(caret_element(caret_x, row_style))
         })
         .into_any_element()
-}
-
-fn image_block_caret_x(
-    snapshot: &BufferSnapshot,
-    image_layout: &RenderedImageBlockLayout,
-    selection: &Selection<Point>,
-) -> Option<gpui::Pixels> {
-    if !selection.is_empty() {
-        return None;
-    }
-
-    let source_offset = snapshot
-        .as_text_snapshot()
-        .point_to_offset(clip_cursor(snapshot, selection.head()));
-    let source_range = &image_layout.image_block.source_range;
-    if source_offset == source_range.start || source_offset == source_range.end {
-        Some(image_block_x_for_source_offset(image_layout, source_offset))
-    } else {
-        None
-    }
-}
-
-fn image_block_is_whole_selected(
-    snapshot: &BufferSnapshot,
-    image_block: &RenderedImageBlock,
-    selection: &Selection<Point>,
-) -> bool {
-    !selection.is_empty()
-        && range_contains(
-            &selection_byte_range(snapshot, selection),
-            &image_block.source_range,
-        )
 }
 
 fn caret_element(caret_x: gpui::Pixels, row_style: RowDisplayStyle) -> gpui::AnyElement {
@@ -4139,6 +4123,18 @@ fn merge_overlapping_row_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usiz
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn image_block_layout(source_range: Range<usize>, width: gpui::Pixels) -> DisplayBlockLayout {
+        DisplayBlockLayout::RemoteImage(RenderedImageBlockLayout {
+            image_block: RenderedImageBlock {
+                url: "https://example.com/cat.png".to_string(),
+                alt_text: "alt".to_string(),
+                source_range,
+            },
+            width,
+            image_height: px(120.),
+        })
+    }
 
     #[test]
     fn display_rows_preserve_empty_lines_and_final_empty_row() {
@@ -4950,11 +4946,7 @@ mod tests {
         let image_source = "![alt](https://example.com/cat.png)";
         let mut buffer = Buffer::local(&format!("{image_source}\nnext\n"));
         let snapshot = buffer.snapshot();
-        let image_block = RenderedImageBlock {
-            url: "https://example.com/cat.png".to_string(),
-            alt_text: "alt".to_string(),
-            source_range: 0..image_source.len(),
-        };
+        let block_layout = image_block_layout(0..image_source.len(), px(200.));
         let whole_selection = Selection {
             id: 0,
             start: Point::new(0, 0),
@@ -4977,58 +4969,28 @@ mod tests {
             goal: SelectionGoal::None,
         };
 
-        assert!(image_block_is_whole_selected(
-            &snapshot,
-            &image_block,
-            &whole_selection
-        ));
-        assert!(image_block_is_whole_selected(
-            &snapshot,
-            &image_block,
-            &containing_selection
-        ));
-        assert!(!image_block_is_whole_selected(
-            &snapshot,
-            &image_block,
-            &partial_selection
-        ));
-        assert!(!image_block_is_whole_selected(
-            &snapshot,
-            &image_block,
-            &collapsed_selection(Point::new(0, 0))
-        ));
+        assert!(block_layout.is_whole_selected(&snapshot, &whole_selection));
+        assert!(block_layout.is_whole_selected(&snapshot, &containing_selection));
+        assert!(!block_layout.is_whole_selected(&snapshot, &partial_selection));
+        assert!(!block_layout.is_whole_selected(&snapshot, &collapsed_selection(Point::new(0, 0))));
     }
 
     #[test]
     fn image_block_mouse_x_maps_to_source_range_edges() {
         let mut buffer = Buffer::local("![alt](https://example.com/cat.png)\n");
         let snapshot = buffer.snapshot();
-        let image_block = RenderedImageBlock {
-            url: "https://example.com/cat.png".to_string(),
-            alt_text: "alt".to_string(),
-            source_range: 0..35,
-        };
+        let block_layout = image_block_layout(0..35, px(200.));
 
         assert_eq!(
-            point_for_image_block_mouse_x(&snapshot, &image_block, px(200.), gutter_width()),
+            block_layout.point_for_mouse_x(&snapshot, gutter_width()),
             Point::new(0, 0)
         );
         assert_eq!(
-            point_for_image_block_mouse_x(
-                &snapshot,
-                &image_block,
-                px(200.),
-                gutter_width() + px(160.)
-            ),
+            block_layout.point_for_mouse_x(&snapshot, gutter_width() + px(160.)),
             Point::new(0, 35)
         );
         assert_eq!(
-            point_for_image_block_mouse_x(
-                &snapshot,
-                &image_block,
-                px(200.),
-                gutter_width() + px(260.)
-            ),
+            block_layout.point_for_mouse_x(&snapshot, gutter_width() + px(260.)),
             Point::new(0, 35)
         );
     }
@@ -5037,32 +4999,18 @@ mod tests {
     fn image_block_mouse_target_tracks_visible_caret_goal() {
         let mut buffer = Buffer::local("![alt](https://example.com/cat.png)\n");
         let snapshot = buffer.snapshot();
-        let image_block = RenderedImageBlock {
-            url: "https://example.com/cat.png".to_string(),
-            alt_text: "alt".to_string(),
-            source_range: 0..35,
-        };
+        let block_layout = image_block_layout(0..35, px(200.));
 
         assert_eq!(
-            mouse_target_for_image_block(&snapshot, &image_block, px(200.), gutter_width()),
+            block_layout.mouse_target_for_x(&snapshot, gutter_width()),
             (Point::new(0, 0), visual_horizontal_goal(0, px(0.)))
         );
         assert_eq!(
-            mouse_target_for_image_block(
-                &snapshot,
-                &image_block,
-                px(200.),
-                gutter_width() + px(160.)
-            ),
+            block_layout.mouse_target_for_x(&snapshot, gutter_width() + px(160.)),
             (Point::new(0, 35), visual_horizontal_goal(0, px(200.)))
         );
         assert_eq!(
-            mouse_target_for_image_block(
-                &snapshot,
-                &image_block,
-                px(200.),
-                gutter_width() + px(260.)
-            ),
+            block_layout.mouse_target_for_x(&snapshot, gutter_width() + px(260.)),
             (Point::new(0, 35), visual_horizontal_goal(0, px(200.)))
         );
     }
@@ -5095,19 +5043,27 @@ mod tests {
 
     #[test]
     fn image_block_source_offset_maps_to_visible_x() {
-        let image_layout = RenderedImageBlockLayout {
-            image_block: RenderedImageBlock {
-                url: "https://example.com/cat.png".to_string(),
-                alt_text: "alt".to_string(),
-                source_range: 4..39,
-            },
-            width: px(200.),
-            image_height: px(120.),
-        };
+        let block_layout = image_block_layout(4..39, px(200.));
 
-        assert_eq!(image_block_x_for_source_offset(&image_layout, 4), px(0.));
-        assert_eq!(image_block_x_for_source_offset(&image_layout, 20), px(100.));
-        assert_eq!(image_block_x_for_source_offset(&image_layout, 39), px(200.));
+        assert_eq!(block_layout.visible_x_for_source_offset(4), px(0.));
+        assert_eq!(block_layout.visible_x_for_source_offset(20), px(100.));
+        assert_eq!(block_layout.visible_x_for_source_offset(39), px(200.));
+    }
+
+    #[test]
+    fn image_block_line_boundary_targets_source_edges() {
+        let mut buffer = Buffer::local("    ![alt](https://example.com/cat.png)\n");
+        let snapshot = buffer.snapshot();
+        let block_layout = image_block_layout(4..39, px(200.));
+
+        assert_eq!(
+            block_layout.line_boundary_target(&snapshot, VisualLineBoundary::Start),
+            (Point::new(0, 4), visual_horizontal_goal(0, px(0.)))
+        );
+        assert_eq!(
+            block_layout.line_boundary_target(&snapshot, VisualLineBoundary::End),
+            (Point::new(0, 39), visual_horizontal_goal(0, px(200.)))
+        );
     }
 
     #[test]
@@ -5115,15 +5071,7 @@ mod tests {
         let image_source = "![alt](https://example.com/cat.png)";
         let mut buffer = Buffer::local(&format!("{image_source}\n"));
         let snapshot = buffer.snapshot();
-        let image_layout = RenderedImageBlockLayout {
-            image_block: RenderedImageBlock {
-                url: "https://example.com/cat.png".to_string(),
-                alt_text: "alt".to_string(),
-                source_range: 0..image_source.len(),
-            },
-            width: px(200.),
-            image_height: px(120.),
-        };
+        let block_layout = image_block_layout(0..image_source.len(), px(200.));
         let selection = Selection {
             id: 0,
             start: Point::new(0, 0),
@@ -5133,33 +5081,21 @@ mod tests {
         };
 
         assert_eq!(
-            image_block_caret_x(
-                &snapshot,
-                &image_layout,
-                &collapsed_selection(Point::new(0, 0))
-            ),
+            block_layout.caret_x(&snapshot, &collapsed_selection(Point::new(0, 0))),
             Some(px(0.))
         );
         assert_eq!(
-            image_block_caret_x(
+            block_layout.caret_x(
                 &snapshot,
-                &image_layout,
                 &collapsed_selection(Point::new(0, image_source.len() as u32))
             ),
             Some(px(200.))
         );
         assert_eq!(
-            image_block_caret_x(
-                &snapshot,
-                &image_layout,
-                &collapsed_selection(Point::new(0, 1))
-            ),
+            block_layout.caret_x(&snapshot, &collapsed_selection(Point::new(0, 1))),
             None
         );
-        assert_eq!(
-            image_block_caret_x(&snapshot, &image_layout, &selection),
-            None
-        );
+        assert_eq!(block_layout.caret_x(&snapshot, &selection), None);
     }
 
     #[test]
