@@ -5522,6 +5522,64 @@ mod tests {
     }
 
     #[gpui::test]
+    fn resize_reflow_clears_wrapped_action_goal(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.simulate_resize(gpui::size(px(90.), px(200.)));
+        let editor = cx.new(|cx| MarkdownEditor::for_text("abcdefghijklmnopqrst\n", cx));
+
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(90.), px(200.)),
+            |_, _| editor.clone().into_any_element(),
+        );
+
+        editor.update_in(cx, |editor, window, cx| {
+            editor.set_cursor(Point::new(0, 0));
+            editor.move_down(&MoveDown, window, cx);
+            assert!(matches!(
+                editor.selection.goal,
+                SelectionGoal::WrappedHorizontalPosition(_)
+            ));
+        });
+
+        cx.simulate_resize(gpui::size(px(180.), px(200.)));
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(180.), px(200.)),
+            |_, _| editor.clone().into_any_element(),
+        );
+
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(editor.selection.goal, SelectionGoal::None);
+        });
+    }
+
+    #[gpui::test]
+    fn mode_switch_clears_wrapped_visual_goal(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.simulate_resize(gpui::size(px(90.), px(200.)));
+        let editor = cx.new(|cx| MarkdownEditor::for_text("abcdefghijklmnopqrst\n", cx));
+
+        editor.update_in(cx, |editor, window, cx| {
+            editor.set_cursor(Point::new(0, 0));
+            editor.move_down(&MoveDown, window, cx);
+            let wrapped_cursor = editor.cursor();
+            assert!(matches!(
+                editor.selection.goal,
+                SelectionGoal::WrappedHorizontalPosition(_)
+            ));
+
+            editor.set_mode(MarkdownEditorMode::Rendered, cx);
+            assert_eq!(editor.cursor(), wrapped_cursor);
+            assert_eq!(editor.selection.goal, SelectionGoal::None);
+
+            editor.set_mode(MarkdownEditorMode::Source, cx);
+            assert_eq!(editor.cursor(), wrapped_cursor);
+            assert_eq!(editor.selection.goal, SelectionGoal::None);
+        });
+    }
+
+    #[gpui::test]
     fn rendered_mode_draws_image_block_without_reentering_list_state(
         cx: &mut gpui::TestAppContext,
     ) {
