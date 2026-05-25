@@ -787,7 +787,13 @@ struct RowLayoutCacheKey {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EditLayoutInvalidation {
     Conservative,
-    LocalSourceSelection,
+    LocalSourceSelection { byte_delta: Option<isize> },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct LocalSourceEditInvalidation {
+    rows: Range<usize>,
+    byte_delta: Option<isize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1293,16 +1299,18 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
+        let buffer_len_before = self.buffer.len();
         let (selection, transaction_id) =
             backspace_selection_in_mode(&mut self.buffer, &self.selection, self.mode);
         let changed = transaction_id.is_some();
+        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(
             changed,
             row_count_before,
             &previous_selection,
-            EditLayoutInvalidation::LocalSourceSelection,
+            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
             cx,
         );
     }
@@ -1311,16 +1319,18 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
+        let buffer_len_before = self.buffer.len();
         let (selection, transaction_id) =
             delete_selection_in_mode(&mut self.buffer, &self.selection, self.mode);
         let changed = transaction_id.is_some();
+        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(
             changed,
             row_count_before,
             &previous_selection,
-            EditLayoutInvalidation::LocalSourceSelection,
+            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
             cx,
         );
     }
@@ -1331,16 +1341,18 @@ impl MarkdownEditor {
         let row_count_before = self.display_list_state.item_count();
         let current_line_indent = current_line_indent(&self.buffer.snapshot(), self.cursor());
         let insert_text = format!("\n{current_line_indent}");
+        let buffer_len_before = self.buffer.len();
         let (selection, transaction_id) =
             replace_selection(&mut self.buffer, &self.selection, &insert_text);
         let changed = transaction_id.is_some();
+        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(
             changed,
             row_count_before,
             &previous_selection,
-            EditLayoutInvalidation::LocalSourceSelection,
+            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
             cx,
         );
     }
@@ -1354,16 +1366,18 @@ impl MarkdownEditor {
         } else {
             "\t".to_string()
         };
+        let buffer_len_before = self.buffer.len();
         let (selection, transaction_id) =
             replace_selection(&mut self.buffer, &self.selection, &tab_text);
         let changed = transaction_id.is_some();
+        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(
             changed,
             row_count_before,
             &previous_selection,
-            EditLayoutInvalidation::LocalSourceSelection,
+            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
             cx,
         );
     }
@@ -1441,9 +1455,11 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
+        let buffer_len_before = self.buffer.len();
         let (selection, transaction_id) =
             replace_selection(&mut self.buffer, &self.selection, text);
         let changed = transaction_id.is_some();
+        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         cx.stop_propagation();
@@ -1451,7 +1467,7 @@ impl MarkdownEditor {
             changed,
             row_count_before,
             &previous_selection,
-            EditLayoutInvalidation::LocalSourceSelection,
+            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
             cx,
         );
     }
@@ -1480,32 +1496,37 @@ impl MarkdownEditor {
         cx: &mut Context<Self>,
     ) {
         let row_count_after = self.buffer.snapshot().row_count() as usize;
-        let remeasure_rows =
-            if changed && invalidation == EditLayoutInvalidation::LocalSourceSelection {
-                local_source_edit_invalidation_rows(
-                    self.mode,
-                    row_count_before,
-                    row_count_after,
-                    previous_selection,
-                    &self.selection,
-                )
-            } else {
-                None
-            };
+        let local_source_edit_invalidation = if changed {
+            match invalidation {
+                EditLayoutInvalidation::LocalSourceSelection { byte_delta } => {
+                    local_source_edit_invalidation_rows(
+                        self.mode,
+                        row_count_before,
+                        row_count_after,
+                        previous_selection,
+                        &self.selection,
+                    )
+                    .map(|rows| LocalSourceEditInvalidation { rows, byte_delta })
+                }
+                EditLayoutInvalidation::Conservative => None,
+            }
+        } else {
+            None
+        };
 
         if changed {
-            if let Some(rows) = remeasure_rows.as_ref() {
+            if let Some(invalidation) = local_source_edit_invalidation.as_ref() {
                 let version = self.buffer.snapshot().version().clone();
-                self.rekey_source_display_row_cache_before_row(rows.start, version);
-                self.clear_row_layout_cache_for_rows(rows.clone());
+                self.rekey_source_display_row_cache_for_local_edit(invalidation, version);
+                self.clear_row_layout_cache_for_rows(invalidation.rows.clone());
             } else {
                 self.clear_display_row_cache();
                 self.clear_row_layout_cache();
             }
         }
         self.sync_display_list_state(row_count_before, previous_selection);
-        if let Some(rows) = remeasure_rows {
-            self.display_list_state.remeasure_items(rows);
+        if let Some(invalidation) = local_source_edit_invalidation {
+            self.display_list_state.remeasure_items(invalidation.rows);
         }
         self.reveal_cursor_row();
         if changed {
@@ -1581,12 +1602,23 @@ impl MarkdownEditor {
         self.display_row_cache.clear();
     }
 
-    fn rekey_source_display_row_cache_before_row(&mut self, row: usize, version: md_text::Global) {
+    fn rekey_source_display_row_cache_for_local_edit(
+        &mut self,
+        invalidation: &LocalSourceEditInvalidation,
+        version: md_text::Global,
+    ) {
         self.display_row_cache = self
             .display_row_cache
             .drain()
             .filter_map(|(key, display_row)| {
-                if key.mode != MarkdownEditorMode::Source || key.row as usize >= row {
+                if key.mode != MarkdownEditorMode::Source {
+                    return None;
+                }
+
+                let row = key.row as usize;
+                if invalidation.rows.contains(&row)
+                    || (invalidation.byte_delta != Some(0) && row >= invalidation.rows.start)
+                {
                     return None;
                 }
 
@@ -2247,6 +2279,12 @@ fn apply_text_wrap_width_change(
     *last_text_wrap_width = Some(wrap_width);
     *selection = selection_without_goal(selection);
     true
+}
+
+fn buffer_byte_delta(before_len: usize, after_len: usize) -> Option<isize> {
+    let before_len = isize::try_from(before_len).ok()?;
+    let after_len = isize::try_from(after_len).ok()?;
+    after_len.checked_sub(before_len)
 }
 
 fn local_source_edit_invalidation_rows(
@@ -7116,7 +7154,9 @@ mod tests {
                 true,
                 row_count_before,
                 &previous_selection,
-                EditLayoutInvalidation::LocalSourceSelection,
+                EditLayoutInvalidation::LocalSourceSelection {
+                    byte_delta: Some("XX".len() as isize),
+                },
                 cx,
             );
 
@@ -7141,6 +7181,72 @@ mod tests {
                 cached_row_2.source_range.start,
                 row_2.source_range.start + "XX".len()
             );
+        });
+    }
+
+    #[gpui::test]
+    fn source_length_preserving_single_row_edit_keeps_later_display_rows(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let editor = cx.update(|cx| cx.new(|cx| MarkdownEditor::for_text("one\ntwo\nthree", cx)));
+
+        editor.update(cx, |editor, cx| {
+            let mode = editor.mode;
+            let snapshot = editor.buffer.snapshot();
+            let display_row_state =
+                DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+            let row_0 = editor
+                .cached_display_row(&snapshot, 0, mode, &display_row_state)
+                .expect("row 0 should exist");
+            let row_1 = editor
+                .cached_display_row(&snapshot, 1, mode, &display_row_state)
+                .expect("row 1 should exist");
+            let row_2 = editor
+                .cached_display_row(&snapshot, 2, mode, &display_row_state)
+                .expect("row 2 should exist");
+
+            let previous_selection = Selection {
+                id: 7,
+                start: Point::new(1, 1),
+                end: Point::new(1, 2),
+                reversed: false,
+                goal: SelectionGoal::None,
+            };
+            editor.selection = previous_selection.clone();
+            let row_count_before = editor.display_list_state.item_count();
+            let buffer_len_before = editor.buffer.len();
+            let (selection, transaction_id) =
+                replace_selection(&mut editor.buffer, &editor.selection, "X");
+            assert!(transaction_id.is_some());
+            let byte_delta = buffer_byte_delta(buffer_len_before, editor.buffer.len());
+            editor.selection = selection;
+
+            editor.notify_after_edit(
+                true,
+                row_count_before,
+                &previous_selection,
+                EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+                cx,
+            );
+
+            let snapshot = editor.buffer.snapshot();
+            let display_row_state =
+                DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+            let cached_row_0 = editor
+                .cached_display_row(&snapshot, 0, mode, &display_row_state)
+                .expect("row 0 should exist after edit");
+            let cached_row_1 = editor
+                .cached_display_row(&snapshot, 1, mode, &display_row_state)
+                .expect("row 1 should exist after edit");
+            let cached_row_2 = editor
+                .cached_display_row(&snapshot, 2, mode, &display_row_state)
+                .expect("row 2 should exist after edit");
+
+            assert!(Arc::ptr_eq(&row_0, &cached_row_0));
+            assert!(!Arc::ptr_eq(&row_1, &cached_row_1));
+            assert!(Arc::ptr_eq(&row_2, &cached_row_2));
+            assert_eq!(cached_row_1.text, "tXo");
+            assert_eq!(cached_row_2.source_range, row_2.source_range);
         });
     }
 

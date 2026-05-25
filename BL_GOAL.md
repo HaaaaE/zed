@@ -45,7 +45,7 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - The render frame snapshots the buffer and clips the selection once per frame, and buffer snapshots share the cached Markdown syntax tree through `Arc`.
 - `ListState::with_default_size_hint` gives long variable-height lists a default unmeasured-row height, reducing scrollbar collapse and scroll-position churn before rows are measured.
 - Width changes clear editor row layout state and stale selection goals without forcing an additional full-list remeasure beyond GPUI list width invalidation.
-- Ordinary Source-mode single-row edits now clear and remeasure only the edited row's cached layout, and rekey Source display-row cache entries before the edited row to the new buffer version. Rendered edits, cross-row edits, row-count changes, undo, and redo remain conservative.
+- Ordinary Source-mode single-row edits now clear and remeasure only the edited row's cached layout, and rekey reusable Source display-row cache entries to the new buffer version. Length-changing edits retain only rows before the edit because later source ranges can shift; length-preserving edits also retain later rows. Rendered edits, cross-row edits, row-count changes, undo, and redo remain conservative.
 
 ### Module Shape and Tests
 
@@ -61,10 +61,11 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - `cargo test -p markdown_wysiwyg` passed: 15/15 tests.
 - `cargo test -p md_buffer` passed: 16/16 tests.
 - `cargo test -p gpui test_default_size_hint_sets_unmeasured_total_height` passed.
-- `cargo test -p md_editor` passed: 107/107 tests.
+- `cargo test -p md_editor` passed: 109/109 tests.
 - `cargo test -p md_editor rendered_inline_row_inputs_collect_styles_and_atoms_together` passed.
 - `cargo test -p md_editor inline_image_atom_size` passed.
 - `cargo test -p md_editor source_single_row_edit_rekeys_display_row_cache_before_edited_row` passed.
+- `cargo test -p md_editor source_length_preserving_single_row_edit_keeps_later_display_rows` passed.
 - `cargo test -p md_editor rendered_mode_does_not_cache_loading_inline_image_layout` passed.
 - `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo test -p md_editor rendered_mode_draws_inline_image_atom` passed and covers drawing a Rendered-mode inline image atom through the GPUI path.
