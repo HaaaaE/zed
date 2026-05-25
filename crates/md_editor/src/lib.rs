@@ -538,6 +538,12 @@ impl DisplayBlockLayout {
         }
     }
 
+    fn cacheable(&self) -> bool {
+        match self {
+            Self::RemoteImage(image_layout) => image_layout.cacheable(),
+        }
+    }
+
     fn source_range(&self) -> &Range<usize> {
         match self {
             Self::RemoteImage(image_layout) => &image_layout.image_block.source_range,
@@ -670,7 +676,7 @@ impl DisplayRowLayout {
     fn cacheable(&self) -> bool {
         match self {
             Self::Text(text_layout) => text_layout.cacheable,
-            Self::Block(_) => false,
+            Self::Block(block_layout) => block_layout.cacheable(),
         }
     }
 
@@ -701,6 +707,7 @@ struct RenderedImageBlockLayout {
     image_block: RenderedImageBlock,
     width: gpui::Pixels,
     image_height: gpui::Pixels,
+    cacheable: bool,
 }
 
 impl RenderedImageBlockLayout {
@@ -712,19 +719,22 @@ impl RenderedImageBlockLayout {
     ) -> Self {
         let width = wrap_width.max(px(1.)).min(RENDERED_IMAGE_BLOCK_MAX_WIDTH);
         let resource = Resource::Uri(image_block.url.clone().into());
-        let height = window
+        let loaded_height = window
             .use_asset::<ImgResourceLoader>(&resource, cx)
             .and_then(|image| {
                 let image = image.ok()?;
                 let size = image.size(0);
                 image_block_height_for_size(width, size.width.0, size.height.0)
-            })
-            .unwrap_or(RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT);
+            });
+        let (image_height, cacheable) = loaded_height
+            .map(|height| (height, true))
+            .unwrap_or((RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT, false));
 
         Self {
             image_block,
             width,
-            image_height: height,
+            image_height,
+            cacheable,
         }
     }
 
@@ -734,6 +744,10 @@ impl RenderedImageBlockLayout {
 
     fn height(&self) -> gpui::Pixels {
         self.image_height() + RENDERED_IMAGE_BLOCK_VERTICAL_PADDING * 2.
+    }
+
+    fn cacheable(&self) -> bool {
+        self.cacheable
     }
 }
 
@@ -5601,6 +5615,7 @@ mod tests {
             },
             width,
             image_height: px(120.),
+            cacheable: true,
         })
     }
 
@@ -5990,6 +6005,28 @@ mod tests {
             gpui::size(px(500.), px(400.)),
             |_, _| editor.clone().into_any_element(),
         );
+    }
+
+    #[gpui::test]
+    fn rendered_mode_does_not_cache_loading_image_block_layout(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        let editor = cx.new(|cx| {
+            let mut editor =
+                MarkdownEditor::for_text("![alt](https://example.com/cat.png)\nnext\n", cx);
+            editor.set_mode(MarkdownEditorMode::Rendered, cx);
+            editor.set_cursor(Point::new(1, 0));
+            editor
+        });
+
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(500.), px(120.)),
+            |_, _| editor.clone().into_any_element(),
+        );
+
+        editor.read_with(cx, |editor, _| {
+            assert!(!editor.row_layout_cache.keys().any(|key| key.row == 0));
+        });
     }
 
     #[gpui::test]
@@ -7429,6 +7466,7 @@ mod tests {
             },
             width: px(200.),
             image_height: px(120.),
+            cacheable: true,
         };
 
         assert_eq!(image_layout.image_height(), px(120.));
@@ -7436,6 +7474,32 @@ mod tests {
             image_layout.height(),
             px(120.) + RENDERED_IMAGE_BLOCK_VERTICAL_PADDING * 2.
         );
+    }
+
+    #[test]
+    fn image_block_layout_cacheability_tracks_loaded_size() {
+        let image_block = RenderedImageBlock {
+            url: "https://example.com/cat.png".to_string(),
+            alt_text: "alt".to_string(),
+            source_range: 4..39,
+        };
+        let loaded_layout =
+            DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(RenderedImageBlockLayout {
+                image_block: image_block.clone(),
+                width: px(200.),
+                image_height: px(120.),
+                cacheable: true,
+            }));
+        let placeholder_layout =
+            DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(RenderedImageBlockLayout {
+                image_block,
+                width: px(200.),
+                image_height: RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT,
+                cacheable: false,
+            }));
+
+        assert!(loaded_layout.cacheable());
+        assert!(!placeholder_layout.cacheable());
     }
 
     #[test]
