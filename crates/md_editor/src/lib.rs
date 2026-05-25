@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash, ops::Range};
+use std::{collections::HashMap, ops::Range, sync::Arc};
 
 use gpui::{
     App, Context, EventEmitter, FocusHandle, Focusable, FontStyle, FontWeight, ImgResourceLoader,
@@ -95,6 +95,7 @@ pub struct MarkdownEditor {
     selection_history: HashMap<md_text::TransactionId, TransactionSelectionState>,
     settings: EditorSettings,
     last_text_wrap_width: Option<gpui::Pixels>,
+    display_row_cache: HashMap<DisplayRowCacheKey, Arc<DisplayRow>>,
     row_layout_cache: HashMap<RowLayoutCacheKey, DisplayRowLayout>,
 }
 
@@ -675,11 +676,50 @@ impl RenderedImageBlockLayout {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct DisplayRowCacheKey {
+    version: md_text::Global,
+    row: u32,
+    mode: MarkdownEditorMode,
+    active_projection_source_ranges: Vec<Range<usize>>,
+}
+
+#[derive(Clone, Debug)]
+struct DisplayRowProjectionState {
+    active_source_range: Option<Range<usize>>,
+    inactive_source_ranges: Vec<Range<usize>>,
+}
+
+impl DisplayRowProjectionState {
+    fn new(
+        snapshot: &BufferSnapshot,
+        selection: Option<&Selection<Point>>,
+        mode: MarkdownEditorMode,
+    ) -> Self {
+        if mode != MarkdownEditorMode::Rendered {
+            return Self {
+                active_source_range: None,
+                inactive_source_ranges: Vec::new(),
+            };
+        }
+
+        Self {
+            active_source_range: selection
+                .and_then(|selection| active_source_range_for_selection(snapshot, selection)),
+            inactive_source_ranges: selection
+                .map(|selection| {
+                    inactive_rendered_element_source_ranges_for_selection(snapshot, selection)
+                })
+                .unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct RowLayoutCacheKey {
     row: u32,
     mode: MarkdownEditorMode,
     wrap_width: gpui::Pixels,
-    active_source_range: Option<Range<usize>>,
+    active_projection_source_ranges: Vec<Range<usize>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -729,6 +769,7 @@ impl MarkdownEditor {
             selection_history: HashMap::default(),
             settings: EditorSettings::default(),
             last_text_wrap_width: None,
+            display_row_cache: HashMap::default(),
             row_layout_cache: HashMap::default(),
         }
     }
@@ -764,6 +805,7 @@ impl MarkdownEditor {
 
         self.mode = mode;
         self.selection = selection_without_goal(&self.selection);
+        self.clear_display_row_cache();
         self.clear_row_layout_cache();
         self.display_list_state.remeasure();
         self.reveal_cursor_row();
@@ -961,14 +1003,8 @@ impl MarkdownEditor {
         cx: &mut Context<Self>,
     ) -> Option<(Point, SelectionGoal)> {
         let cursor = clip_cursor(snapshot, selection.head());
-        let display_row = display_rows_in_mode(
-            snapshot,
-            cursor.row as usize..cursor.row as usize + 1,
-            Some(selection),
-            self.mode,
-        )
-        .into_iter()
-        .next()?;
+        let display_row =
+            self.cached_display_row(snapshot, cursor.row as usize, selection, self.mode)?;
         let row_style = row_display_style_for_display_row(snapshot, &display_row, self.mode);
         let wrap_width = text_wrap_width(window);
         let layout = self.cached_row_layout(
@@ -1029,14 +1065,8 @@ impl MarkdownEditor {
         }
 
         let cursor = clip_cursor(snapshot, selection.head());
-        let display_row = display_rows_in_mode(
-            snapshot,
-            cursor.row as usize..cursor.row as usize + 1,
-            Some(selection),
-            self.mode,
-        )
-        .into_iter()
-        .next()?;
+        let display_row =
+            self.cached_display_row(snapshot, cursor.row as usize, selection, self.mode)?;
         let row_style = row_display_style_for_display_row(snapshot, &display_row, self.mode);
         let wrap_width = text_wrap_width(window);
         let current_layout = self.cached_row_layout(
@@ -1108,14 +1138,8 @@ impl MarkdownEditor {
             }
             next_row
         };
-        let target_display_row = display_rows_in_mode(
-            snapshot,
-            target_row as usize..target_row as usize + 1,
-            Some(selection),
-            self.mode,
-        )
-        .into_iter()
-        .next()?;
+        let target_display_row =
+            self.cached_display_row(snapshot, target_row as usize, selection, self.mode)?;
         let target_row_style =
             row_display_style_for_display_row(snapshot, &target_display_row, self.mode);
         let target_layout = self.cached_row_layout(
@@ -1404,6 +1428,7 @@ impl MarkdownEditor {
             };
 
         if changed {
+            self.clear_display_row_cache();
             if let Some(rows) = remeasure_rows.as_ref() {
                 self.clear_row_layout_cache_for_rows(rows.clone());
             } else {
@@ -1467,6 +1492,7 @@ impl MarkdownEditor {
             previous_active.as_ref(),
             current_active.as_ref(),
         ) {
+            self.clear_display_row_cache_for_row_ranges(&active_rows);
             self.clear_row_layout_cache_for_row_ranges(&active_rows);
         }
         for rows in active_rows {
@@ -1481,6 +1507,18 @@ impl MarkdownEditor {
 
     fn clear_row_layout_cache(&mut self) {
         self.row_layout_cache.clear();
+    }
+
+    fn clear_display_row_cache(&mut self) {
+        self.display_row_cache.clear();
+    }
+
+    fn clear_display_row_cache_for_row_ranges(&mut self, row_ranges: &[Range<usize>]) {
+        self.display_row_cache.retain(|key, _| {
+            !row_ranges
+                .iter()
+                .any(|rows| rows.contains(&(key.row as usize)))
+        });
     }
 
     fn clear_row_layout_cache_for_rows(&mut self, rows: Range<usize>) {
@@ -1504,6 +1542,43 @@ impl MarkdownEditor {
         );
     }
 
+    fn cached_display_row(
+        &mut self,
+        snapshot: &BufferSnapshot,
+        row: usize,
+        selection: &Selection<Point>,
+        mode: MarkdownEditorMode,
+    ) -> Option<Arc<DisplayRow>> {
+        let row_count = snapshot.row_count() as usize;
+        if row >= row_count {
+            return None;
+        }
+
+        let row = row as u32;
+        let display_row_state = DisplayRowProjectionState::new(snapshot, Some(selection), mode);
+        let source_range = row_source_range(snapshot, row);
+        let cache_key = DisplayRowCacheKey {
+            version: snapshot.version().clone(),
+            row,
+            mode,
+            active_projection_source_ranges: active_projection_source_ranges(
+                snapshot,
+                &source_range,
+                &display_row_state,
+                mode,
+            ),
+        };
+
+        if let Some(display_row) = self.display_row_cache.get(&cache_key) {
+            return Some(display_row.clone());
+        }
+
+        let display_row = Arc::new(display_row_in_mode(snapshot, row, mode, &display_row_state));
+        self.display_row_cache
+            .insert(cache_key, display_row.clone());
+        Some(display_row)
+    }
+
     fn cached_row_layout(
         &mut self,
         snapshot: &BufferSnapshot,
@@ -1520,10 +1595,10 @@ impl MarkdownEditor {
             row: display_row.row,
             mode,
             wrap_width,
-            active_source_range: row_layout_active_source_range(
+            active_projection_source_ranges: active_projection_source_ranges(
                 snapshot,
-                display_row,
-                selection,
+                &display_row.source_range,
+                &DisplayRowProjectionState::new(snapshot, Some(selection), mode),
                 mode,
             ),
         };
@@ -1746,14 +1821,9 @@ impl Render for MarkdownEditor {
                 list(
                     self.display_list_state.clone(),
                     cx.processor(move |this, row, window, _cx| {
-                        let Some(display_row) = display_rows_in_mode(
-                            &snapshot,
-                            row..row.saturating_add(1),
-                            Some(&selection),
-                            mode,
-                        )
-                        .into_iter()
-                        .next() else {
+                        let Some(display_row) =
+                            this.cached_display_row(&snapshot, row, &selection, mode)
+                        else {
                             return div().into_any_element();
                         };
 
@@ -1837,52 +1907,44 @@ fn display_rows_in_mode(
     let row_count = snapshot.row_count() as usize;
     let start = range.start.min(row_count);
     let end = range.end.min(row_count);
-    let active_source_range = if mode == MarkdownEditorMode::Rendered {
-        selection.and_then(|selection| active_source_range_for_selection(snapshot, selection))
-    } else {
-        None
-    };
-    let inactive_source_ranges = if mode == MarkdownEditorMode::Rendered {
-        selection
-            .map(|selection| {
-                inactive_rendered_element_source_ranges_for_selection(snapshot, selection)
-            })
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-
+    let display_row_state = DisplayRowProjectionState::new(snapshot, selection, mode);
     (start..end)
-        .map(|row| {
-            let row = row as u32;
-            let (source_text, source_range) = row_text_and_source_range(snapshot, row);
-            let projection = match mode {
-                MarkdownEditorMode::Source => MarkdownProjectionMap::new(
-                    snapshot.as_text_snapshot().len(),
-                    source_range.clone(),
-                    Vec::new(),
-                ),
-                MarkdownEditorMode::Rendered => snapshot
-                    .syntax_tree()
-                    .projection_for_source_range_with_inactive_ranges(
-                        source_range.clone(),
-                        active_source_range.clone(),
-                        &inactive_source_ranges,
-                    ),
-            };
-
-            let (text, insertions) =
-                project_display_row_text(snapshot, &source_text, &source_range, &projection, mode);
-            DisplayRow {
-                row,
-                text,
-                source_text,
-                source_range,
-                projection,
-                insertions,
-            }
-        })
+        .map(|row| display_row_in_mode(snapshot, row as u32, mode, &display_row_state))
         .collect()
+}
+
+fn display_row_in_mode(
+    snapshot: &BufferSnapshot,
+    row: u32,
+    mode: MarkdownEditorMode,
+    display_row_state: &DisplayRowProjectionState,
+) -> DisplayRow {
+    let (source_text, source_range) = row_text_and_source_range(snapshot, row);
+    let projection = match mode {
+        MarkdownEditorMode::Source => MarkdownProjectionMap::new(
+            snapshot.as_text_snapshot().len(),
+            source_range.clone(),
+            Vec::new(),
+        ),
+        MarkdownEditorMode::Rendered => snapshot
+            .syntax_tree()
+            .projection_for_source_range_with_inactive_ranges(
+                source_range.clone(),
+                display_row_state.active_source_range.clone(),
+                &display_row_state.inactive_source_ranges,
+            ),
+    };
+
+    let (text, insertions) =
+        project_display_row_text(snapshot, &source_text, &source_range, &projection, mode);
+    DisplayRow {
+        row,
+        text,
+        source_text,
+        source_range,
+        projection,
+        insertions,
+    }
 }
 
 pub fn row_text(snapshot: &BufferSnapshot, row: u32) -> String {
@@ -1890,7 +1952,15 @@ pub fn row_text(snapshot: &BufferSnapshot, row: u32) -> String {
 }
 
 fn row_source_range(snapshot: &BufferSnapshot, row: u32) -> Range<usize> {
-    row_text_and_source_range(snapshot, row).1
+    let text_snapshot = snapshot.as_text_snapshot();
+    if row >= text_snapshot.row_count() {
+        let end = text_snapshot.len();
+        return end..end;
+    }
+
+    let start = text_snapshot.point_to_offset(Point::new(row, 0));
+    let end = start + text_snapshot.line_len(row) as usize;
+    start..end
 }
 
 fn row_text_and_source_range(snapshot: &BufferSnapshot, row: u32) -> (String, Range<usize>) {
@@ -4350,19 +4420,65 @@ fn active_source_range_for_selection(
     }
 }
 
-fn row_layout_active_source_range(
+fn active_projection_source_ranges(
     snapshot: &BufferSnapshot,
-    display_row: &DisplayRow,
-    selection: &Selection<Point>,
+    source_range: &Range<usize>,
+    display_row_state: &DisplayRowProjectionState,
     mode: MarkdownEditorMode,
-) -> Option<Range<usize>> {
+) -> Vec<Range<usize>> {
     if mode != MarkdownEditorMode::Rendered {
-        return None;
+        return Vec::new();
     }
 
-    active_source_range_for_selection(snapshot, selection).filter(|active_source_range| {
-        ranges_overlap(active_source_range, &display_row.source_range)
-    })
+    let Some(active_source_range) = display_row_state.active_source_range.as_ref() else {
+        return Vec::new();
+    };
+
+    let syntax_tree = snapshot.syntax_tree();
+    let mut source_ranges = Vec::new();
+    for block in syntax_tree.blocks_in_source_range(source_range.clone()) {
+        if block
+            .marker_ranges
+            .iter()
+            .any(|marker_range| ranges_overlap(marker_range, source_range))
+            && projection_source_range_is_active(
+                &block.source_range,
+                active_source_range,
+                &display_row_state.inactive_source_ranges,
+            )
+        {
+            source_ranges.push(block.source_range.clone());
+        }
+    }
+    for span in syntax_tree.inline_spans_in_source_range(source_range.clone()) {
+        if span
+            .marker_ranges
+            .iter()
+            .any(|marker_range| ranges_overlap(marker_range, source_range))
+            && projection_source_range_is_active(
+                &span.source_range,
+                active_source_range,
+                &display_row_state.inactive_source_ranges,
+            )
+        {
+            source_ranges.push(span.source_range.clone());
+        }
+    }
+
+    source_ranges.sort_by_key(|source_range| (source_range.start, source_range.end));
+    source_ranges.dedup();
+    source_ranges
+}
+
+fn projection_source_range_is_active(
+    source_range: &Range<usize>,
+    active_source_range: &Range<usize>,
+    inactive_source_ranges: &[Range<usize>],
+) -> bool {
+    ranges_overlap(source_range, active_source_range)
+        && !inactive_source_ranges
+            .iter()
+            .any(|inactive_source_range| range_contains(inactive_source_range, source_range))
 }
 
 fn selection_range_is_whole_rendered_element(
@@ -6853,43 +6969,109 @@ mod tests {
     }
 
     #[test]
-    fn row_layout_active_source_range_only_affects_intersecting_rows() {
-        let mut buffer = Buffer::local("first\nsecond\nthird\n");
+    fn active_projection_source_ranges_tracks_marker_visibility_dependencies() {
+        let mut buffer = Buffer::local("# Title\nplain\n```rust\ncode\n```\n**bold**\n");
         let snapshot = buffer.snapshot();
-        let rows = display_rows_in_mode(
+        let heading_range = snapshot
+            .syntax_tree()
+            .blocks()
+            .iter()
+            .find_map(|block| match block.kind {
+                MarkdownBlockKind::AtxHeading { .. } => Some(block.source_range.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let fenced_range = snapshot
+            .syntax_tree()
+            .blocks()
+            .iter()
+            .find_map(|block| match block.kind {
+                MarkdownBlockKind::FencedCodeBlock => Some(block.source_range.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let strong_range = snapshot
+            .syntax_tree()
+            .inline_spans()
+            .iter()
+            .find_map(|span| match span.kind {
+                MarkdownInlineKind::Strong => Some(span.source_range.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        assert!(!heading_range.is_empty());
+        assert!(!fenced_range.is_empty());
+        assert!(!strong_range.is_empty());
+
+        let heading_state = DisplayRowProjectionState::new(
             &snapshot,
-            0..3,
-            Some(&collapsed_selection(Point::new(0, 2))),
+            Some(&collapsed_selection(Point::new(0, 3))),
             MarkdownEditorMode::Rendered,
         );
-        let selection = collapsed_selection(Point::new(0, 2));
+        let fenced_state = DisplayRowProjectionState::new(
+            &snapshot,
+            Some(&collapsed_selection(Point::new(3, 1))),
+            MarkdownEditorMode::Rendered,
+        );
+        let strong_state = DisplayRowProjectionState::new(
+            &snapshot,
+            Some(&collapsed_selection(Point::new(5, 3))),
+            MarkdownEditorMode::Rendered,
+        );
 
         assert_eq!(
-            row_layout_active_source_range(
+            active_projection_source_ranges(
                 &snapshot,
-                &rows[0],
-                &selection,
+                &row_source_range(&snapshot, 0),
+                &heading_state,
                 MarkdownEditorMode::Rendered
             ),
-            Some(2..3)
+            vec![heading_range]
         );
         assert_eq!(
-            row_layout_active_source_range(
+            active_projection_source_ranges(
                 &snapshot,
-                &rows[2],
-                &selection,
+                &row_source_range(&snapshot, 1),
+                &heading_state,
                 MarkdownEditorMode::Rendered
             ),
-            None
+            Vec::<Range<usize>>::new()
         );
         assert_eq!(
-            row_layout_active_source_range(
+            active_projection_source_ranges(
                 &snapshot,
-                &rows[0],
-                &selection,
+                &row_source_range(&snapshot, 2),
+                &fenced_state,
+                MarkdownEditorMode::Rendered
+            ),
+            vec![fenced_range]
+        );
+        assert_eq!(
+            active_projection_source_ranges(
+                &snapshot,
+                &row_source_range(&snapshot, 3),
+                &fenced_state,
+                MarkdownEditorMode::Rendered
+            ),
+            Vec::<Range<usize>>::new()
+        );
+        assert_eq!(
+            active_projection_source_ranges(
+                &snapshot,
+                &row_source_range(&snapshot, 5),
+                &strong_state,
+                MarkdownEditorMode::Rendered
+            ),
+            vec![strong_range]
+        );
+        assert_eq!(
+            active_projection_source_ranges(
+                &snapshot,
+                &row_source_range(&snapshot, 0),
+                &heading_state,
                 MarkdownEditorMode::Source
             ),
-            None
+            Vec::<Range<usize>>::new()
         );
     }
 

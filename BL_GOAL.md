@@ -560,9 +560,20 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Width changes still clear the editor row layout cache and drop stale wrapped selection goals, while GPUI `List` continues to invalidate item heights when its actual layout bounds width changes.
 - This removes one redundant full-list remeasure during resize/reflow, reducing duplicated long-document work while preserving width-aware row layout invalidation.
 
+### 2026-05-25 - Display rows are cached across render paths
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- `MarkdownEditor` now caches projected `DisplayRow`s by buffer version, row, mode, and the Markdown source ranges whose marker visibility depends on the current Rendered-mode active source range.
+- List rendering, visual line-boundary movement, and vertical visual movement now reuse cached display rows instead of repeatedly extracting row text and rebuilding Markdown projection for the same visible rows.
+- Batch `display_rows_in_mode` now builds the Rendered projection state once per range and delegates to the same single-row projection helper used by the cache.
+- `row_source_range` now computes byte ranges directly from row offsets instead of copying row text when only a range is needed for cache keys.
+- Text edits, mode switches, and Rendered active-row changes invalidate display-row cache entries alongside row layout cache entries.
+- Added coverage that the cache dependency key tracks marker visibility dependencies for headings, fenced code blocks, and inline strong spans without depending on unrelated rows.
+
 ## Verification
 
 - `cargo fmt -p gpui -p markdown_wysiwyg -p md_buffer -p md_editor -p markdown_editor` passed.
+- `cargo check -p md_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 15/15 tests.
 - `cargo test -p md_buffer` passed: 16/16 tests.
 - `cargo test -p gpui test_default_size_hint_sets_unmeasured_total_height` passed.
