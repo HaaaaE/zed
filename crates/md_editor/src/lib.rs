@@ -602,6 +602,12 @@ struct RowLayoutCacheKey {
     active_source_range: Option<Range<usize>>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EditLayoutInvalidation {
+    Conservative,
+    LocalSourceSelection,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct RowDisplayStyle {
     min_height: gpui::Pixels,
@@ -1121,7 +1127,13 @@ impl MarkdownEditor {
         let changed = transaction_id.is_some();
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
-        self.notify_after_edit(changed, row_count_before, &previous_selection, cx);
+        self.notify_after_edit(
+            changed,
+            row_count_before,
+            &previous_selection,
+            EditLayoutInvalidation::LocalSourceSelection,
+            cx,
+        );
     }
 
     pub fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
@@ -1133,7 +1145,13 @@ impl MarkdownEditor {
         let changed = transaction_id.is_some();
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
-        self.notify_after_edit(changed, row_count_before, &previous_selection, cx);
+        self.notify_after_edit(
+            changed,
+            row_count_before,
+            &previous_selection,
+            EditLayoutInvalidation::LocalSourceSelection,
+            cx,
+        );
     }
 
     pub fn insert_newline(&mut self, _: &InsertNewline, _: &mut Window, cx: &mut Context<Self>) {
@@ -1147,7 +1165,13 @@ impl MarkdownEditor {
         let changed = transaction_id.is_some();
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
-        self.notify_after_edit(changed, row_count_before, &previous_selection, cx);
+        self.notify_after_edit(
+            changed,
+            row_count_before,
+            &previous_selection,
+            EditLayoutInvalidation::LocalSourceSelection,
+            cx,
+        );
     }
 
     pub fn tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
@@ -1164,7 +1188,13 @@ impl MarkdownEditor {
         let changed = transaction_id.is_some();
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
-        self.notify_after_edit(changed, row_count_before, &previous_selection, cx);
+        self.notify_after_edit(
+            changed,
+            row_count_before,
+            &previous_selection,
+            EditLayoutInvalidation::LocalSourceSelection,
+            cx,
+        );
     }
 
     /// Update editor settings at runtime.
@@ -1190,7 +1220,13 @@ impl MarkdownEditor {
                 .unwrap_or(fallback);
             changed = true;
         }
-        self.notify_after_edit(changed, row_count_before, &previous_selection, cx);
+        self.notify_after_edit(
+            changed,
+            row_count_before,
+            &previous_selection,
+            EditLayoutInvalidation::Conservative,
+            cx,
+        );
     }
 
     pub fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
@@ -1206,7 +1242,13 @@ impl MarkdownEditor {
                 .unwrap_or(fallback);
             changed = true;
         }
-        self.notify_after_edit(changed, row_count_before, &previous_selection, cx);
+        self.notify_after_edit(
+            changed,
+            row_count_before,
+            &previous_selection,
+            EditLayoutInvalidation::Conservative,
+            cx,
+        );
     }
 
     fn key_down(&mut self, event: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -1234,7 +1276,13 @@ impl MarkdownEditor {
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         cx.stop_propagation();
-        self.notify_after_edit(changed, row_count_before, &previous_selection, cx);
+        self.notify_after_edit(
+            changed,
+            row_count_before,
+            &previous_selection,
+            EditLayoutInvalidation::LocalSourceSelection,
+            cx,
+        );
     }
 
     fn record_selection_history(
@@ -1257,10 +1305,34 @@ impl MarkdownEditor {
         changed: bool,
         row_count_before: usize,
         previous_selection: &Selection<Point>,
+        invalidation: EditLayoutInvalidation,
         cx: &mut Context<Self>,
     ) {
-        self.clear_row_layout_cache();
+        let row_count_after = self.buffer.snapshot().row_count() as usize;
+        let remeasure_rows =
+            if changed && invalidation == EditLayoutInvalidation::LocalSourceSelection {
+                local_source_edit_invalidation_rows(
+                    self.mode,
+                    row_count_before,
+                    row_count_after,
+                    previous_selection,
+                    &self.selection,
+                )
+            } else {
+                None
+            };
+
+        if changed {
+            if let Some(rows) = remeasure_rows.as_ref() {
+                self.clear_row_layout_cache_for_rows(rows.clone());
+            } else {
+                self.clear_row_layout_cache();
+            }
+        }
         self.sync_display_list_state(row_count_before, previous_selection);
+        if let Some(rows) = remeasure_rows {
+            self.display_list_state.remeasure_items(rows);
+        }
         self.reveal_cursor_row();
         if changed {
             self.emit_dirty_state(cx);
@@ -1348,6 +1420,11 @@ impl MarkdownEditor {
 
     fn clear_row_layout_cache(&mut self) {
         self.row_layout_cache.clear();
+    }
+
+    fn clear_row_layout_cache_for_rows(&mut self, rows: Range<usize>) {
+        self.row_layout_cache
+            .retain(|key, _| !rows.contains(&(key.row as usize)));
     }
 
     fn reveal_cursor_row(&mut self) {
@@ -1866,6 +1943,33 @@ fn apply_text_wrap_width_change(
     *last_text_wrap_width = Some(wrap_width);
     *selection = selection_without_goal(selection);
     true
+}
+
+fn local_source_edit_invalidation_rows(
+    mode: MarkdownEditorMode,
+    row_count_before: usize,
+    row_count_after: usize,
+    previous_selection: &Selection<Point>,
+    current_selection: &Selection<Point>,
+) -> Option<Range<usize>> {
+    if mode != MarkdownEditorMode::Source || row_count_before != row_count_after {
+        return None;
+    }
+
+    let row = previous_selection.start.row;
+    if previous_selection.end.row != row
+        || current_selection.start.row != row
+        || current_selection.end.row != row
+    {
+        return None;
+    }
+
+    let row = row as usize;
+    if row >= row_count_after {
+        return None;
+    }
+
+    Some(row..row.saturating_add(1))
 }
 
 fn apply_rendered_active_source_range_change(
@@ -5937,6 +6041,74 @@ mod tests {
         assert_eq!(
             selection.goal,
             SelectionGoal::WrappedHorizontalPosition((1, 24.))
+        );
+    }
+
+    #[test]
+    fn source_single_row_edit_invalidates_only_that_row() {
+        let previous_selection = Selection {
+            id: 7,
+            start: Point::new(4, 2),
+            end: Point::new(4, 5),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        let current_selection = collapsed_selection(Point::new(4, 8));
+
+        assert_eq!(
+            local_source_edit_invalidation_rows(
+                MarkdownEditorMode::Source,
+                12,
+                12,
+                &previous_selection,
+                &current_selection,
+            ),
+            Some(4..5)
+        );
+    }
+
+    #[test]
+    fn local_edit_invalidation_stays_conservative_for_cross_row_or_rendered_edits() {
+        let previous_selection = Selection {
+            id: 7,
+            start: Point::new(4, 2),
+            end: Point::new(5, 1),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        let current_selection = collapsed_selection(Point::new(4, 8));
+
+        assert_eq!(
+            local_source_edit_invalidation_rows(
+                MarkdownEditorMode::Source,
+                12,
+                12,
+                &previous_selection,
+                &current_selection,
+            ),
+            None
+        );
+
+        assert_eq!(
+            local_source_edit_invalidation_rows(
+                MarkdownEditorMode::Rendered,
+                12,
+                12,
+                &collapsed_selection(Point::new(4, 2)),
+                &current_selection,
+            ),
+            None
+        );
+
+        assert_eq!(
+            local_source_edit_invalidation_rows(
+                MarkdownEditorMode::Source,
+                12,
+                13,
+                &collapsed_selection(Point::new(4, 2)),
+                &current_selection,
+            ),
+            None
         );
     }
 

@@ -459,11 +459,18 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Removed render-time block height tracking and the now-unused `DisplayRowLayout::block_height` helper.
 - Block rows are already measured by the current `layout_as_root` pass, so this avoids re-entering `ListState` from item rendering and keeps block layout measurement in the list's normal layout pass.
 
+### 2026-05-25 - Source single-row edits use local layout invalidation
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Added an edit layout invalidation strategy so ordinary Source-mode single-row edits clear and remeasure only the edited row's cached layout.
+- Rendered-mode edits, cross-row edits, row-count changes, undo, and redo remain conservative full-cache invalidations because Markdown projection and block structure can change beyond the immediate row.
+- Added tests for the local Source invalidation path and conservative fallback boundaries.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 88/88 tests.
+- `cargo test -p md_editor` passed: 90/90 tests.
 - `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo check -p markdown_editor` passed.
 - `git diff --check` passed with only LF/CRLF warnings for touched files.
