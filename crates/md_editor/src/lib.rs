@@ -307,6 +307,36 @@ impl DisplayInlineAtom {
                 && selected_range.end >= self.display_range.end
         })
     }
+
+    fn push_line_fragment<'a>(
+        &self,
+        display_text: &'a str,
+        line_fragments: &mut Vec<LineFragment<'a>>,
+    ) -> Option<()> {
+        let text = display_text.get(self.display_range.clone())?;
+        if !text.is_empty() {
+            line_fragments.push(LineFragment::element(self.width.max(px(1.)), text.len()));
+        }
+        Some(())
+    }
+
+    fn contains_display_index(&self, display_index: usize) -> bool {
+        self.display_range.start < display_index && display_index < self.display_range.end
+    }
+
+    fn boundary_for_x(
+        &self,
+        atom_start_x: gpui::Pixels,
+        atom_end_x: gpui::Pixels,
+        display_x: gpui::Pixels,
+    ) -> usize {
+        let midpoint = atom_start_x + (atom_end_x - atom_start_x) / 2.;
+        if display_x < midpoint {
+            self.display_range.start
+        } else {
+            self.display_range.end
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2595,11 +2625,7 @@ fn line_fragments_for_wrapping<'a>(
                 }
             }
             DisplayInlineFragment::Atom(atom) => {
-                let text = display_text.get(atom.display_range.clone())?;
-                if text.is_empty() {
-                    continue;
-                }
-                line_fragments.push(LineFragment::element(atom.width.max(px(1.)), text.len()));
+                atom.push_line_fragment(display_text, &mut line_fragments)?
             }
         }
     }
@@ -2680,10 +2706,7 @@ fn atom_range_containing_display_index(
 ) -> Option<Range<usize>> {
     fragments.iter().find_map(|fragment| match fragment {
         DisplayInlineFragment::Text(_) => None,
-        DisplayInlineFragment::Atom(atom)
-            if atom.display_range.start < display_index
-                && display_index < atom.display_range.end =>
-        {
+        DisplayInlineFragment::Atom(atom) if atom.contains_display_index(display_index) => {
             Some(atom.display_range.clone())
         }
         DisplayInlineFragment::Atom(_) => None,
@@ -3213,12 +3236,7 @@ fn snap_display_offset_to_inline_atom_boundary(
             return None;
         }
 
-        Some(inline_atom_boundary_for_x(
-            &atom.display_range,
-            atom_start_x,
-            atom_end_x,
-            display_x,
-        ))
+        Some(atom.boundary_for_x(atom_start_x, atom_end_x, display_x))
     })
 }
 
@@ -3252,12 +3270,7 @@ fn closest_display_offset_for_x(
                     return atom.display_range.start;
                 }
                 if display_x <= end_x {
-                    return inline_atom_boundary_for_x(
-                        &atom.display_range,
-                        start_x,
-                        end_x,
-                        display_x,
-                    );
+                    return atom.boundary_for_x(start_x, end_x, display_x);
                 }
             }
         }
@@ -3294,20 +3307,6 @@ fn display_x_for_offset(
     }
 
     shaped_line.x_for_index(display_offset) + delta
-}
-
-fn inline_atom_boundary_for_x(
-    atom_range: &Range<usize>,
-    atom_start_x: gpui::Pixels,
-    atom_end_x: gpui::Pixels,
-    display_x: gpui::Pixels,
-) -> usize {
-    let midpoint = atom_start_x + (atom_end_x - atom_start_x) / 2.;
-    if display_x < midpoint {
-        atom_range.start
-    } else {
-        atom_range.end
-    }
 }
 
 fn image_block_source_offset_for_x(
@@ -4624,16 +4623,18 @@ mod tests {
 
     #[test]
     fn inline_atom_x_position_snaps_to_nearest_boundary() {
-        let atom_range = 7..12;
+        let atom = DisplayInlineAtom {
+            kind: DisplayInlineAtomKind::InlineMath,
+            source_range: 8..15,
+            display_range: 7..12,
+            fallback_text: "x + y".to_string(),
+            style: inline_style(MarkdownInlineKind::InlineMath),
+            height: px(24.),
+            width: px(50.),
+        };
 
-        assert_eq!(
-            inline_atom_boundary_for_x(&atom_range, px(70.), px(120.), px(80.)),
-            7
-        );
-        assert_eq!(
-            inline_atom_boundary_for_x(&atom_range, px(70.), px(120.), px(95.)),
-            12
-        );
+        assert_eq!(atom.boundary_for_x(px(70.), px(120.), px(80.)), 7);
+        assert_eq!(atom.boundary_for_x(px(70.), px(120.), px(95.)), 12);
     }
 
     #[test]

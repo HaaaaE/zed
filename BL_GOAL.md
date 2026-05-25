@@ -418,6 +418,13 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Removed the old free-function inline atom geometry and render helpers, keeping inline math as the current atom variant while giving future inline GPUI elements a shared implementation point.
 - Updated existing inline atom coverage to assert through the atom interface without changing rendered behavior.
 
+### 2026-05-25 - Inline atom hit geometry uses atom interface
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Moved inline atom line-fragment generation, display-index containment, and midpoint x-boundary snapping onto `DisplayInlineAtom`.
+- Wrapping, atom-aware hit testing, and visual movement still behave the same, but future inline atom variants now have a narrower geometry surface to implement.
+- Updated the focused inline atom boundary test to assert through the atom method instead of a free helper.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
