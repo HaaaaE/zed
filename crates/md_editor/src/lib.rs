@@ -5588,23 +5588,30 @@ mod tests {
 
     #[gpui::test]
     fn rendered_mode_actions_update_marker_visibility(cx: &mut gpui::TestAppContext) {
-        let cx = cx.add_empty_window();
-        cx.simulate_resize(gpui::size(px(400.), px(200.)));
-        let editor = cx.new(|cx| {
+        cx.update(init_standalone);
+        let (editor, cx) = cx.add_window_view(|window, cx| {
             let mut editor = MarkdownEditor::for_text("# Title\nBody\n", cx);
             editor.set_mode(MarkdownEditorMode::Rendered, cx);
             editor.set_cursor(Point::new(1, 0));
+            window.focus(&editor.focus_handle(cx), cx);
+            window.activate_window();
             editor
         });
 
-        editor.update_in(cx, |editor, window, cx| {
+        editor.update(cx, |editor, _| {
             assert_eq!(cached_row_text_for_current_selection(editor, 0), "Title");
+        });
 
-            editor.move_up(&MoveUp, window, cx);
+        cx.simulate_keystrokes("up");
+
+        editor.update(cx, |editor, _| {
             assert_eq!(editor.cursor().row, 0);
             assert_eq!(cached_row_text_for_current_selection(editor, 0), "# Title");
+        });
 
-            editor.move_down(&MoveDown, window, cx);
+        cx.simulate_keystrokes("down");
+
+        editor.update(cx, |editor, _| {
             assert_eq!(editor.cursor().row, 1);
             assert_eq!(cached_row_text_for_current_selection(editor, 0), "Title");
         });

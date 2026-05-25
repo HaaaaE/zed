@@ -53,7 +53,7 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 
 - Inline atom layout, atom hit geometry, block rendering, and block layout construction have been moved onto their respective atom/block interfaces to reduce ad hoc branching in the row pipeline.
 - `md_editor` still needs internal module boundary cleanup; `lib.rs` now carries projection, row layout/cache, inline atom, block layout/rendering, selection/movement, hit-testing, rendering, and extensive tests.
-- Coverage now includes focused unit and GPUI-path tests for wrapped movement, action-level Source wrapped keyboard movement, Source wrapped mouse hit testing and shift-selection across visual rows, Rendered marker reveal/hide transitions, resize reflow, mode switching at wrapped positions, visual-row bounds, rendered inline math, inline images, empty-alt inline images, remote image blocks, cache dependency keys, range-local span queries, source-row fast paths, snapshot sharing, default list size hints, and the rendered image block crash path.
+- Coverage now includes focused unit and GPUI-path tests for wrapped movement, action-level Source wrapped keyboard movement, Source wrapped mouse hit testing and shift-selection across visual rows, keybinding-level Rendered marker reveal/hide transitions, resize reflow, mode switching at wrapped positions, visual-row bounds, rendered inline math, inline images, empty-alt inline images, remote image blocks, cache dependency keys, range-local span queries, source-row fast paths, snapshot sharing, default list size hints, and the rendered image block crash path.
 
 ## Verification
 
@@ -71,5 +71,5 @@ The bullets below are categories, not priority order or execution order.
 - Generalize inline atom measurement beyond the current inactive inline math atom path, and add invalidation if future atom content can resize after the row is cached.
 - Implement general block-level GPUI elements as measured list items or subitems. Remote image blocks now update from loaded image dimensions, but arbitrary GPUI block measurement is not solved.
 - Continue code architecture cleanup within the existing source-row virtualization constraint. `crates/md_editor/src/lib.rs` is now large enough that display-row projection, row layout/cache, inline atoms, block layout/rendering, selection/movement, mouse hit testing, rendering, and tests should be split into clearer internal module boundaries before more general GPUI inline/block content is added. This does not imply switching away from source-row virtualization or immediately splitting `md_editor` into more crates.
-- Add stronger runtime or visual tests for visual-row keyboard movement, especially Rendered-mode marker reveal/hide transitions.
+- Add stronger runtime or visual tests for any remaining visual-row keyboard movement gaps found during profiling or manual use.
 - Add stronger runtime or visual tests for general Rendered image/block behavior and any remaining wrapped-layout interaction gaps found during profiling or manual use.
