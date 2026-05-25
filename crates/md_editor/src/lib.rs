@@ -4372,6 +4372,23 @@ mod tests {
         );
     }
 
+    #[gpui::test]
+    fn rendered_mode_draws_inline_image_atom(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        let editor = cx.new(|cx| {
+            let mut editor =
+                MarkdownEditor::for_text("Before ![alt](https://example.com/cat.png) after", cx);
+            editor.set_mode(MarkdownEditorMode::Rendered, cx);
+            editor
+        });
+
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(500.), px(120.)),
+            |_, _| editor.clone().into_any_element(),
+        );
+    }
+
     #[test]
     fn display_rows_clips_requested_range_to_buffer_rows() {
         let mut buffer = Buffer::local("one\ntwo");
