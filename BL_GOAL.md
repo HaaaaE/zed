@@ -505,11 +505,19 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Source rows no longer run through Markdown style range collection, inline atom range collection, hidden-range breakpoint construction, or atom fallback measurement when they only need plain text wrapping.
 - Added coverage that Source-mode Markdown syntax stays in a single plain text fragment rather than being split into styled fragments or atoms.
 
+### 2026-05-25 - Fitting text rows skip wrap shaping
+
+- Scope: `crates/md_editor/src/lib.rs`.
+- Text rows without inline atoms now reuse the existing unwrapped shaped-line width to decide whether the row already fits inside the current wrap width.
+- Rows that already fit produce a single visual row directly and skip the second `shape_text(..., Some(wrap_width), ...)` pass that was previously used only to rediscover that no wrapping was needed.
+- Rows with inline atoms and rows wider than the wrap width keep the existing wrapping path, so atom-aware geometry and wrapped long-line behavior are unchanged.
+- Added focused coverage for the fit/no-fit boundary of the new fast path.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 15/15 tests.
-- `cargo test -p md_editor` passed: 99/99 tests.
+- `cargo test -p md_editor` passed: 100/100 tests.
 - `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo test -p md_editor rendered_mode_draws_inline_image_atom` passed and covers drawing a Rendered-mode inline image atom through the GPUI path.
 - `cargo test -p md_editor rendered_mode_draws_empty_alt_inline_image_atom` passed and covers drawing a Rendered-mode empty-alt inline image atom through the GPUI path.

@@ -2785,6 +2785,14 @@ fn text_layout_for_display_row(
             wrap_width,
             cx,
         )
+    } else if let Some(visual_rows) = unwrapped_visual_rows_if_fits(
+        display_row.text.len(),
+        &fragments,
+        row_style,
+        shaped_line.width(),
+        wrap_width,
+    ) {
+        visual_rows
     } else {
         match window.text_system().shape_text(
             SharedString::from(display_row.text.clone()),
@@ -2811,6 +2819,16 @@ fn text_layout_for_display_row(
         shaped_line,
         text_len: display_row.text.len(),
     }
+}
+
+fn unwrapped_visual_rows_if_fits(
+    text_len: usize,
+    fragments: &[DisplayInlineFragment],
+    row_style: RowDisplayStyle,
+    shaped_line_width: gpui::Pixels,
+    wrap_width: gpui::Pixels,
+) -> Option<Vec<VisualDisplayRow>> {
+    (shaped_line_width <= wrap_width).then(|| fallback_visual_rows(text_len, fragments, row_style))
 }
 
 fn display_fragments_for_text_layout(
@@ -5255,6 +5273,30 @@ mod tests {
         })];
 
         assert!(line_fragments_for_wrapping("short", &fragments).is_none());
+    }
+
+    #[test]
+    fn unwrapped_visual_rows_if_fits_skips_wrap_shaping_for_fitting_text() {
+        let row_style: RowDisplayStyle = md_theme::default_row_metrics().into();
+        let fragments = vec![DisplayInlineFragment::Text(StyledDisplaySegment {
+            display_range: 0..5,
+            text: "short".to_string(),
+            style: DisplayTextStyle::default(),
+        })];
+
+        assert_eq!(
+            unwrapped_visual_rows_if_fits(5, &fragments, row_style, px(80.), px(80.)),
+            Some(vec![VisualDisplayRow {
+                display_range: 0..5,
+                line_start_x: px(0.),
+                top: px(0.),
+                height: row_style.line_height,
+            }])
+        );
+        assert_eq!(
+            unwrapped_visual_rows_if_fits(5, &fragments, row_style, px(81.), px(80.)),
+            None
+        );
     }
 
     #[test]
