@@ -4,6 +4,13 @@
 
 Refactor the current project's `markdown-editor` path so Source and Rendered modes support width-aware automatic wrapping, and so Rendered mode can eventually lay out inline and block GPUI elements as first-class content. The final state must keep text, Markdown styling, images, previews, custom GPUI elements, cursor, selections, hit testing, keyboard movement, scrolling, and mode switching consistent with the visible layout without unnecessary whole-document reflow.
 
+## Architecture Constraints
+
+- Keep the outer editor/list virtualization unit as a Markdown source row. Do not change the goal into a visual-row or chunk-level virtualizer unless the goal is explicitly reset.
+- Optimize large-document behavior within that source-row model: cache row projection/layout work, narrow invalidation, avoid immediate whole-document remeasure, and keep non-visible rows represented by estimates.
+- Accept that extremely long single source rows remain a row-local worst case. Mitigate those rows with source-row-local caching and measurement improvements rather than redesigning the outer architecture.
+- Improve maintainability while completing the goal: keep new behavior behind explicit row/layout/cache concepts, avoid adding more hidden coupling between Rendered projection, GPUI list measurement, and input handling, and split responsibilities when a local extraction materially reduces risk.
+
 ## Current Progress
 
 ### 2026-05-24 - Width-aware text row geometry foundation
@@ -601,8 +608,9 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 
 ## Known Remaining Work
 
+- Profile 300KB-class Markdown files in Source and Rendered modes to identify the remaining source-row-local hot paths before making further performance changes.
+- Continue optimizing within the source-row architecture: cheaper row layout, less string/fragment churn, stronger row-layout cache reuse, narrower remeasure and cache invalidation, and better behavior for large but non-extreme documents.
 - Generalize inline atom measurement beyond the current inactive inline math atom path, and add invalidation if future atom content can resize after the row is cached.
 - Implement general block-level GPUI elements as measured list items or subitems. Remote image blocks now update from loaded image dimensions, but arbitrary GPUI block measurement is not solved.
 - Add stronger runtime or visual tests for visual-row keyboard movement, especially Rendered-mode marker reveal/hide transitions.
 - Add stronger runtime or visual tests for resize reflow, wrapped hit testing, selection across visual rows, mode switching at wrapped positions, and general Rendered image/block behavior.
-- Continue performance work for large documents: Source-mode fast paths, narrower cache invalidation, layout prefetch or bounded row caches, and runtime profiling around 300KB-class Markdown files.
