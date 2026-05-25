@@ -1668,24 +1668,30 @@ impl MarkdownEditor {
     pub fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
+        let buffer_len_before = self.buffer.len();
         let mut changed = false;
+        let mut invalidation = EditLayoutInvalidation::Conservative;
         if let Some(transaction_id) = self.buffer.undo() {
             let fallback = collapsed_selection(clip_cursor_in_text_snapshot(
                 self.buffer.as_text_snapshot(),
                 self.cursor(),
             ));
-            self.selection = self
+            let previous = self
                 .selection_history
                 .get(&transaction_id)
-                .map(|state| state.before.clone())
-                .unwrap_or(fallback);
+                .map(|state| state.before.clone());
+            if previous.is_some() {
+                let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
+                invalidation = EditLayoutInvalidation::LocalSourceSelection { byte_delta };
+            }
+            self.selection = previous.unwrap_or(fallback);
             changed = true;
         }
         self.notify_after_edit(
             changed,
             row_count_before,
             &previous_selection,
-            EditLayoutInvalidation::Conservative,
+            invalidation,
             cx,
         );
     }
@@ -1693,24 +1699,30 @@ impl MarkdownEditor {
     pub fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
+        let buffer_len_before = self.buffer.len();
         let mut changed = false;
+        let mut invalidation = EditLayoutInvalidation::Conservative;
         if let Some(transaction_id) = self.buffer.redo() {
             let fallback = collapsed_selection(clip_cursor_in_text_snapshot(
                 self.buffer.as_text_snapshot(),
                 self.cursor(),
             ));
-            self.selection = self
+            let next = self
                 .selection_history
                 .get(&transaction_id)
-                .map(|state| state.after.clone())
-                .unwrap_or(fallback);
+                .map(|state| state.after.clone());
+            if next.is_some() {
+                let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
+                invalidation = EditLayoutInvalidation::LocalSourceSelection { byte_delta };
+            }
+            self.selection = next.unwrap_or(fallback);
             changed = true;
         }
         self.notify_after_edit(
             changed,
             row_count_before,
             &previous_selection,
-            EditLayoutInvalidation::Conservative,
+            invalidation,
             cx,
         );
     }
@@ -8407,6 +8419,117 @@ mod tests {
             assert!(Arc::ptr_eq(&row_2, &cached_row_2));
             assert_eq!(cached_row_1.text, "tXo");
             assert_eq!(cached_row_2.source_range, row_2.source_range);
+        });
+    }
+
+    #[gpui::test]
+    fn source_undo_redo_single_row_edit_keeps_later_display_rows(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        let editor = cx.new(|cx| MarkdownEditor::for_text("one\ntwo\nthree", cx));
+
+        editor.update_in(cx, |editor, window, cx| {
+            let mode = editor.mode;
+            let snapshot = editor.buffer.snapshot();
+            let display_row_state =
+                DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+            let row_0 = editor
+                .cached_display_row(&snapshot, 0, mode, &display_row_state)
+                .expect("row 0 should exist");
+            let row_1 = editor
+                .cached_display_row(&snapshot, 1, mode, &display_row_state)
+                .expect("row 1 should exist");
+            let row_2 = editor
+                .cached_display_row(&snapshot, 2, mode, &display_row_state)
+                .expect("row 2 should exist");
+
+            let previous_selection = Selection {
+                id: 7,
+                start: Point::new(1, 1),
+                end: Point::new(1, 2),
+                reversed: false,
+                goal: SelectionGoal::None,
+            };
+            editor.selection = previous_selection.clone();
+            let row_count_before = editor.display_list_state.item_count();
+            let buffer_len_before = editor.buffer.len();
+            let (selection, transaction_id) =
+                replace_selection(&mut editor.buffer, &editor.selection, "X");
+            assert!(transaction_id.is_some());
+            let byte_delta = buffer_byte_delta(buffer_len_before, editor.buffer.len());
+            editor.selection = selection;
+            editor.record_selection_history(
+                transaction_id,
+                previous_selection.clone(),
+                editor.selection.clone(),
+            );
+
+            editor.notify_after_edit(
+                true,
+                row_count_before,
+                &previous_selection,
+                EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+                cx,
+            );
+
+            let snapshot = editor.buffer.snapshot();
+            let display_row_state =
+                DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+            let edited_row_0 = editor
+                .cached_display_row(&snapshot, 0, mode, &display_row_state)
+                .expect("row 0 should exist after edit");
+            let edited_row_1 = editor
+                .cached_display_row(&snapshot, 1, mode, &display_row_state)
+                .expect("row 1 should exist after edit");
+            let edited_row_2 = editor
+                .cached_display_row(&snapshot, 2, mode, &display_row_state)
+                .expect("row 2 should exist after edit");
+
+            assert!(Arc::ptr_eq(&row_0, &edited_row_0));
+            assert!(!Arc::ptr_eq(&row_1, &edited_row_1));
+            assert!(Arc::ptr_eq(&row_2, &edited_row_2));
+            assert_eq!(edited_row_1.text, "tXo");
+
+            editor.undo(&Undo, window, cx);
+
+            let snapshot = editor.buffer.snapshot();
+            let display_row_state =
+                DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+            let undo_row_0 = editor
+                .cached_display_row(&snapshot, 0, mode, &display_row_state)
+                .expect("row 0 should exist after undo");
+            let undo_row_1 = editor
+                .cached_display_row(&snapshot, 1, mode, &display_row_state)
+                .expect("row 1 should exist after undo");
+            let undo_row_2 = editor
+                .cached_display_row(&snapshot, 2, mode, &display_row_state)
+                .expect("row 2 should exist after undo");
+
+            assert!(Arc::ptr_eq(&edited_row_0, &undo_row_0));
+            assert!(!Arc::ptr_eq(&edited_row_1, &undo_row_1));
+            assert!(Arc::ptr_eq(&edited_row_2, &undo_row_2));
+            assert_eq!(undo_row_1.text, "two");
+            assert_eq!(undo_row_2.source_range, edited_row_2.source_range);
+
+            editor.redo(&Redo, window, cx);
+
+            let snapshot = editor.buffer.snapshot();
+            let display_row_state =
+                DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+            let redo_row_0 = editor
+                .cached_display_row(&snapshot, 0, mode, &display_row_state)
+                .expect("row 0 should exist after redo");
+            let redo_row_1 = editor
+                .cached_display_row(&snapshot, 1, mode, &display_row_state)
+                .expect("row 1 should exist after redo");
+            let redo_row_2 = editor
+                .cached_display_row(&snapshot, 2, mode, &display_row_state)
+                .expect("row 2 should exist after redo");
+
+            assert!(Arc::ptr_eq(&undo_row_0, &redo_row_0));
+            assert!(!Arc::ptr_eq(&undo_row_1, &redo_row_1));
+            assert!(Arc::ptr_eq(&undo_row_2, &redo_row_2));
+            assert_eq!(redo_row_1.text, "tXo");
+            assert_eq!(redo_row_2.source_range, undo_row_2.source_range);
         });
     }
 
