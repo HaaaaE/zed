@@ -73,6 +73,7 @@ struct StateInner {
     measuring_behavior: ListMeasuringBehavior,
     pending_scroll: Option<PendingScrollFraction>,
     follow_state: FollowState,
+    default_size_hint: Option<Size<Pixels>>,
 }
 
 /// Keeps track of a fractional scroll position within an item for restoration
@@ -245,6 +246,29 @@ impl ListItem {
         }
     }
 
+    fn with_default_size_hint(&self, default_size_hint: Size<Pixels>) -> Self {
+        match self {
+            ListItem::Unmeasured {
+                size_hint,
+                focus_handle,
+            } => ListItem::Unmeasured {
+                size_hint: size_hint.or(Some(default_size_hint)),
+                focus_handle: focus_handle.clone(),
+            },
+            ListItem::Measured { size, focus_handle } => ListItem::Measured {
+                size: *size,
+                focus_handle: focus_handle.clone(),
+            },
+        }
+    }
+
+    fn as_unmeasured_with_hint(&self, default_size_hint: Option<Size<Pixels>>) -> Self {
+        ListItem::Unmeasured {
+            size_hint: self.size_hint().or(default_size_hint),
+            focus_handle: self.focus_handle(),
+        }
+    }
+
     fn focus_handle(&self) -> Option<FocusHandle> {
         match self {
             ListItem::Unmeasured { focus_handle, .. } | ListItem::Measured { focus_handle, .. } => {
@@ -301,9 +325,27 @@ impl ListState {
             measuring_behavior: ListMeasuringBehavior::default(),
             pending_scroll: None,
             follow_state: FollowState::default(),
+            default_size_hint: None,
         })));
         this.splice(0..0, item_count);
         this
+    }
+
+    /// Set the size hint used for items that have not been measured yet.
+    ///
+    /// This helps long variable-height lists maintain a reasonable total-height
+    /// estimate before every item has been rendered.
+    pub fn with_default_size_hint(self, size_hint: Size<Pixels>) -> Self {
+        let mut state = self.0.borrow_mut();
+        state.default_size_hint = Some(size_hint);
+        let items: Vec<_> = state
+            .items
+            .iter()
+            .map(|item| item.with_default_size_hint(size_hint))
+            .collect();
+        state.items = SumTree::from_iter(items, ());
+        drop(state);
+        self
     }
 
     /// Set the list to measure all items in the list in the first layout phase.
@@ -435,6 +477,7 @@ impl ListState {
         focus_handles: impl IntoIterator<Item = Option<FocusHandle>>,
     ) {
         let state = &mut *self.0.borrow_mut();
+        let default_size_hint = state.default_size_hint;
 
         let mut old_items = state.items.cursor::<Count>(());
         let mut new_items = old_items.slice(&Count(old_range.start), Bias::Right);
@@ -445,7 +488,7 @@ impl ListState {
             focus_handles.into_iter().map(|focus_handle| {
                 spliced_count += 1;
                 ListItem::Unmeasured {
-                    size_hint: None,
+                    size_hint: default_size_hint,
                     focus_handle,
                 }
             }),
@@ -1303,14 +1346,13 @@ impl Element for List {
             .last_layout_bounds
             .is_none_or(|last_bounds| last_bounds.size.width != bounds.size.width)
         {
-            let new_items = SumTree::from_iter(
-                state.items.iter().map(|item| ListItem::Unmeasured {
-                    size_hint: None,
-                    focus_handle: item.focus_handle(),
-                }),
-                (),
-            );
-
+            let default_size_hint = state.default_size_hint;
+            let items: Vec<_> = state
+                .items
+                .iter()
+                .map(|item| item.as_unmeasured_with_hint(default_size_hint))
+                .collect();
+            let new_items = SumTree::from_iter(items, ());
             state.items = new_items;
             state.measuring_behavior.reset();
         }
@@ -1479,6 +1521,18 @@ mod test {
         self as gpui, AppContext, Context, Element, FollowMode, IntoElement, ListState, Render,
         Styled, TestAppContext, Window, div, list, point, px, size,
     };
+
+    #[test]
+    fn test_default_size_hint_sets_unmeasured_total_height() {
+        let state = ListState::new(100, crate::ListAlignment::Top, px(0.))
+            .with_default_size_hint(size(px(0.), px(20.)));
+
+        assert_eq!(state.max_offset_for_scrollbar().y, px(2000.));
+
+        state.splice(100..100, 50);
+
+        assert_eq!(state.max_offset_for_scrollbar().y, px(3000.));
+    }
 
     #[gpui::test]
     fn test_reset_after_paint_before_scroll(cx: &mut TestAppContext) {

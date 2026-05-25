@@ -1345,6 +1345,7 @@ mod tests {
                 color: Some(red()),
                 wavy: true,
             }),
+            ..Default::default()
         };
         let expected_style = style_b;
 
@@ -1377,6 +1378,7 @@ mod tests {
                 color: None,
                 wavy: false,
             }),
+            ..Default::default()
         };
 
         let expected_style = HighlightStyle {
@@ -1395,6 +1397,7 @@ mod tests {
                 color: None,
                 wavy: false,
             }),
+            ..Default::default()
         };
 
         let style_c = style_c.highlight(style_d);

@@ -544,11 +544,21 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - This removes a document-size-dependent snapshot cost from render and movement paths, which matters for 300KB-class Markdown files with many blocks and inline spans.
 - Added coverage that snapshots share the cached syntax tree until text changes.
 
+### 2026-05-25 - List rows use default height estimates
+
+- Scope: `crates/gpui/src/elements/list.rs`, `crates/gpui/src/style.rs`, and `crates/md_editor/src/lib.rs`.
+- Added `ListState::with_default_size_hint` so long variable-height lists can assign a reasonable height to items that have not been measured yet.
+- New list items and width-change invalidations preserve an existing measured height or fall back to the configured default size hint instead of contributing zero height.
+- Markdown editor list rows now use the default editor row height as the initial unmeasured-row estimate, reducing long-document scrollbar collapse and scroll-position churn before rows are measured.
+- Added focused GPUI coverage that default size hints set total height for unmeasured rows and newly spliced rows.
+- Updated existing `HighlightStyle` test literals to use default values for newly added fields so the focused GPUI test target compiles.
+
 ## Verification
 
-- `cargo fmt -p markdown_wysiwyg -p md_buffer -p md_editor -p markdown_editor` passed.
+- `cargo fmt -p gpui -p markdown_wysiwyg -p md_buffer -p md_editor -p markdown_editor` passed.
 - `cargo test -p markdown_wysiwyg` passed: 15/15 tests.
 - `cargo test -p md_buffer` passed: 16/16 tests.
+- `cargo test -p gpui test_default_size_hint_sets_unmeasured_total_height` passed.
 - `cargo test -p md_editor` passed: 103/103 tests.
 - `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo test -p md_editor rendered_mode_draws_inline_image_atom` passed and covers drawing a Rendered-mode inline image atom through the GPUI path.

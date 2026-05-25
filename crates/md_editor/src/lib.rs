@@ -717,10 +717,12 @@ impl EventEmitter<MarkdownEditorEvent> for MarkdownEditor {}
 impl MarkdownEditor {
     pub fn new(mut buffer: Buffer, cx: &mut Context<Self>) -> Self {
         let row_count = buffer.snapshot().row_count() as usize;
+        let row_size_hint = gpui::size(px(0.), default_row_metrics().min_height);
         Self {
             buffer,
             focus_handle: cx.focus_handle(),
-            display_list_state: ListState::new(row_count, ListAlignment::Top, px(1000.)),
+            display_list_state: ListState::new(row_count, ListAlignment::Top, px(1000.))
+                .with_default_size_hint(row_size_hint),
             mode: MarkdownEditorMode::Source,
             selection: collapsed_selection(Point::zero()),
             is_selecting_with_mouse: false,
