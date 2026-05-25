@@ -483,11 +483,19 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Source-to-display and display-to-source row mapping now account for display insertions so caret placement, selection bounds, mouse hit testing, and keyboard movement can map the placeholder back to the full Markdown image source range.
 - Added focused coverage for empty-alt inline image atom creation, display-boundary source mapping, wrapping line-fragment sizing, and GPUI drawing.
 
+### 2026-05-25 - Rendered row inline span queries are range-local
+
+- Scope: `crates/markdown_wysiwyg/src/markdown_wysiwyg.rs` and `crates/md_editor/src/lib.rs`.
+- Added `MarkdownSyntaxTree::inline_spans_in_source_range` so row-level Rendered layout can query only inline spans overlapping the current source range instead of scanning every inline span in the document.
+- Rendered row projection, empty-alt placeholder insertion, image block detection, inline atom collection, Markdown style range construction, rendered-element boundary movement, and whole/contained rendered-element selection checks now use range-local inline span queries.
+- This reduces one of the clearest long-document scrolling costs: newly visible rows no longer multiply their row layout work by the full document's inline span count.
+- Added coverage for range-local inline span filtering and for rendered-element boundary queries staying local to the cursor while still recognizing nearby inline atoms and image blocks.
+
 ## Verification
 
 - `cargo fmt -p markdown_wysiwyg -p md_editor -p markdown_editor` passed.
-- `cargo test -p markdown_wysiwyg` passed: 13/13 tests.
-- `cargo test -p md_editor` passed: 97/97 tests.
+- `cargo test -p markdown_wysiwyg` passed: 14/14 tests.
+- `cargo test -p md_editor` passed: 98/98 tests.
 - `cargo test -p md_editor rendered_mode_draws_image_block_without_reentering_list_state` passed and covers drawing a Rendered-mode image block without re-entering `ListState`.
 - `cargo test -p md_editor rendered_mode_draws_inline_image_atom` passed and covers drawing a Rendered-mode inline image atom through the GPUI path.
 - `cargo test -p md_editor rendered_mode_draws_empty_alt_inline_image_atom` passed and covers drawing a Rendered-mode empty-alt inline image atom through the GPUI path.
@@ -501,4 +509,4 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 - Implement general block-level GPUI elements as measured list items or subitems. Remote image blocks now update from loaded image dimensions, but arbitrary GPUI block measurement is not solved.
 - Add stronger runtime or visual tests for visual-row keyboard movement, especially Rendered-mode marker reveal/hide transitions.
 - Add stronger runtime or visual tests for resize reflow, wrapped hit testing, selection across visual rows, mode switching at wrapped positions, and general Rendered image/block behavior.
-- Add performance-oriented caching/invalidation so large-document wrapping reuses per-row layout and avoids whole-document reflow except when global width changes.
+- Continue performance work for large documents: Source-mode fast paths, narrower cache invalidation, layout prefetch or bounded row caches, and runtime profiling around 300KB-class Markdown files.

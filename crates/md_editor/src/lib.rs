@@ -1927,7 +1927,10 @@ fn project_display_row_text(
 
     let row_source_range = row_source_range(snapshot, row);
     let mut insertions = Vec::new();
-    for span in snapshot.syntax_tree().inline_spans() {
+    for span in snapshot
+        .syntax_tree()
+        .inline_spans_in_source_range(row_source_range.clone())
+    {
         if span.kind != MarkdownInlineKind::Image
             || rendered_remote_image_span_is_block(snapshot, span)
             || !range_contains(&row_source_range, &span.source_range)
@@ -2384,8 +2387,11 @@ fn rendered_element_range_at_cursor(
     let source_offset = snapshot.as_text_snapshot().point_to_offset(cursor);
     snapshot
         .syntax_tree()
-        .inline_spans()
-        .iter()
+        .inline_spans_in_source_range(rendered_element_boundary_query_range(
+            snapshot,
+            source_offset,
+            direction,
+        )?)
         .find_map(|span| {
             let source_range = rendered_element_source_range_for_span(snapshot, span)?;
             match direction {
@@ -2398,6 +2404,34 @@ fn rendered_element_range_at_cursor(
                 _ => None,
             }
         })
+}
+
+fn rendered_element_boundary_query_range(
+    snapshot: &BufferSnapshot,
+    source_offset: usize,
+    direction: HorizontalDirection,
+) -> Option<Range<usize>> {
+    let text_snapshot = snapshot.as_text_snapshot();
+    match direction {
+        HorizontalDirection::Left => {
+            if source_offset == 0 {
+                return None;
+            }
+            let start = text_snapshot
+                .as_rope()
+                .floor_char_boundary(source_offset.saturating_sub(1));
+            Some(start..source_offset)
+        }
+        HorizontalDirection::Right => {
+            if source_offset >= text_snapshot.len() {
+                return None;
+            }
+            let end = text_snapshot
+                .as_rope()
+                .ceil_char_boundary(source_offset.saturating_add(1));
+            Some(source_offset..end)
+        }
+    }
 }
 
 pub fn selection_byte_range(
@@ -3690,15 +3724,18 @@ fn rendered_image_block_for_row(
 
     let row_source_range = row_source_range(snapshot, display_row.row);
     let source_text = row_text(snapshot, display_row.row);
-    let mut matching_spans = snapshot.syntax_tree().inline_spans().iter().filter(|span| {
-        span.kind == MarkdownInlineKind::Image
-            && span
-                .url
-                .as_ref()
-                .is_some_and(|url| is_remote_image_url(url))
-            && span.source_range.start >= row_source_range.start
-            && span.source_range.end <= row_source_range.end
-    });
+    let mut matching_spans = snapshot
+        .syntax_tree()
+        .inline_spans_in_source_range(row_source_range.clone())
+        .filter(|span| {
+            span.kind == MarkdownInlineKind::Image
+                && span
+                    .url
+                    .as_ref()
+                    .is_some_and(|url| is_remote_image_url(url))
+                && span.source_range.start >= row_source_range.start
+                && span.source_range.end <= row_source_range.end
+        });
 
     let span = matching_spans.next()?;
     if matching_spans.next().is_some() {
@@ -3888,8 +3925,7 @@ fn inline_atom_ranges_for_row(
     let hidden_ranges = display_row.projection.hidden_ranges();
     snapshot
         .syntax_tree()
-        .inline_spans()
-        .iter()
+        .inline_spans_in_source_range(row_source_range.clone())
         .filter_map(|span| {
             if !range_contains(&row_source_range, &span.source_range)
                 || !span.marker_ranges.iter().any(|marker_range| {
@@ -4007,10 +4043,10 @@ fn markdown_style_ranges_for_row(
         }
     }
 
-    for span in snapshot.syntax_tree().inline_spans() {
-        if !ranges_overlap(&span.source_range, &row_source_range) {
-            continue;
-        }
+    for span in snapshot
+        .syntax_tree()
+        .inline_spans_in_source_range(row_source_range.clone())
+    {
         let style = inline_style(span.kind);
         for content_range in &span.content_ranges {
             push_style_range(
@@ -4254,10 +4290,13 @@ fn selection_range_is_whole_rendered_element(
     snapshot: &BufferSnapshot,
     selection_range: &Range<usize>,
 ) -> bool {
-    snapshot.syntax_tree().inline_spans().iter().any(|span| {
-        rendered_element_source_range_for_span(snapshot, span)
-            .is_some_and(|source_range| &source_range == selection_range)
-    })
+    snapshot
+        .syntax_tree()
+        .inline_spans_in_source_range(selection_range.clone())
+        .any(|span| {
+            rendered_element_source_range_for_span(snapshot, span)
+                .is_some_and(|source_range| &source_range == selection_range)
+        })
 }
 
 fn inactive_rendered_element_source_ranges_for_selection(
@@ -4272,8 +4311,7 @@ fn inactive_rendered_element_source_ranges_for_selection(
     let selection_range = selection_byte_range(snapshot, &selection);
     snapshot
         .syntax_tree()
-        .inline_spans()
-        .iter()
+        .inline_spans_in_source_range(selection_range.clone())
         .filter_map(|span| rendered_element_source_range_for_span(snapshot, span))
         .filter(|source_range| range_contains(&selection_range, source_range))
         .collect()
@@ -4300,11 +4338,23 @@ fn source_offset_is_rendered_element_boundary(
     snapshot: &BufferSnapshot,
     source_offset: usize,
 ) -> bool {
-    snapshot.syntax_tree().inline_spans().iter().any(|span| {
-        rendered_element_source_range_for_span(snapshot, span).is_some_and(|source_range| {
-            source_range.start == source_offset || source_range.end == source_offset
+    [HorizontalDirection::Left, HorizontalDirection::Right]
+        .into_iter()
+        .filter_map(|direction| {
+            rendered_element_boundary_query_range(snapshot, source_offset, direction)
         })
-    })
+        .any(|source_range| {
+            snapshot
+                .syntax_tree()
+                .inline_spans_in_source_range(source_range)
+                .any(|span| {
+                    rendered_element_source_range_for_span(snapshot, span).is_some_and(
+                        |source_range| {
+                            source_range.start == source_offset || source_range.end == source_offset
+                        },
+                    )
+                })
+        })
 }
 
 fn rendered_element_source_range_for_span(
@@ -5820,6 +5870,47 @@ mod tests {
             ),
             Point::new(0, atom_start as u32)
         );
+    }
+
+    #[test]
+    fn rendered_element_boundary_queries_stay_local_to_cursor() {
+        let mut buffer =
+            Buffer::local("Before $x$ after\nplain text\n![alt](https://example.com/cat.png)\n");
+        let snapshot = buffer.snapshot();
+        let inline_atom_start = "Before ".len();
+        let inline_atom_end = "Before $x$".len();
+        let image_source_len = "![alt](https://example.com/cat.png)".len();
+
+        assert_eq!(
+            rendered_element_range_at_cursor(
+                &snapshot,
+                Point::new(0, inline_atom_start as u32),
+                HorizontalDirection::Right,
+            ),
+            Some(inline_atom_start..inline_atom_end)
+        );
+        assert_eq!(
+            rendered_element_range_at_cursor(
+                &snapshot,
+                Point::new(0, inline_atom_end as u32),
+                HorizontalDirection::Left,
+            ),
+            Some(inline_atom_start..inline_atom_end)
+        );
+        assert_eq!(
+            rendered_element_range_at_cursor(
+                &snapshot,
+                Point::new(1, 0),
+                HorizontalDirection::Right,
+            ),
+            None
+        );
+        assert!(source_offset_is_rendered_element_boundary(
+            &snapshot,
+            snapshot
+                .as_text_snapshot()
+                .point_to_offset(Point::new(2, image_source_len as u32))
+        ));
     }
 
     #[test]

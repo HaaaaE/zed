@@ -170,6 +170,19 @@ impl MarkdownSyntaxTree {
         &self.inline_spans
     }
 
+    pub fn inline_spans_in_source_range(
+        &self,
+        range: Range<usize>,
+    ) -> impl Iterator<Item = &MarkdownInlineSpan> {
+        let start = range.start;
+        let end = range.end;
+        self.inline_spans
+            .iter()
+            .skip_while(move |span| span.source_range.end <= start)
+            .take_while(move |span| span.source_range.start < end)
+            .filter(move |span| span.source_range.start < end && span.source_range.end > start)
+    }
+
     pub fn blocks_in_source_range(
         &self,
         range: Range<usize>,
@@ -239,13 +252,7 @@ impl MarkdownSyntaxTree {
             }
         }
 
-        for span in &self.inline_spans {
-            if span.source_range.end <= visible_source_range.start
-                || span.source_range.start >= visible_source_range.end
-            {
-                continue;
-            }
-
+        for span in self.inline_spans_in_source_range(visible_source_range.clone()) {
             if source_range_is_active(
                 &span.source_range,
                 active_source_range.as_ref(),
@@ -902,6 +909,25 @@ mod tests {
         assert_eq!(tree.inline_spans().len(), 2);
         assert_eq!(tree.inline_spans()[0].kind, MarkdownInlineKind::Strong);
         assert_eq!(tree.inline_spans()[1].kind, MarkdownInlineKind::Link);
+    }
+
+    #[test]
+    fn inline_spans_in_source_range_returns_overlapping_spans() {
+        let source = "before **bold**\nafter [link](url)\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let second_row_start = source.find("after").expect("expected second row");
+
+        let first_row_spans = tree
+            .inline_spans_in_source_range(0..second_row_start)
+            .map(|span| span.kind)
+            .collect::<Vec<_>>();
+        let second_row_spans = tree
+            .inline_spans_in_source_range(second_row_start..source.len())
+            .map(|span| span.kind)
+            .collect::<Vec<_>>();
+
+        assert_eq!(first_row_spans, vec![MarkdownInlineKind::Strong]);
+        assert_eq!(second_row_spans, vec![MarkdownInlineKind::Link]);
     }
 
     #[test]
