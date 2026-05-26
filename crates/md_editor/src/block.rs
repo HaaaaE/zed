@@ -19,6 +19,35 @@ pub(super) const RENDERED_IMAGE_BLOCK_MAX_WIDTH: gpui::Pixels = px(600.);
 pub(super) const RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT: gpui::Pixels = px(120.);
 pub(super) const RENDERED_IMAGE_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(4.);
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DisplayBlockKind {
+    RemoteImage(RenderedImageBlock),
+}
+
+impl DisplayBlockKind {
+    fn for_display_row(
+        snapshot: &BufferSnapshot,
+        display_row: &DisplayRow,
+        selection: &Selection<Point>,
+        mode: MarkdownEditorMode,
+    ) -> Option<Self> {
+        rendered_image_block_for_row(snapshot, display_row, selection, mode).map(Self::RemoteImage)
+    }
+
+    fn into_layout(
+        self,
+        wrap_width: gpui::Pixels,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> DisplayBlockLayout {
+        match self {
+            Self::RemoteImage(image_block) => DisplayBlockLayout::RemoteImage(
+                RenderedImageBlockLayout::new(image_block, wrap_width, window, cx),
+            ),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum DisplayBlockLayout {
     RemoteImage(RenderedImageBlockLayout),
@@ -34,14 +63,8 @@ impl DisplayBlockLayout {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<Self> {
-        rendered_image_block_for_row(snapshot, display_row, selection, mode).map(|image_block| {
-            Self::RemoteImage(RenderedImageBlockLayout::new(
-                image_block,
-                wrap_width,
-                window,
-                cx,
-            ))
-        })
+        DisplayBlockKind::for_display_row(snapshot, display_row, selection, mode)
+            .map(|kind| kind.into_layout(wrap_width, window, cx))
     }
 
     pub(super) fn height(&self) -> gpui::Pixels {
