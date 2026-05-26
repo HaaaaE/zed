@@ -2,7 +2,9 @@ use gpui::{Pixels, px};
 use md_text::{Point, SelectionGoal};
 
 use super::{
-    TextBufferSnapshot, clip_cursor_in_text_snapshot, display_model::DisplayRow, gutter_width,
+    TextBufferSnapshot, clip_cursor_in_text_snapshot,
+    display_model::DisplayRow,
+    gutter_width,
     layout::{DisplayRowTextLayout, VisualDisplayRow},
     visual_row::{
         display_offset_for_visual_row_x, display_x_for_offset, source_offset_for_display_offset,

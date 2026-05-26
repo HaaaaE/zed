@@ -1315,6 +1315,7 @@ fn formula_block_layout_is_cacheable_and_uses_measured_height() {
         formula_block: rendered_formula_block(4..13, "x + y"),
         width: px(200.),
         height: px(36.),
+        cacheable: true,
     };
     let block_layout = DisplayRowLayout::Block(DisplayBlockLayout::Formula(formula_layout.clone()));
 

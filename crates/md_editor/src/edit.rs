@@ -1,6 +1,7 @@
 use md_buffer::{Buffer, BufferSnapshot};
 use md_text::{Point, Selection, SelectionGoal};
 
+use super::rendered_element::rendered_element_range_at_cursor;
 use super::{
     MarkdownEditorMode,
     selection::{
@@ -8,7 +9,6 @@ use super::{
         selection_byte_range_in_text_snapshot, selection_for_source_range,
     },
 };
-use super::rendered_element::rendered_element_range_at_cursor;
 
 pub fn replace_selection(
     buffer: &mut Buffer,

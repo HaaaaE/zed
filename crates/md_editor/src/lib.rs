@@ -1,12 +1,12 @@
 use std::{collections::HashMap, ops::Range, sync::Arc};
 
+#[cfg(test)]
+use gpui::FontWeight;
 use gpui::{
     App, Context, EventEmitter, FocusHandle, Focusable, IntoElement, KeyBinding, KeyDownEvent,
     ListAlignment, ListSizingBehavior, ListState, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Render, SharedString, TextAlign, Window, div, list, prelude::*, px,
 };
-#[cfg(test)]
-use gpui::FontWeight;
 #[cfg(test)]
 use markdown_wysiwyg::MarkdownBlockKind;
 use markdown_wysiwyg::{MarkdownInlineKind, MarkdownProjectionMap};
@@ -29,17 +29,17 @@ mod selection;
 mod visual_row;
 
 use block::DisplayBlockLayout;
-use display_model::{DisplayInsertion, DisplayRow, DisplayTextStyle, StyledDisplaySegment};
-pub use edit::{backspace_selection, current_line_indent, delete_selection, replace_selection};
-use edit::{
-    backspace_selection_in_mode, current_line_indent_in_text_snapshot, delete_selection_in_mode,
-};
 #[cfg(test)]
 use block::{
     RENDERED_FORMULA_BLOCK_VERTICAL_PADDING, RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT,
     RENDERED_IMAGE_BLOCK_VERTICAL_PADDING, RenderedFormulaBlock, RenderedFormulaBlockLayout,
     RenderedImageBlock, RenderedImageBlockLayout, image_block_height_for_size,
     image_block_source_offset_for_x, rendered_formula_block_for_row, rendered_image_block_for_row,
+};
+use display_model::{DisplayInsertion, DisplayRow, DisplayTextStyle, StyledDisplaySegment};
+pub use edit::{backspace_selection, current_line_indent, delete_selection, replace_selection};
+use edit::{
+    backspace_selection_in_mode, current_line_indent_in_text_snapshot, delete_selection_in_mode,
 };
 use inline_atom::{
     DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, INLINE_IMAGE_PLACEHOLDER,
@@ -76,11 +76,6 @@ use rendered_element::{
     rendered_element_descriptor_for_inline_span_in_row, rendered_element_range_at_cursor,
     rendered_element_source_range_is_active, rendered_remote_image_span_is_block_in_row,
 };
-pub use selection::{
-    clip_cursor, clip_selection, move_left, move_right, move_to_beginning_of_line,
-    move_to_end_of_line, select_left, select_right, select_to_beginning_of_line,
-    select_to_end_of_line, select_to_point, select_vertical, selection_byte_range,
-};
 #[cfg(test)]
 use selection::{HorizontalDirection, move_horizontal_in_mode, move_selection_left, move_vertical};
 use selection::{
@@ -98,6 +93,11 @@ use selection::{
     select_to_point_with_goal, select_vertical_in_text_snapshot,
     selection_byte_range_in_text_snapshot, selection_without_goal,
     source_rows_for_active_range_change, transaction_selection_state_without_goals,
+};
+pub use selection::{
+    clip_cursor, clip_selection, move_left, move_right, move_to_beginning_of_line,
+    move_to_end_of_line, select_left, select_right, select_to_beginning_of_line,
+    select_to_end_of_line, select_to_point, select_vertical, selection_byte_range,
 };
 use visual_row::{
     VisualLineBoundary, desired_visual_x, display_x_for_offset, point_for_display_offset,
@@ -1301,6 +1301,11 @@ impl MarkdownEditor {
         let snapshot = self.buffer.snapshot();
         let previous_active = active_source_range_for_selection(&snapshot, previous_selection);
         let current_active = active_source_range_for_selection(&snapshot, &self.selection);
+        let current_goal = self.selection.goal;
+        let preserve_wrapped_visual_goal = previous_selection.is_empty()
+            && self.selection.is_empty()
+            && previous_selection.head().row == self.selection.head().row
+            && matches!(current_goal, SelectionGoal::WrappedHorizontalPosition(_));
         let active_rows = source_rows_for_active_range_change(
             &snapshot,
             previous_active.as_ref(),
@@ -1313,6 +1318,9 @@ impl MarkdownEditor {
         ) {
             self.clear_display_row_cache_for_row_ranges(&active_rows);
             self.clear_row_layout_cache_for_row_ranges(&active_rows);
+            if preserve_wrapped_visual_goal {
+                self.selection.goal = current_goal;
+            }
         }
         for rows in active_rows {
             self.display_list_state.remeasure_items(rows);
@@ -2204,6 +2212,7 @@ mod test_support {
             formula_block: rendered_formula_block(source_range, "x + y"),
             width,
             height: px(36.),
+            cacheable: true,
         })
     }
 

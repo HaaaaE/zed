@@ -14,9 +14,8 @@ use super::rendered_element::{
 };
 use super::{
     MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, VisualLineBoundary, clip_cursor,
-    display_model::DisplayRow, range_contains,
-    rendered_element_descriptor_for_inline_span_in_row, rendered_element_source_range_is_active,
-    selection_byte_range, visual_horizontal_goal,
+    display_model::DisplayRow, range_contains, rendered_element_descriptor_for_inline_span_in_row,
+    rendered_element_source_range_is_active, selection_byte_range, visual_horizontal_goal,
 };
 
 pub(super) const RENDERED_IMAGE_BLOCK_MAX_WIDTH: gpui::Pixels = px(600.);
@@ -45,16 +44,24 @@ impl DisplayBlockKind {
         self,
         wrap_width: gpui::Pixels,
         row_style: RowDisplayStyle,
+        measure_layout: bool,
         window: &mut Window,
         cx: &mut App,
     ) -> DisplayBlockLayout {
         match self {
             Self::RemoteImage(image_block) => DisplayBlockLayout::RemoteImage(
-                RenderedImageBlockLayout::new(image_block, wrap_width, window, cx),
+                RenderedImageBlockLayout::new(image_block, wrap_width, measure_layout, window, cx),
             ),
-            Self::Formula(formula_block) => DisplayBlockLayout::Formula(
-                RenderedFormulaBlockLayout::new(formula_block, wrap_width, row_style, window, cx),
-            ),
+            Self::Formula(formula_block) => {
+                DisplayBlockLayout::Formula(RenderedFormulaBlockLayout::new(
+                    formula_block,
+                    wrap_width,
+                    row_style,
+                    measure_layout,
+                    window,
+                    cx,
+                ))
+            }
         }
     }
 }
@@ -73,11 +80,12 @@ impl DisplayBlockLayout {
         mode: MarkdownEditorMode,
         wrap_width: gpui::Pixels,
         row_style: RowDisplayStyle,
+        measure_layout: bool,
         window: &mut Window,
         cx: &mut App,
     ) -> Option<Self> {
         DisplayBlockKind::for_display_row(snapshot, display_row, selection, mode)
-            .map(|kind| kind.into_layout(wrap_width, row_style, window, cx))
+            .map(|kind| kind.into_layout(wrap_width, row_style, measure_layout, window, cx))
     }
 
     pub(super) fn height(&self) -> gpui::Pixels {
@@ -260,10 +268,20 @@ impl RenderedImageBlockLayout {
     pub(super) fn new(
         image_block: RenderedImageBlock,
         wrap_width: gpui::Pixels,
+        measure_layout: bool,
         window: &mut Window,
         cx: &mut App,
     ) -> Self {
         let width = wrap_width.max(px(1.)).min(RENDERED_IMAGE_BLOCK_MAX_WIDTH);
+        if !measure_layout {
+            return Self {
+                image_block,
+                width,
+                image_height: RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT,
+                cacheable: false,
+            };
+        }
+
         let resource = Resource::Uri(image_block.url.clone().into());
         let loaded_height = window
             .use_asset::<ImgResourceLoader>(&resource, cx)
@@ -309,6 +327,7 @@ pub(super) struct RenderedFormulaBlockLayout {
     pub(super) formula_block: RenderedFormulaBlock,
     pub(super) width: gpui::Pixels,
     pub(super) height: gpui::Pixels,
+    pub(super) cacheable: bool,
 }
 
 impl RenderedFormulaBlockLayout {
@@ -316,10 +335,20 @@ impl RenderedFormulaBlockLayout {
         formula_block: RenderedFormulaBlock,
         wrap_width: gpui::Pixels,
         row_style: RowDisplayStyle,
+        measure_layout: bool,
         window: &mut Window,
         cx: &mut App,
     ) -> Self {
         let width = wrap_width.max(px(1.));
+        if !measure_layout {
+            return Self {
+                formula_block,
+                width,
+                height: row_style.line_height + RENDERED_FORMULA_BLOCK_VERTICAL_PADDING * 2.,
+                cacheable: false,
+            };
+        }
+
         let mut element = formula_block_measurement_element(&formula_block.tex, width, row_style)
             .into_any_element();
         let size = element.layout_as_root(
@@ -332,6 +361,7 @@ impl RenderedFormulaBlockLayout {
             formula_block,
             width,
             height: size.height.max(row_style.line_height),
+            cacheable: true,
         }
     }
 
@@ -340,7 +370,7 @@ impl RenderedFormulaBlockLayout {
     }
 
     pub(super) fn cacheable(&self) -> bool {
-        true
+        self.cacheable
     }
 }
 

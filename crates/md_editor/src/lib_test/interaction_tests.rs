@@ -133,6 +133,154 @@ fn rendered_interaction_layouts_cache_plain_text_rows(cx: &mut gpui::TestAppCont
 }
 
 #[gpui::test]
+fn rendered_mode_actions_follow_wrapped_visual_rows_with_inline_image(
+    cx: &mut gpui::TestAppContext,
+) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(110.), px(240.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(
+            "Before ![alt](https://example.com/cat.png) after more words here\n",
+            cx,
+        );
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        let source_line_end = editor.buffer.as_text_snapshot().line_len(0);
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
+            .expect("display row should exist");
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let wrap_width = text_wrap_width(window);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            wrap_width,
+            false,
+            window,
+            cx,
+        );
+
+        let DisplayRowLayout::Text(text_layout) = row_layout else {
+            panic!("expected wrapped text layout");
+        };
+        assert!(
+            text_layout.visual_rows.len() >= 3,
+            "expected at least three visual rows, got {:?}",
+            text_layout.visual_rows
+        );
+
+        let second_visual_row = &text_layout.visual_rows[1];
+        let wrapped_row_start = point_for_visual_row_x(
+            &snapshot,
+            &display_row,
+            &text_layout,
+            second_visual_row,
+            px(0.),
+        )
+        .expect("second visual row should map to a point");
+        let wrapped_row_end = point_for_display_offset(
+            &snapshot,
+            &display_row,
+            &text_layout,
+            second_visual_row.display_range.end,
+        );
+
+        assert_eq!(wrapped_row_start.row, 0);
+        assert!(wrapped_row_start.column > 0);
+        assert!(wrapped_row_start.column < source_line_end);
+        assert_eq!(wrapped_row_end.row, 0);
+        assert!(wrapped_row_end.column > wrapped_row_start.column);
+        assert!(wrapped_row_end.column < source_line_end);
+
+        editor.set_cursor(Point::new(0, 0));
+
+        editor.move_down(&MoveDown, window, cx);
+        assert_eq!(editor.cursor(), wrapped_row_start);
+
+        editor.move_to_end_of_line(&MoveToEndOfLine, window, cx);
+        assert_eq!(editor.cursor(), wrapped_row_end);
+
+        editor.move_to_beginning_of_line(&MoveToBeginningOfLine, window, cx);
+        assert_eq!(editor.cursor(), wrapped_row_start);
+
+        editor.move_up(&MoveUp, window, cx);
+        assert_eq!(editor.cursor(), Point::new(0, 0));
+    });
+}
+
+#[gpui::test]
+fn rendered_mode_actions_follow_image_block_boundaries(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(500.), px(240.)));
+    let image_source = "![alt](https://example.com/cat.png)";
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(&format!("Intro\n{image_source}\nAfter\n"), cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(0, 0));
+
+        editor.move_down(&MoveDown, window, cx);
+        assert_eq!(editor.cursor(), Point::new(1, 0));
+
+        editor.move_to_end_of_line(&MoveToEndOfLine, window, cx);
+        assert_eq!(editor.cursor(), Point::new(1, image_source.len() as u32));
+
+        editor.move_to_beginning_of_line(&MoveToBeginningOfLine, window, cx);
+        assert_eq!(editor.cursor(), Point::new(1, 0));
+
+        editor.move_down(&MoveDown, window, cx);
+        assert_eq!(editor.cursor(), Point::new(2, 0));
+
+        editor.move_up(&MoveUp, window, cx);
+        assert_eq!(editor.cursor(), Point::new(1, 0));
+    });
+}
+
+#[gpui::test]
+fn rendered_mode_actions_follow_formula_block_boundaries(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(500.), px(240.)));
+    let formula_source = "$$x + y$$";
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(&format!("Intro\n{formula_source}\nAfter\n"), cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(0, 0));
+
+        editor.move_down(&MoveDown, window, cx);
+        assert_eq!(editor.cursor(), Point::new(1, 0));
+
+        editor.move_to_end_of_line(&MoveToEndOfLine, window, cx);
+        assert_eq!(editor.cursor(), Point::new(1, formula_source.len() as u32));
+
+        editor.move_to_beginning_of_line(&MoveToBeginningOfLine, window, cx);
+        assert_eq!(editor.cursor(), Point::new(1, 0));
+
+        editor.move_down(&MoveDown, window, cx);
+        assert_eq!(editor.cursor(), Point::new(2, 0));
+
+        editor.move_up(&MoveUp, window, cx);
+        assert_eq!(editor.cursor(), Point::new(1, 0));
+    });
+}
+
+#[gpui::test]
 fn source_render_uses_text_snapshot_without_refreshing_markdown_syntax(
     cx: &mut gpui::TestAppContext,
 ) {

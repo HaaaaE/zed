@@ -12,10 +12,12 @@ use md_theme::{default_row_metrics, editor_palette, gutter_width, heading_row_me
 
 use super::{
     DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, MarkdownEditorMode,
-    RowDisplayStyle, active_source_range_for_selection, block::DisplayBlockLayout,
+    RowDisplayStyle, active_source_range_for_selection,
+    block::DisplayBlockLayout,
     display_model::{DisplayRow, DisplayTextStyle, StyledDisplaySegment},
     inactive_rendered_element_source_ranges_for_selection, ranges_overlap,
-    rendered_element_descriptor_for_inline_span_in_row, visual_row::display_x_for_offset,
+    rendered_element_descriptor_for_inline_span_in_row,
+    visual_row::display_x_for_offset,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -133,7 +135,7 @@ pub(super) fn compute_display_row_layout(
     mode: MarkdownEditorMode,
     row_style: RowDisplayStyle,
     wrap_width: gpui::Pixels,
-    measure_inline_atoms: bool,
+    measure_layout: bool,
     window: &mut Window,
     cx: &mut App,
 ) -> DisplayRowLayout {
@@ -144,6 +146,7 @@ pub(super) fn compute_display_row_layout(
         mode,
         wrap_width,
         row_style,
+        measure_layout,
         window,
         cx,
     ) {
@@ -156,7 +159,7 @@ pub(super) fn compute_display_row_layout(
         mode,
         row_style,
         wrap_width,
-        measure_inline_atoms,
+        measure_layout,
         window,
         cx,
     ))
