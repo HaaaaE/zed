@@ -55,13 +55,14 @@ Refactor the current project's `markdown-editor` path so Source and Rendered mod
 ### Module Shape and Tests
 
 - Inline atom layout, atom hit geometry, block rendering, and block layout construction have been moved onto their respective atom/block interfaces to reduce ad hoc branching in the row pipeline.
+- Inline atom constants, sizing, measurement, fragment atom typing, and atom rendering helpers now live behind an internal `inline_atom` module, leaving the main editor file to focus on row layout and interaction flow.
 - Remote image block layout, measurement, hit geometry, rendering, and inactive-image detection now live behind an internal `block` module, leaving the main editor file to route block rows through the shared display-row layout path.
-- `md_editor` still needs more internal module boundary cleanup; `lib.rs` now carries projection, row layout/cache, inline atom, selection/movement, hit-testing, rendering, and extensive tests.
+- `md_editor` still needs more internal module boundary cleanup; `lib.rs` now carries projection, row layout/cache, selection/movement, hit-testing, rendering, and extensive tests.
 - Coverage now includes focused unit and GPUI-path tests for wrapped movement, action-level Source wrapped keyboard movement, Source display-row and render paths without Markdown syntax refresh, Source wrapped mouse hit testing and shift-selection across visual rows, keybinding-level Rendered marker reveal/hide transitions, resize reflow, mode switching at wrapped positions, visual-row bounds, rendered inline math, inline images, empty-alt inline images, remote image blocks, Rendered image block mouse hit testing and shift-selection, cache dependency keys, range-local span queries, source-row fast paths, source undo/redo local cache invalidation, Rendered interaction layout caching, remote image block cacheability, snapshot sharing, default list size hints, and the rendered image block crash path.
 
 ## Verification
 
-- Recent touched-crate checks have passed, including `cargo fmt -p md_buffer -p md_editor`, `cargo check -p md_buffer`, `cargo check -p md_editor`, `cargo test -p md_buffer`, and `cargo test -p md_editor` (currently 123 tests). The latest block-module cleanup was verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, `cargo test -p md_editor`, and `git diff --check`.
+- Recent touched-crate checks have passed, including `cargo fmt -p md_buffer -p md_editor`, `cargo check -p md_buffer`, `cargo check -p md_editor`, `cargo test -p md_buffer`, and `cargo test -p md_editor` (currently 123 tests). The latest block/inline-atom module cleanup was verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, `cargo test -p md_editor`, and `git diff --check`.
 - Focused coverage now exercises wrapped movement, inline atoms/images, source display-row/cache/render fast paths, source edit and undo/redo cache invalidation, Rendered interaction layout caching, remote image block cacheability, default list size hints, Rendered image block drawing, and mouse interaction.
 - `git diff --check` passes with only LF/CRLF warnings on touched files; short markdown-editor smoke runs after the Rendered image block fix did not reproduce the previous panic.
 
