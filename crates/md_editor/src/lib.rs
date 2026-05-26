@@ -20,9 +20,11 @@ mod inline_atom;
 use block::DisplayBlockLayout;
 #[cfg(test)]
 use block::{
-    RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT, RENDERED_IMAGE_BLOCK_VERTICAL_PADDING,
+    RENDERED_FENCED_CODE_BLOCK_VERTICAL_PADDING, RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT,
+    RENDERED_IMAGE_BLOCK_VERTICAL_PADDING, RenderedFencedCodeBlock, RenderedFencedCodeBlockLayout,
     RenderedImageBlock, RenderedImageBlockLayout, image_block_height_for_size,
-    image_block_source_offset_for_x, rendered_image_block_for_row,
+    image_block_source_offset_for_x, rendered_fenced_code_block_for_row,
+    rendered_image_block_for_row,
 };
 use inline_atom::{
     DisplayInlineAtom, DisplayInlineAtomKind, DisplayInlineFragment, DisplayInlineRowInputs,
@@ -3186,6 +3188,7 @@ fn compute_display_row_layout(
         selection,
         mode,
         wrap_width,
+        row_style,
         window,
         cx,
     ) {
@@ -4899,6 +4902,20 @@ mod tests {
         })
     }
 
+    fn fenced_code_block_layout(
+        source_range: Range<usize>,
+        width: gpui::Pixels,
+    ) -> DisplayBlockLayout {
+        DisplayBlockLayout::FencedCode(RenderedFencedCodeBlockLayout {
+            code_block: RenderedFencedCodeBlock {
+                source_range,
+                text: "let x = 1;".to_string(),
+            },
+            width,
+            code_height: px(22.),
+        })
+    }
+
     fn cached_row_text_for_current_selection(editor: &mut MarkdownEditor, row: usize) -> String {
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
@@ -6577,6 +6594,103 @@ mod tests {
                 source_range: image_source_start..image_source_start + image_source.len(),
             })
         );
+    }
+
+    #[test]
+    fn rendered_fenced_code_block_detects_inactive_row() {
+        let source = "```rust\nlet x = 1;\n```\nnext\n";
+        let mut buffer = Buffer::local(source);
+        let snapshot = buffer.snapshot();
+        let selection = collapsed_selection(Point::new(3, 0));
+        let row = display_rows_in_mode(
+            &snapshot,
+            1..2,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        assert_eq!(row.text, "let x = 1;");
+        assert_eq!(
+            rendered_fenced_code_block_for_row(
+                &snapshot,
+                &row,
+                &selection,
+                MarkdownEditorMode::Rendered
+            ),
+            Some(RenderedFencedCodeBlock {
+                source_range: source.find("let x = 1;").expect("code row start")
+                    ..source.find("let x = 1;").expect("code row start") + "let x = 1;".len(),
+                text: "let x = 1;".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn rendered_fenced_code_block_reveals_active_source() {
+        let source = "```rust\nlet x = 1;\n```\nnext\n";
+        let mut buffer = Buffer::local(source);
+        let snapshot = buffer.snapshot();
+        let code_col = "```rust\nlet ".len();
+        let selection = collapsed_selection(Point::new(1, code_col as u32));
+        let row = display_rows_in_mode(
+            &snapshot,
+            1..2,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        assert_eq!(row.text, "let x = 1;");
+        assert_eq!(
+            rendered_fenced_code_block_for_row(
+                &snapshot,
+                &row,
+                &selection,
+                MarkdownEditorMode::Rendered
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn fenced_code_block_line_boundary_targets_source_edges() {
+        let source = "```rust\nlet x = 1;\n```\n";
+        let mut buffer = Buffer::local(source);
+        let snapshot = buffer.snapshot();
+        let start = source.find("let x = 1;").expect("code row start");
+        let end = start + "let x = 1;".len();
+        let block_layout = fenced_code_block_layout(start..end, px(240.));
+
+        assert_eq!(
+            block_layout.line_boundary_target(&snapshot, VisualLineBoundary::Start),
+            (Point::new(1, 0), visual_horizontal_goal(0, px(0.)))
+        );
+        assert_eq!(
+            block_layout.line_boundary_target(&snapshot, VisualLineBoundary::End),
+            (
+                Point::new(1, "let x = 1;".len() as u32),
+                visual_horizontal_goal(0, px(240.))
+            )
+        );
+    }
+
+    #[test]
+    fn fenced_code_block_layout_height_includes_vertical_padding() {
+        let layout = RenderedFencedCodeBlockLayout {
+            code_block: RenderedFencedCodeBlock {
+                source_range: 8..18,
+                text: "let x = 1;".to_string(),
+            },
+            width: px(240.),
+            code_height: px(22.),
+        };
+
+        assert_eq!(
+            layout.height(),
+            px(22.) + RENDERED_FENCED_CODE_BLOCK_VERTICAL_PADDING * 2.
+        );
+        assert!(layout.cacheable());
     }
 
     #[test]
