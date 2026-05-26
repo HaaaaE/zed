@@ -4,6 +4,16 @@
 
 Use a lightweight, non-Tokio HTTP client for standalone `markdown_editor` remote image loading. The implementation should use `ureq`, remove the accidental `ReqwestClient` wiring, and keep networking out of the `md_editor` library. It must handle documents with many images by queueing downloads with explicit concurrency, timeout, and response-size limits.
 
+## Progress
+
+- 2026-05-27: Completed UREQ implementation in `crates/markdown_editor`.
+  - Added app-private `MarkdownHttpClient` backed by `ureq`.
+  - Removed `markdown_editor`'s `reqwest_client` dependency and startup wiring.
+  - Added a 4-worker download queue, 2-downloads-per-host limit, 30s request timeout, and 20MB response body limit.
+  - Preserved HTTP error statuses as responses and rejected `AsyncBody::AsyncReader` with a clear error.
+  - Added focused unit coverage for 200, 404, body limit, global queueing, same-host limiting, unsupported streaming bodies, and dropped futures.
+  - Verified with `cargo fmt -p markdown_editor`, `cargo test -p markdown_editor`, `cargo check -p markdown_editor`, and `cargo tree -p markdown_editor | rg "tokio|reqwest|reqwest_client"`; the dependency-tree grep returned no matches.
+
 ## Key Changes
 
 - Remove the current wrong-direction `ReqwestClient` changes from `crates/markdown_editor`: no `reqwest_client` dependency and no `ReqwestClient::proxy_and_user_agent` startup wiring.

@@ -7,6 +7,8 @@ use gpui::{
 use md_editor::{MarkdownEditor, MarkdownEditorEvent, MarkdownEditorMode, init_standalone};
 use md_theme::{shell_palette, title_bar_height};
 
+use crate::lightweight_http_client::MarkdownHttpClient;
+
 gpui::actions!(
     markdown_editor,
     [NewDocument, OpenDocument, Save, SaveAs, ToggleMode]
@@ -419,10 +421,7 @@ pub fn run() {
 fn configure_http_client(cx: &mut App) {
     const USER_AGENT: &str = concat!("markdown-editor/", env!("CARGO_PKG_VERSION"));
 
-    match reqwest_client::ReqwestClient::proxy_and_user_agent(
-        http_client::read_proxy_from_env(),
-        USER_AGENT,
-    ) {
+    match MarkdownHttpClient::new(USER_AGENT) {
         Ok(client) => cx.set_http_client(Arc::new(client)),
         Err(error) => eprintln!("failed to initialize HTTP client: {error:#}"),
     }
