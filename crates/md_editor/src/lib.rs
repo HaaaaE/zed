@@ -21,10 +21,10 @@ mod rendered_element;
 use block::DisplayBlockLayout;
 #[cfg(test)]
 use block::{
-    RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT, RENDERED_IMAGE_BLOCK_VERTICAL_PADDING,
-    RenderedFormulaBlock, RenderedImageBlock, RenderedImageBlockLayout,
-    image_block_height_for_size, image_block_source_offset_for_x, rendered_formula_block_for_row,
-    rendered_image_block_for_row,
+    RENDERED_FORMULA_BLOCK_VERTICAL_PADDING, RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT,
+    RENDERED_IMAGE_BLOCK_VERTICAL_PADDING, RenderedFormulaBlock, RenderedImageBlock,
+    RenderedImageBlockLayout, image_block_height_for_size, image_block_source_offset_for_x,
+    rendered_formula_block_for_row, rendered_image_block_for_row,
 };
 use inline_atom::{
     DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, INLINE_IMAGE_PLACEHOLDER,
@@ -5200,6 +5200,61 @@ mod tests {
     }
 
     #[gpui::test]
+    fn rendered_formula_block_mouse_events_select_source_boundaries(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.simulate_resize(gpui::size(px(500.), px(400.)));
+        let formula_source = "$$x + y$$";
+        let editor = cx.new(|cx| {
+            let mut editor = MarkdownEditor::for_text(&format!("{formula_source}\nnext\n"), cx);
+            editor.set_mode(MarkdownEditorMode::Rendered, cx);
+            editor.set_cursor(Point::new(1, 0));
+            editor
+        });
+
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(500.), px(400.)),
+            |_, _| editor.clone().into_any_element(),
+        );
+
+        let block_middle_y = (default_row_metrics().line_height
+            + RENDERED_FORMULA_BLOCK_VERTICAL_PADDING * 2.)
+            * 0.5;
+        let left_half = gpui::point(gutter_width() + px(20.), block_middle_y);
+        cx.simulate_mouse_down(left_half, MouseButton::Left, gpui::Modifiers::none());
+        cx.simulate_mouse_up(left_half, MouseButton::Left, gpui::Modifiers::none());
+
+        editor.read_with(cx, |editor, _| {
+            assert!(editor.selection.is_empty());
+            assert_eq!(editor.cursor(), Point::new(0, 0));
+            assert_eq!(editor.selection.goal, SelectionGoal::HorizontalPosition(0.));
+        });
+
+        cx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(500.), px(400.)),
+            |_, _| editor.clone().into_any_element(),
+        );
+
+        let right_half = gpui::point(gutter_width() + px(360.), block_middle_y);
+        cx.simulate_mouse_down(right_half, MouseButton::Left, gpui::Modifiers::shift());
+        cx.simulate_mouse_up(right_half, MouseButton::Left, gpui::Modifiers::shift());
+
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(editor.selection.start, Point::new(0, 0));
+            assert_eq!(
+                editor.selection.end,
+                Point::new(0, formula_source.len() as u32)
+            );
+            assert!(!editor.selection.reversed);
+            assert!(matches!(
+                editor.selection.goal,
+                SelectionGoal::WrappedHorizontalPosition((0, x)) if x > 0.
+            ));
+        });
+    }
+
+    #[gpui::test]
     fn rendered_mode_draws_inline_image_atom(cx: &mut gpui::TestAppContext) {
         let cx = cx.add_empty_window();
         let editor = cx.new(|cx| {
@@ -6990,6 +7045,33 @@ mod tests {
     }
 
     #[test]
+    fn rendered_horizontal_movement_skips_inactive_formula_block() {
+        let formula_source = "$$x + y$$";
+        let mut buffer = Buffer::local(&format!("{formula_source}\nnext\n"));
+        let snapshot = buffer.snapshot();
+        let formula_end = formula_source.len();
+
+        assert_eq!(
+            move_horizontal_in_mode(
+                &snapshot,
+                Point::new(0, 0),
+                MarkdownEditorMode::Rendered,
+                HorizontalDirection::Right,
+            ),
+            Point::new(0, formula_end as u32)
+        );
+        assert_eq!(
+            move_horizontal_in_mode(
+                &snapshot,
+                Point::new(0, formula_end as u32),
+                MarkdownEditorMode::Rendered,
+                HorizontalDirection::Left,
+            ),
+            Point::new(0, 0)
+        );
+    }
+
+    #[test]
     fn rendered_select_horizontal_extends_across_inactive_image_block() {
         let image_source = "![alt](https://example.com/cat.png)";
         let mut buffer = Buffer::local(&format!("{image_source}\nnext\n"));
@@ -7020,6 +7102,43 @@ mod tests {
                 id: 0,
                 start: Point::new(0, 0),
                 end: Point::new(0, image_end as u32),
+                reversed: true,
+                goal: SelectionGoal::None,
+            }
+        );
+    }
+
+    #[test]
+    fn rendered_select_horizontal_extends_across_inactive_formula_block() {
+        let formula_source = "$$x + y$$";
+        let mut buffer = Buffer::local(&format!("{formula_source}\nnext\n"));
+        let snapshot = buffer.snapshot();
+        let formula_end = formula_source.len();
+
+        assert_eq!(
+            select_right_in_mode(
+                &snapshot,
+                &collapsed_selection(Point::new(0, 0)),
+                MarkdownEditorMode::Rendered,
+            ),
+            Selection {
+                id: 0,
+                start: Point::new(0, 0),
+                end: Point::new(0, formula_end as u32),
+                reversed: false,
+                goal: SelectionGoal::None,
+            }
+        );
+        assert_eq!(
+            select_left_in_mode(
+                &snapshot,
+                &collapsed_selection(Point::new(0, formula_end as u32)),
+                MarkdownEditorMode::Rendered,
+            ),
+            Selection {
+                id: 0,
+                start: Point::new(0, 0),
+                end: Point::new(0, formula_end as u32),
                 reversed: true,
                 goal: SelectionGoal::None,
             }
@@ -8273,6 +8392,34 @@ mod tests {
     fn rendered_delete_deletes_next_image_block() {
         let image_source = "![alt](https://example.com/cat.png)";
         let mut buffer = Buffer::local(&format!("{image_source}\nnext\n"));
+        let selection = collapsed_selection(Point::new(0, 0));
+
+        let (selection, transaction_id) =
+            delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+        assert_eq!(buffer.text(), "\nnext\n");
+        assert_eq!(selection, collapsed_selection(Point::new(0, 0)));
+        assert!(transaction_id.is_some());
+    }
+
+    #[test]
+    fn rendered_backspace_deletes_previous_formula_block() {
+        let formula_source = "$$x + y$$";
+        let mut buffer = Buffer::local(&format!("{formula_source}\nnext\n"));
+        let selection = collapsed_selection(Point::new(0, formula_source.len() as u32));
+
+        let (selection, transaction_id) =
+            backspace_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+        assert_eq!(buffer.text(), "\nnext\n");
+        assert_eq!(selection, collapsed_selection(Point::new(0, 0)));
+        assert!(transaction_id.is_some());
+    }
+
+    #[test]
+    fn rendered_delete_deletes_next_formula_block() {
+        let formula_source = "$$x + y$$";
+        let mut buffer = Buffer::local(&format!("{formula_source}\nnext\n"));
         let selection = collapsed_selection(Point::new(0, 0));
 
         let (selection, transaction_id) =
