@@ -9,6 +9,7 @@ use md_theme::editor_palette;
 
 use super::{
     DisplayRow, DisplayTextStyle, RowDisplayStyle, StyledDisplaySegment,
+    formula_render::{FormulaRenderMode, FormulaRenderState, formula_render_key, render_formula},
     layout::inline_style,
     markdown_image::{MarkdownImageSource, MarkdownImageSourceKey},
     rendered_element::{RenderedElementDescriptor, RenderedElementKind, RenderedElementPlacement},
@@ -58,6 +59,7 @@ pub(super) struct InlineAtomMeasurementKey {
     pub(super) fallback_text: String,
     pub(super) row_style: RowDisplayStyle,
     pub(super) resource_id: Option<MarkdownImageSourceKey>,
+    pub(super) formula_scale_factor_bits: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -131,7 +133,20 @@ impl DisplayInlineAtom {
                 .image_source
                 .as_ref()
                 .map(MarkdownImageSource::cache_key),
+            formula_scale_factor_bits: None,
         }
+    }
+
+    pub(super) fn measurement_key_with_scale(
+        &self,
+        row_style: RowDisplayStyle,
+        scale_factor: f32,
+    ) -> InlineAtomMeasurementKey {
+        let mut key = self.measurement_key(row_style);
+        if self.kind() == DisplayInlineAtomKind::InlineMath {
+            key.formula_scale_factor_bits = Some(scale_factor.to_bits());
+        }
+        key
     }
 
     pub(super) fn fallback_size(
@@ -159,24 +174,20 @@ impl DisplayInlineAtom {
         window: &mut Window,
         cx: &mut App,
     ) -> InlineAtomMeasurementState {
-        if self.kind() == DisplayInlineAtomKind::InlineImage {
-            return self.measure_inline_image_size(fallback_size, window, cx);
+        match self.kind() {
+            DisplayInlineAtomKind::InlineImage => {
+                self.measure_inline_image_size(fallback_size, window, cx)
+            }
+            DisplayInlineAtomKind::InlineMath => {
+                let key = self.formula_key(row_style, window.scale_factor());
+                match render_formula(&key, fallback_size) {
+                    FormulaRenderState::Ready(asset) => {
+                        InlineAtomMeasurementState::Ready(asset.logical_size)
+                    }
+                    FormulaRenderState::Invalid(size) => InlineAtomMeasurementState::Invalid(size),
+                }
+            }
         }
-
-        let mut element = self.render_measurement_piece(self.fallback_text.clone(), row_style);
-        let size = element.layout_as_root(
-            gpui::size(
-                gpui::AvailableSpace::MaxContent,
-                gpui::AvailableSpace::MaxContent,
-            ),
-            window,
-            cx,
-        );
-
-        InlineAtomMeasurementState::Ready(gpui::size(
-            size.width.max(fallback_size.width).max(px(1.)),
-            size.height.max(fallback_size.height).max(px(1.)),
-        ))
     }
 
     fn measure_inline_image_size(
@@ -222,14 +233,6 @@ impl DisplayInlineAtom {
         )
     }
 
-    fn render_measurement_piece(
-        &self,
-        text: String,
-        row_style: RowDisplayStyle,
-    ) -> gpui::AnyElement {
-        self.render_element(text, row_style, None, false)
-    }
-
     fn render_element(
         &self,
         text: String,
@@ -244,9 +247,22 @@ impl DisplayInlineAtom {
                 if selected {
                     style.color = Some(palette.selection_text);
                 }
+                let formula = self.formula_key_with_color(
+                    row_style,
+                    style
+                        .color
+                        .unwrap_or_else(|| editor_palette().inline_math_text),
+                    1.,
+                );
+                let rendered_formula = match render_formula(
+                    &formula,
+                    size.unwrap_or_else(|| gpui::size(self.width, self.height)),
+                ) {
+                    FormulaRenderState::Ready(asset) => Some(asset),
+                    FormulaRenderState::Invalid(_) => None,
+                };
                 let mut element = div()
                     .min_h(self.height)
-                    .px(self.kind().horizontal_padding())
                     .flex()
                     .items_center()
                     .font_family(EDITOR_FONT_FAMILY)
@@ -258,11 +274,17 @@ impl DisplayInlineAtom {
                         palette.selection_background
                     } else {
                         palette.inline_math_text.opacity(0.08)
-                    })
-                    .child(render_text_piece(text, &style));
+                    });
                 if let Some(size) = size {
                     element = element.w(size.width).h(size.height);
                 }
+                element = if let Some(asset) = rendered_formula {
+                    element.child(img(asset.image).size_full())
+                } else {
+                    element
+                        .px(self.kind().horizontal_padding())
+                        .child(render_text_piece(text, &style))
+                };
                 element.into_any_element()
             }
             DisplayInlineAtomKind::InlineImage => {
@@ -313,6 +335,41 @@ impl DisplayInlineAtom {
                 element.into_any_element()
             }
         }
+    }
+
+    fn formula_key(
+        &self,
+        row_style: RowDisplayStyle,
+        scale_factor: f32,
+    ) -> super::formula_render::FormulaRenderKey {
+        self.formula_key_with_color(
+            row_style,
+            self.style
+                .color
+                .unwrap_or_else(|| editor_palette().inline_math_text),
+            scale_factor,
+        )
+    }
+
+    fn formula_key_with_color(
+        &self,
+        row_style: RowDisplayStyle,
+        color: gpui::Hsla,
+        scale_factor: f32,
+    ) -> super::formula_render::FormulaRenderKey {
+        let tex = match &self.descriptor.kind {
+            RenderedElementKind::Math { tex } => tex.clone(),
+            _ => self.fallback_text.clone(),
+        };
+        formula_render_key(
+            tex,
+            FormulaRenderMode::Inline,
+            row_style.text_size,
+            row_style.line_height,
+            color,
+            INLINE_MATH_ATOM_HORIZONTAL_PADDING,
+            scale_factor,
+        )
     }
 
     pub(super) fn is_selected(&self, selected_range: Option<&Range<usize>>) -> bool {

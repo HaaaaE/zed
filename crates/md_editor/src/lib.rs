@@ -25,6 +25,7 @@ mod block;
 mod cache;
 mod display_model;
 mod edit;
+mod formula_render;
 mod inline_atom;
 mod interaction;
 mod layout;
@@ -2281,6 +2282,7 @@ mod test_support {
             formula_block: rendered_formula_block(source_range, "x + y"),
             width,
             height: px(36.),
+            rendered_formula: None,
             cacheable: true,
         })
     }

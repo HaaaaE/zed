@@ -203,7 +203,9 @@ pub(super) fn display_row_layout_inputs_for_fragments(
         .iter()
         .filter_map(|fragment| match fragment {
             DisplayInlineFragment::Text(_) => None,
-            DisplayInlineFragment::Atom(atom) => Some(atom.measurement_key(row_style)),
+            DisplayInlineFragment::Atom(atom) => {
+                Some(atom.measurement_key_with_scale(row_style, window.scale_factor()))
+            }
         })
         .collect();
 

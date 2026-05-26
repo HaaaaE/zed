@@ -14,9 +14,11 @@ use super::rendered_element::{
 };
 use super::{
     MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, VisualLineBoundary, clip_cursor,
-    display_model::DisplayRow, markdown_image::MarkdownImageSource, range_contains,
-    rendered_element_descriptor_for_inline_span_in_row, rendered_element_source_range_is_active,
-    selection_byte_range, visual_horizontal_goal,
+    display_model::DisplayRow,
+    formula_render::{FormulaRenderMode, FormulaRenderState, formula_render_key, render_formula},
+    markdown_image::MarkdownImageSource,
+    range_contains, rendered_element_descriptor_for_inline_span_in_row,
+    rendered_element_source_range_is_active, selection_byte_range, visual_horizontal_goal,
 };
 
 pub(super) const RENDERED_IMAGE_BLOCK_MAX_WIDTH: gpui::Pixels = px(600.);
@@ -330,6 +332,7 @@ pub(super) struct RenderedFormulaBlockLayout {
     pub(super) formula_block: RenderedFormulaBlock,
     pub(super) width: gpui::Pixels,
     pub(super) height: gpui::Pixels,
+    pub(super) rendered_formula: Option<super::formula_render::FormulaRenderAsset>,
     pub(super) cacheable: bool,
 }
 
@@ -340,7 +343,7 @@ impl RenderedFormulaBlockLayout {
         row_style: RowDisplayStyle,
         measure_layout: bool,
         window: &mut Window,
-        cx: &mut App,
+        _cx: &mut App,
     ) -> Self {
         let width = wrap_width.max(px(1.));
         if !measure_layout {
@@ -348,22 +351,35 @@ impl RenderedFormulaBlockLayout {
                 formula_block,
                 width,
                 height: row_style.line_height + RENDERED_FORMULA_BLOCK_VERTICAL_PADDING * 2.,
+                rendered_formula: None,
                 cacheable: false,
             };
         }
 
-        let mut element = formula_block_measurement_element(&formula_block.tex, width, row_style)
-            .into_any_element();
-        let size = element.layout_as_root(
-            gpui::size(width.into(), gpui::AvailableSpace::MaxContent),
-            window,
-            cx,
+        let fallback_height = row_style.line_height + RENDERED_FORMULA_BLOCK_VERTICAL_PADDING * 2.;
+        let key = formula_render_key(
+            formula_block.tex.clone(),
+            FormulaRenderMode::Block,
+            row_style.text_size,
+            row_style.line_height,
+            editor_palette().inline_math_text,
+            RENDERED_FORMULA_BLOCK_VERTICAL_PADDING,
+            window.scale_factor(),
         );
+        let rendered_formula = match render_formula(&key, gpui::size(width, fallback_height)) {
+            FormulaRenderState::Ready(asset) => Some(asset),
+            FormulaRenderState::Invalid(_) => None,
+        };
+        let height = rendered_formula
+            .as_ref()
+            .map(|asset| asset.logical_size.height + RENDERED_FORMULA_BLOCK_VERTICAL_PADDING * 2.)
+            .unwrap_or(fallback_height);
 
         Self {
             formula_block,
             width,
-            height: size.height.max(row_style.line_height),
+            height: height.max(row_style.line_height),
+            rendered_formula,
             cacheable: true,
         }
     }
@@ -540,8 +556,7 @@ fn render_formula_block(
             this.mouse_move_on_block(&mouse_move_block_layout, event, window, cx)
         }))
         .child(render_formula_block_inner(
-            &formula_layout.formula_block.tex,
-            formula_layout.width,
+            formula_layout.clone(),
             row_style,
             selected,
         ))
@@ -552,22 +567,29 @@ fn render_formula_block(
 }
 
 fn render_formula_block_inner(
-    tex: &str,
-    width: gpui::Pixels,
+    formula_layout: RenderedFormulaBlockLayout,
     row_style: RowDisplayStyle,
     selected: bool,
 ) -> gpui::AnyElement {
     let palette = editor_palette();
-    let mut element = formula_block_measurement_element(tex, width, row_style)
-        .border_1()
-        .border_color(if selected {
-            palette.selection_background
-        } else {
-            palette.inline_math_text.opacity(0.35)
-        });
+    let mut element = formula_block_measurement_element(
+        &formula_layout.formula_block.tex,
+        formula_layout.width,
+        row_style,
+    )
+    .border_1()
+    .border_color(if selected {
+        palette.selection_background
+    } else {
+        palette.inline_math_text.opacity(0.35)
+    });
 
     if selected {
         element = element.bg(palette.selection_background.opacity(0.12));
+    }
+
+    if let Some(asset) = formula_layout.rendered_formula {
+        element = element.child(img(asset.image).h(asset.logical_size.height));
     }
 
     element.into_any_element()

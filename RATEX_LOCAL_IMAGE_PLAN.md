@@ -16,7 +16,14 @@ virtualization model:
   - Threaded `MarkdownImageSource` through rendered descriptors, inline atoms, block images, measurement keys, measurement, and paint.
   - Local relative image rows with a document path now become rendered image blocks; unresolved relative images remain fallback inline atoms.
   - Verified with `cargo fmt -p md_editor -p markdown_editor`, `cargo test -p md_editor`, `cargo test -p markdown_wysiwyg`, and `cargo check -p md_editor -p markdown_editor`.
-- Remaining: RaTeX formula asset rendering and its cache/style/scale/interaction tests are not implemented yet.
+- 2026-05-27: Added RaTeX-backed formula rendering for inline and block math.
+  - Added RaTeX workspace dependencies with embedded `ratex-render` fonts.
+  - Added `formula_render` with TeX/style/mode/padding/scale keys, PNG rendering into `RenderImage`, invalid fallback caching, and cached asset reuse.
+  - Inline math measurement now uses rendered formula logical size when rendering succeeds and falls back to source text for invalid formulas.
+  - Block math layout now uses rendered formula image height and paints the same cached asset inside the existing block interaction surface.
+  - Inline formula measurement cache keys now include formula scale factor bits so high-DPI measurements are not reused across scale changes.
+  - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, `cargo test -p md_editor`, `cargo test -p markdown_wysiwyg`, `cargo check -p md_editor -p markdown_editor`, and `cargo test -p markdown_editor`.
+- Remaining: The formula asset path is synchronous in v1. The originally planned async `Pending` formula state and deferred row invalidation for formula transitions are not implemented; formula rows render only when layout/render asks for them and cache ready/invalid results.
 
 The implementation must keep measurement and rendering in agreement. The same
 resolved image or formula source should drive layout, cache keys, and paint.

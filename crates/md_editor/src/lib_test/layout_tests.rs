@@ -514,6 +514,10 @@ fn inline_atom_measurement_key_tracks_descriptor_content_and_row_style() {
     assert_ne!(same_image, different_url);
     assert_ne!(same_image, different_style);
     assert_ne!(math.measurement_key(row_style), different_math);
+    assert_ne!(
+        math.measurement_key_with_scale(row_style, 1.),
+        math.measurement_key_with_scale(row_style, 2.)
+    );
 }
 
 #[test]
@@ -1519,6 +1523,7 @@ fn formula_block_layout_is_cacheable_and_uses_measured_height() {
         formula_block: rendered_formula_block(4..13, "x + y"),
         width: px(200.),
         height: px(36.),
+        rendered_formula: None,
         cacheable: true,
     };
     let block_layout = DisplayRowLayout::Block(DisplayBlockLayout::Formula(formula_layout.clone()));
