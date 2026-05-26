@@ -1,0 +1,1294 @@
+use super::test_support::*;
+
+#[gpui::test]
+fn source_display_rows_uses_text_snapshot_without_refreshing_markdown_syntax(
+    cx: &mut gpui::TestAppContext,
+) {
+    let editor = cx.update(|cx| cx.new(|cx| MarkdownEditor::for_text("# Heading\nBody\n", cx)));
+
+    editor.update(cx, |editor, _| {
+        let _snapshot = editor.buffer.snapshot();
+        let cached_syntax_version = editor.buffer.cached_syntax_version_for_tests();
+        assert_eq!(
+            &cached_syntax_version,
+            editor.buffer.as_text_snapshot().version()
+        );
+
+        assert!(editor.buffer.edit([(0..0, "Plain text\n")]).is_some());
+        let edited_text_version = editor.buffer.as_text_snapshot().version().clone();
+        assert_ne!(cached_syntax_version, edited_text_version);
+
+        let display_rows = editor.display_rows(0..2);
+        assert_eq!(
+            display_rows
+                .into_iter()
+                .map(|row| row.text)
+                .collect::<Vec<_>>(),
+            vec!["Plain text".to_string(), "# Heading".to_string()]
+        );
+        assert_eq!(
+            editor.buffer.cached_syntax_version_for_tests(),
+            cached_syntax_version
+        );
+    });
+}
+
+#[gpui::test]
+fn source_mode_actions_follow_wrapped_visual_rows(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(90.), px(200.)));
+    let editor = cx.new(|cx| MarkdownEditor::for_text("abcdefghijklmnopqrst\n", cx));
+
+    editor.update_in(cx, |editor, window, cx| {
+        let source_line_end = editor.buffer.as_text_snapshot().line_len(0);
+        editor.set_cursor(Point::new(0, 0));
+
+        editor.move_down(&MoveDown, window, cx);
+        let wrapped_row_start = editor.cursor();
+        assert_eq!(wrapped_row_start.row, 0);
+        assert!(wrapped_row_start.column > 0);
+        assert!(wrapped_row_start.column < source_line_end);
+
+        editor.move_to_end_of_line(&MoveToEndOfLine, window, cx);
+        let wrapped_row_end = editor.cursor();
+        assert_eq!(wrapped_row_end.row, 0);
+        assert!(wrapped_row_end.column > wrapped_row_start.column);
+        assert!(wrapped_row_end.column < source_line_end);
+
+        editor.move_to_beginning_of_line(&MoveToBeginningOfLine, window, cx);
+        assert_eq!(editor.cursor(), wrapped_row_start);
+
+        editor.move_up(&MoveUp, window, cx);
+        assert_eq!(editor.cursor(), Point::new(0, 0));
+    });
+}
+
+#[gpui::test]
+fn source_interaction_layouts_cache_wrapped_text_rows(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(90.), px(200.)));
+    let editor = cx.new(|cx| MarkdownEditor::for_text("abcdefghijklmnopqrst\n", cx));
+
+    editor.update_in(cx, |editor, window, cx| {
+        assert_eq!(editor.row_layout_cache.len(), 0);
+
+        editor.set_cursor(Point::new(0, 0));
+        editor.move_down(&MoveDown, window, cx);
+        assert_eq!(editor.row_layout_cache.len(), 1);
+
+        editor.move_up(&MoveUp, window, cx);
+        assert_eq!(editor.row_layout_cache.len(), 1);
+    });
+}
+
+#[gpui::test]
+fn rendered_interaction_layouts_cache_plain_text_rows(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(90.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("abcdefghijklmnopqrst\nsecond", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        assert_eq!(editor.row_layout_cache.len(), 0);
+
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
+            .expect("display row should exist");
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let wrap_width = text_wrap_width(window);
+        let selection = editor.selection.clone();
+
+        let _ = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            wrap_width,
+            false,
+            window,
+            cx,
+        );
+        assert_eq!(editor.row_layout_cache.len(), 1);
+
+        let _ = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            wrap_width,
+            false,
+            window,
+            cx,
+        );
+        assert_eq!(editor.row_layout_cache.len(), 1);
+    });
+}
+
+#[gpui::test]
+fn source_render_uses_text_snapshot_without_refreshing_markdown_syntax(
+    cx: &mut gpui::TestAppContext,
+) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(240.), px(200.)));
+    let editor = cx.new(|cx| MarkdownEditor::for_text("# Heading\nBody\n", cx));
+
+    let (cached_syntax_version, edited_text_version) = editor.update(cx, |editor, _| {
+        let _snapshot = editor.buffer.snapshot();
+        let cached_syntax_version = editor.buffer.cached_syntax_version_for_tests();
+        assert_eq!(
+            &cached_syntax_version,
+            editor.buffer.as_text_snapshot().version()
+        );
+
+        assert!(editor.buffer.edit([(0..0, "Plain text\n")]).is_some());
+        let edited_text_version = editor.buffer.as_text_snapshot().version().clone();
+        assert_ne!(cached_syntax_version, edited_text_version);
+        assert_eq!(
+            editor.buffer.cached_syntax_version_for_tests(),
+            cached_syntax_version
+        );
+
+        (cached_syntax_version, edited_text_version)
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(240.), px(200.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    editor.read_with(cx, |editor, _| {
+        assert_eq!(
+            editor.buffer.cached_syntax_version_for_tests(),
+            cached_syntax_version
+        );
+        assert_eq!(
+            editor.buffer.as_text_snapshot().version(),
+            &edited_text_version
+        );
+    });
+}
+
+#[gpui::test]
+fn source_mouse_events_hit_and_select_wrapped_visual_rows(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(90.), px(200.)));
+    let editor = cx.new(|cx| MarkdownEditor::for_text("abcdefghijklmnopqrst\n", cx));
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(90.), px(200.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    let line_height = default_row_metrics().line_height;
+    let second_visual_row = gpui::point(gutter_width() + px(2.), line_height * 1.5);
+    cx.simulate_mouse_move(second_visual_row, None, gpui::Modifiers::none());
+    cx.simulate_mouse_down(
+        second_visual_row,
+        MouseButton::Left,
+        gpui::Modifiers::none(),
+    );
+    cx.simulate_mouse_up(
+        second_visual_row,
+        MouseButton::Left,
+        gpui::Modifiers::none(),
+    );
+
+    editor.read_with(cx, |editor, _| {
+        assert!(editor.selection.is_empty());
+        assert_eq!(editor.cursor().row, 0);
+        assert!(editor.cursor().column > 0);
+        assert!(editor.cursor().column < editor.buffer.as_text_snapshot().line_len(0));
+        assert!(matches!(
+            editor.selection.goal,
+            SelectionGoal::WrappedHorizontalPosition((1, _))
+        ));
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(90.), px(200.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    let third_visual_row = gpui::point(gutter_width() + px(30.), line_height * 2.5);
+    cx.simulate_mouse_down(
+        third_visual_row,
+        MouseButton::Left,
+        gpui::Modifiers::shift(),
+    );
+    cx.simulate_mouse_up(
+        third_visual_row,
+        MouseButton::Left,
+        gpui::Modifiers::shift(),
+    );
+
+    editor.read_with(cx, |editor, _| {
+        assert!(
+            !editor.selection.is_empty(),
+            "expected extended selection, got {:?}",
+            editor.selection
+        );
+        assert_eq!(editor.selection.start.row, 0);
+        assert_eq!(editor.selection.end.row, 0);
+        assert!(editor.selection.end.column > editor.selection.start.column);
+        assert!(matches!(
+            editor.selection.goal,
+            SelectionGoal::WrappedHorizontalPosition((2, _))
+        ));
+    });
+}
+
+#[gpui::test]
+fn rendered_mode_actions_update_marker_visibility(cx: &mut gpui::TestAppContext) {
+    cx.update(init_standalone);
+    let (editor, cx) = cx.add_window_view(|window, cx| {
+        let mut editor = MarkdownEditor::for_text("# Title\nBody\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(1, 0));
+        window.focus(&editor.focus_handle(cx), cx);
+        window.activate_window();
+        editor
+    });
+
+    editor.update(cx, |editor, _| {
+        assert_eq!(cached_row_text_for_current_selection(editor, 0), "Title");
+    });
+
+    cx.simulate_keystrokes("up");
+
+    editor.update(cx, |editor, _| {
+        assert_eq!(editor.cursor().row, 0);
+        assert_eq!(cached_row_text_for_current_selection(editor, 0), "# Title");
+    });
+
+    cx.simulate_keystrokes("down");
+
+    editor.update(cx, |editor, _| {
+        assert_eq!(editor.cursor().row, 1);
+        assert_eq!(cached_row_text_for_current_selection(editor, 0), "Title");
+    });
+}
+
+#[gpui::test]
+fn resize_reflow_clears_wrapped_action_goal(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(90.), px(200.)));
+    let editor = cx.new(|cx| MarkdownEditor::for_text("abcdefghijklmnopqrst\n", cx));
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(90.), px(200.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(0, 0));
+        editor.move_down(&MoveDown, window, cx);
+        assert!(matches!(
+            editor.selection.goal,
+            SelectionGoal::WrappedHorizontalPosition(_)
+        ));
+    });
+
+    cx.simulate_resize(gpui::size(px(180.), px(200.)));
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(180.), px(200.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    editor.read_with(cx, |editor, _| {
+        assert_eq!(editor.selection.goal, SelectionGoal::None);
+    });
+}
+
+#[gpui::test]
+fn mode_switch_clears_wrapped_visual_goal(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(90.), px(200.)));
+    let editor = cx.new(|cx| MarkdownEditor::for_text("abcdefghijklmnopqrst\n", cx));
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(0, 0));
+        editor.move_down(&MoveDown, window, cx);
+        let wrapped_cursor = editor.cursor();
+        assert!(matches!(
+            editor.selection.goal,
+            SelectionGoal::WrappedHorizontalPosition(_)
+        ));
+
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        assert_eq!(editor.cursor(), wrapped_cursor);
+        assert_eq!(editor.selection.goal, SelectionGoal::None);
+
+        editor.set_mode(MarkdownEditorMode::Source, cx);
+        assert_eq!(editor.cursor(), wrapped_cursor);
+        assert_eq!(editor.selection.goal, SelectionGoal::None);
+    });
+}
+
+#[gpui::test]
+fn rendered_mode_draws_image_block_without_reentering_list_state(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(
+            "# Heading\n\n![Test Image](https://example.com/cat.png)\n\nAfter image",
+            cx,
+        );
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(500.), px(400.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+}
+
+#[gpui::test]
+fn rendered_mode_does_not_cache_loading_image_block_layout(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let editor = cx.new(|cx| {
+        let mut editor =
+            MarkdownEditor::for_text("![alt](https://example.com/cat.png)\nnext\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(1, 0));
+        editor
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(500.), px(120.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    editor.read_with(cx, |editor, _| {
+        assert!(!editor.row_layout_cache.keys().any(|key| key.row == 0));
+    });
+}
+
+#[gpui::test]
+fn rendered_image_block_mouse_events_select_source_boundaries(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(500.), px(400.)));
+    let image_source = "![alt](https://example.com/cat.png)";
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(&format!("{image_source}\nnext\n"), cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(1, 0));
+        editor
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(500.), px(400.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    let block_middle_y = (RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT
+        + RENDERED_IMAGE_BLOCK_VERTICAL_PADDING * 2.)
+        * 0.5;
+    let left_half = gpui::point(gutter_width() + px(20.), block_middle_y);
+    cx.simulate_mouse_down(left_half, MouseButton::Left, gpui::Modifiers::none());
+    cx.simulate_mouse_up(left_half, MouseButton::Left, gpui::Modifiers::none());
+
+    editor.read_with(cx, |editor, _| {
+        assert!(editor.selection.is_empty());
+        assert_eq!(editor.cursor(), Point::new(0, 0));
+        assert_eq!(editor.selection.goal, SelectionGoal::HorizontalPosition(0.));
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(500.), px(400.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    let right_half = gpui::point(gutter_width() + px(360.), block_middle_y);
+    cx.simulate_mouse_down(right_half, MouseButton::Left, gpui::Modifiers::shift());
+    cx.simulate_mouse_up(right_half, MouseButton::Left, gpui::Modifiers::shift());
+
+    editor.read_with(cx, |editor, _| {
+        assert_eq!(editor.selection.start, Point::new(0, 0));
+        assert_eq!(
+            editor.selection.end,
+            Point::new(0, image_source.len() as u32)
+        );
+        assert!(!editor.selection.reversed);
+        assert!(matches!(
+            editor.selection.goal,
+            SelectionGoal::WrappedHorizontalPosition((0, x)) if x > 0.
+        ));
+    });
+}
+
+#[gpui::test]
+fn rendered_formula_block_mouse_events_select_source_boundaries(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(500.), px(400.)));
+    let formula_source = "$$x + y$$";
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(&format!("{formula_source}\nnext\n"), cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(1, 0));
+        editor
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(500.), px(400.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    let block_middle_y =
+        (default_row_metrics().line_height + RENDERED_FORMULA_BLOCK_VERTICAL_PADDING * 2.) * 0.5;
+    let left_half = gpui::point(gutter_width() + px(20.), block_middle_y);
+    cx.simulate_mouse_down(left_half, MouseButton::Left, gpui::Modifiers::none());
+    cx.simulate_mouse_up(left_half, MouseButton::Left, gpui::Modifiers::none());
+
+    editor.read_with(cx, |editor, _| {
+        assert!(editor.selection.is_empty());
+        assert_eq!(editor.cursor(), Point::new(0, 0));
+        assert_eq!(editor.selection.goal, SelectionGoal::HorizontalPosition(0.));
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(500.), px(400.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    let right_half = gpui::point(gutter_width() + px(360.), block_middle_y);
+    cx.simulate_mouse_down(right_half, MouseButton::Left, gpui::Modifiers::shift());
+    cx.simulate_mouse_up(right_half, MouseButton::Left, gpui::Modifiers::shift());
+
+    editor.read_with(cx, |editor, _| {
+        assert_eq!(editor.selection.start, Point::new(0, 0));
+        assert_eq!(
+            editor.selection.end,
+            Point::new(0, formula_source.len() as u32)
+        );
+        assert!(!editor.selection.reversed);
+        assert!(matches!(
+            editor.selection.goal,
+            SelectionGoal::WrappedHorizontalPosition((0, x)) if x > 0.
+        ));
+    });
+}
+
+#[gpui::test]
+fn rendered_mode_draws_inline_image_atom(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let editor = cx.new(|cx| {
+        let mut editor =
+            MarkdownEditor::for_text("Before ![alt](https://example.com/cat.png) after", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(500.), px(120.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+}
+
+#[gpui::test]
+fn rendered_mode_does_not_cache_loading_inline_image_layout(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let editor = cx.new(|cx| {
+        let mut editor =
+            MarkdownEditor::for_text("Before ![alt](https://example.com/cat.png) after", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(500.), px(120.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    assert_eq!(
+        editor.read_with(cx, |editor, _| editor.row_layout_cache.len()),
+        0
+    );
+}
+
+#[gpui::test]
+fn rendered_mode_draws_empty_alt_inline_image_atom(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let editor = cx.new(|cx| {
+        let mut editor =
+            MarkdownEditor::for_text("Before ![](https://example.com/cat.png) after", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(500.), px(120.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+}
+
+#[test]
+fn selection_without_goal_preserves_selection_shape() {
+    let selection = Selection {
+        id: 7,
+        start: Point::new(0, 2),
+        end: Point::new(3, 1),
+        reversed: true,
+        goal: SelectionGoal::WrappedHorizontalPosition((2, 48.)),
+    };
+
+    assert_eq!(
+        selection_without_goal(&selection),
+        Selection {
+            id: 7,
+            start: Point::new(0, 2),
+            end: Point::new(3, 1),
+            reversed: true,
+            goal: SelectionGoal::None,
+        }
+    );
+}
+
+#[test]
+fn transaction_selection_history_drops_layout_goals() {
+    let before = Selection {
+        id: 7,
+        start: Point::new(0, 2),
+        end: Point::new(3, 1),
+        reversed: true,
+        goal: SelectionGoal::WrappedHorizontalPosition((2, 48.)),
+    };
+    let after = Selection {
+        id: 8,
+        start: Point::new(1, 0),
+        end: Point::new(1, 4),
+        reversed: false,
+        goal: SelectionGoal::WrappedHorizontalPosition((1, 24.)),
+    };
+
+    assert_eq!(
+        transaction_selection_state_without_goals(before, after),
+        TransactionSelectionState {
+            before: Selection {
+                id: 7,
+                start: Point::new(0, 2),
+                end: Point::new(3, 1),
+                reversed: true,
+                goal: SelectionGoal::None,
+            },
+            after: Selection {
+                id: 8,
+                start: Point::new(1, 0),
+                end: Point::new(1, 4),
+                reversed: false,
+                goal: SelectionGoal::None,
+            },
+        }
+    );
+}
+
+#[test]
+fn reveal_selection_head_row_scrolls_to_clipped_cursor_row() {
+    let buffer = Buffer::local("zero\none\ntwo\n");
+    let list_state = ListState::new(2, ListAlignment::Top, px(1000.));
+    list_state.scroll_to(gpui::ListOffset {
+        item_ix: 1,
+        offset_in_item: px(5.),
+    });
+    let selection = collapsed_selection(Point::new(2, 0));
+
+    reveal_selection_head_row_in_text_snapshot(&list_state, buffer.as_text_snapshot(), &selection);
+
+    let scroll_top = list_state.logical_scroll_top();
+    assert_eq!(scroll_top.item_ix, 1);
+    assert_eq!(scroll_top.offset_in_item, px(0.));
+}
+
+#[test]
+fn text_wrap_width_change_clears_stale_selection_goal_once() {
+    let mut last_text_wrap_width = Some(px(120.));
+    let mut selection = Selection {
+        id: 7,
+        start: Point::new(0, 2),
+        end: Point::new(3, 1),
+        reversed: true,
+        goal: SelectionGoal::WrappedHorizontalPosition((2, 48.)),
+    };
+
+    assert!(apply_text_wrap_width_change(
+        &mut last_text_wrap_width,
+        &mut selection,
+        px(80.)
+    ));
+    assert_eq!(last_text_wrap_width, Some(px(80.)));
+    assert_eq!(selection.goal, SelectionGoal::None);
+    assert_eq!(selection.start, Point::new(0, 2));
+    assert_eq!(selection.end, Point::new(3, 1));
+    assert!(selection.reversed);
+
+    selection.goal = SelectionGoal::WrappedHorizontalPosition((1, 24.));
+
+    assert!(!apply_text_wrap_width_change(
+        &mut last_text_wrap_width,
+        &mut selection,
+        px(80.)
+    ));
+    assert_eq!(
+        selection.goal,
+        SelectionGoal::WrappedHorizontalPosition((1, 24.))
+    );
+}
+
+#[test]
+fn source_single_row_edit_invalidates_only_that_row() {
+    let previous_selection = Selection {
+        id: 7,
+        start: Point::new(4, 2),
+        end: Point::new(4, 5),
+        reversed: false,
+        goal: SelectionGoal::None,
+    };
+    let current_selection = collapsed_selection(Point::new(4, 8));
+
+    assert_eq!(
+        local_source_edit_invalidation_rows(
+            MarkdownEditorMode::Source,
+            12,
+            12,
+            &previous_selection,
+            &current_selection,
+        ),
+        Some(4..5)
+    );
+}
+
+#[gpui::test]
+fn source_cached_display_row_reuses_text_snapshot_fast_path(cx: &mut gpui::TestAppContext) {
+    let editor = cx.update(|cx| cx.new(|cx| MarkdownEditor::for_text("one\n**two**", cx)));
+
+    editor.update(cx, |editor, _| {
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state = DisplayRowProjectionState::new(
+            &snapshot,
+            Some(&editor.selection),
+            MarkdownEditorMode::Source,
+        );
+
+        let display_row = editor
+            .cached_display_row(&snapshot, 1, MarkdownEditorMode::Source, &display_row_state)
+            .expect("source row should exist");
+        let source_display_row = editor
+            .cached_source_display_row(snapshot.as_text_snapshot(), 1)
+            .expect("source row should exist");
+
+        assert!(Arc::ptr_eq(&display_row, &source_display_row));
+        assert_eq!(display_row.text, "**two**");
+        assert_eq!(display_row.source_text, "**two**");
+    });
+}
+
+#[gpui::test]
+fn source_single_row_edit_rekeys_display_row_cache_before_edited_row(
+    cx: &mut gpui::TestAppContext,
+) {
+    let editor = cx.update(|cx| cx.new(|cx| MarkdownEditor::for_text("one\ntwo\nthree", cx)));
+
+    editor.update(cx, |editor, cx| {
+        let mode = editor.mode;
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let row_0 = editor
+            .cached_display_row(&snapshot, 0, mode, &display_row_state)
+            .expect("row 0 should exist");
+        let row_1 = editor
+            .cached_display_row(&snapshot, 1, mode, &display_row_state)
+            .expect("row 1 should exist");
+        let row_2 = editor
+            .cached_display_row(&snapshot, 2, mode, &display_row_state)
+            .expect("row 2 should exist");
+
+        let previous_selection = collapsed_selection(Point::new(1, 1));
+        editor.selection = previous_selection.clone();
+        let row_count_before = editor.display_list_state.item_count();
+        let (selection, transaction_id) =
+            replace_selection(&mut editor.buffer, &editor.selection, "XX");
+        assert!(transaction_id.is_some());
+        editor.selection = selection;
+
+        editor.notify_after_edit(
+            true,
+            row_count_before,
+            &previous_selection,
+            EditLayoutInvalidation::LocalSourceSelection {
+                byte_delta: Some("XX".len() as isize),
+            },
+            cx,
+        );
+
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let cached_row_0 = editor
+            .cached_display_row(&snapshot, 0, mode, &display_row_state)
+            .expect("row 0 should exist after edit");
+        let cached_row_1 = editor
+            .cached_display_row(&snapshot, 1, mode, &display_row_state)
+            .expect("row 1 should exist after edit");
+        let cached_row_2 = editor
+            .cached_display_row(&snapshot, 2, mode, &display_row_state)
+            .expect("row 2 should exist after edit");
+
+        assert!(Arc::ptr_eq(&row_0, &cached_row_0));
+        assert!(!Arc::ptr_eq(&row_1, &cached_row_1));
+        assert!(!Arc::ptr_eq(&row_2, &cached_row_2));
+        assert_eq!(cached_row_1.text, "tXXwo");
+        assert_eq!(
+            cached_row_2.source_range.start,
+            row_2.source_range.start + "XX".len()
+        );
+    });
+}
+
+#[gpui::test]
+fn source_length_preserving_single_row_edit_keeps_later_display_rows(
+    cx: &mut gpui::TestAppContext,
+) {
+    let editor = cx.update(|cx| cx.new(|cx| MarkdownEditor::for_text("one\ntwo\nthree", cx)));
+
+    editor.update(cx, |editor, cx| {
+        let mode = editor.mode;
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let row_0 = editor
+            .cached_display_row(&snapshot, 0, mode, &display_row_state)
+            .expect("row 0 should exist");
+        let row_1 = editor
+            .cached_display_row(&snapshot, 1, mode, &display_row_state)
+            .expect("row 1 should exist");
+        let row_2 = editor
+            .cached_display_row(&snapshot, 2, mode, &display_row_state)
+            .expect("row 2 should exist");
+
+        let previous_selection = Selection {
+            id: 7,
+            start: Point::new(1, 1),
+            end: Point::new(1, 2),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        editor.selection = previous_selection.clone();
+        let row_count_before = editor.display_list_state.item_count();
+        let buffer_len_before = editor.buffer.len();
+        let (selection, transaction_id) =
+            replace_selection(&mut editor.buffer, &editor.selection, "X");
+        assert!(transaction_id.is_some());
+        let byte_delta = buffer_byte_delta(buffer_len_before, editor.buffer.len());
+        editor.selection = selection;
+
+        editor.notify_after_edit(
+            true,
+            row_count_before,
+            &previous_selection,
+            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+            cx,
+        );
+
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let cached_row_0 = editor
+            .cached_display_row(&snapshot, 0, mode, &display_row_state)
+            .expect("row 0 should exist after edit");
+        let cached_row_1 = editor
+            .cached_display_row(&snapshot, 1, mode, &display_row_state)
+            .expect("row 1 should exist after edit");
+        let cached_row_2 = editor
+            .cached_display_row(&snapshot, 2, mode, &display_row_state)
+            .expect("row 2 should exist after edit");
+
+        assert!(Arc::ptr_eq(&row_0, &cached_row_0));
+        assert!(!Arc::ptr_eq(&row_1, &cached_row_1));
+        assert!(Arc::ptr_eq(&row_2, &cached_row_2));
+        assert_eq!(cached_row_1.text, "tXo");
+        assert_eq!(cached_row_2.source_range, row_2.source_range);
+    });
+}
+
+#[gpui::test]
+fn source_undo_redo_single_row_edit_keeps_later_display_rows(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let editor = cx.new(|cx| MarkdownEditor::for_text("one\ntwo\nthree", cx));
+
+    editor.update_in(cx, |editor, window, cx| {
+        let mode = editor.mode;
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let row_0 = editor
+            .cached_display_row(&snapshot, 0, mode, &display_row_state)
+            .expect("row 0 should exist");
+        let row_1 = editor
+            .cached_display_row(&snapshot, 1, mode, &display_row_state)
+            .expect("row 1 should exist");
+        let row_2 = editor
+            .cached_display_row(&snapshot, 2, mode, &display_row_state)
+            .expect("row 2 should exist");
+
+        let previous_selection = Selection {
+            id: 7,
+            start: Point::new(1, 1),
+            end: Point::new(1, 2),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        editor.selection = previous_selection.clone();
+        let row_count_before = editor.display_list_state.item_count();
+        let buffer_len_before = editor.buffer.len();
+        let (selection, transaction_id) =
+            replace_selection(&mut editor.buffer, &editor.selection, "X");
+        assert!(transaction_id.is_some());
+        let byte_delta = buffer_byte_delta(buffer_len_before, editor.buffer.len());
+        editor.selection = selection;
+        editor.record_selection_history(
+            transaction_id,
+            previous_selection.clone(),
+            editor.selection.clone(),
+        );
+
+        editor.notify_after_edit(
+            true,
+            row_count_before,
+            &previous_selection,
+            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+            cx,
+        );
+
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let edited_row_0 = editor
+            .cached_display_row(&snapshot, 0, mode, &display_row_state)
+            .expect("row 0 should exist after edit");
+        let edited_row_1 = editor
+            .cached_display_row(&snapshot, 1, mode, &display_row_state)
+            .expect("row 1 should exist after edit");
+        let edited_row_2 = editor
+            .cached_display_row(&snapshot, 2, mode, &display_row_state)
+            .expect("row 2 should exist after edit");
+
+        assert!(Arc::ptr_eq(&row_0, &edited_row_0));
+        assert!(!Arc::ptr_eq(&row_1, &edited_row_1));
+        assert!(Arc::ptr_eq(&row_2, &edited_row_2));
+        assert_eq!(edited_row_1.text, "tXo");
+
+        editor.undo(&Undo, window, cx);
+
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let undo_row_0 = editor
+            .cached_display_row(&snapshot, 0, mode, &display_row_state)
+            .expect("row 0 should exist after undo");
+        let undo_row_1 = editor
+            .cached_display_row(&snapshot, 1, mode, &display_row_state)
+            .expect("row 1 should exist after undo");
+        let undo_row_2 = editor
+            .cached_display_row(&snapshot, 2, mode, &display_row_state)
+            .expect("row 2 should exist after undo");
+
+        assert!(Arc::ptr_eq(&edited_row_0, &undo_row_0));
+        assert!(!Arc::ptr_eq(&edited_row_1, &undo_row_1));
+        assert!(Arc::ptr_eq(&edited_row_2, &undo_row_2));
+        assert_eq!(undo_row_1.text, "two");
+        assert_eq!(undo_row_2.source_range, edited_row_2.source_range);
+
+        editor.redo(&Redo, window, cx);
+
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let redo_row_0 = editor
+            .cached_display_row(&snapshot, 0, mode, &display_row_state)
+            .expect("row 0 should exist after redo");
+        let redo_row_1 = editor
+            .cached_display_row(&snapshot, 1, mode, &display_row_state)
+            .expect("row 1 should exist after redo");
+        let redo_row_2 = editor
+            .cached_display_row(&snapshot, 2, mode, &display_row_state)
+            .expect("row 2 should exist after redo");
+
+        assert!(Arc::ptr_eq(&undo_row_0, &redo_row_0));
+        assert!(!Arc::ptr_eq(&undo_row_1, &redo_row_1));
+        assert!(Arc::ptr_eq(&undo_row_2, &redo_row_2));
+        assert_eq!(redo_row_1.text, "tXo");
+        assert_eq!(redo_row_2.source_range, undo_row_2.source_range);
+    });
+}
+
+#[test]
+fn local_edit_invalidation_stays_conservative_for_cross_row_or_rendered_edits() {
+    let previous_selection = Selection {
+        id: 7,
+        start: Point::new(4, 2),
+        end: Point::new(5, 1),
+        reversed: false,
+        goal: SelectionGoal::None,
+    };
+    let current_selection = collapsed_selection(Point::new(4, 8));
+
+    assert_eq!(
+        local_source_edit_invalidation_rows(
+            MarkdownEditorMode::Source,
+            12,
+            12,
+            &previous_selection,
+            &current_selection,
+        ),
+        None
+    );
+
+    assert_eq!(
+        local_source_edit_invalidation_rows(
+            MarkdownEditorMode::Rendered,
+            12,
+            12,
+            &collapsed_selection(Point::new(4, 2)),
+            &current_selection,
+        ),
+        None
+    );
+
+    assert_eq!(
+        local_source_edit_invalidation_rows(
+            MarkdownEditorMode::Source,
+            12,
+            13,
+            &collapsed_selection(Point::new(4, 2)),
+            &current_selection,
+        ),
+        None
+    );
+}
+
+#[test]
+fn rendered_active_source_range_change_drops_stale_visual_row_goal_once() {
+    let previous_active = 8..12;
+    let current_active = 16..24;
+    let mut selection = Selection {
+        id: 7,
+        start: Point::new(0, 2),
+        end: Point::new(3, 1),
+        reversed: true,
+        goal: SelectionGoal::WrappedHorizontalPosition((2, 48.)),
+    };
+
+    assert!(apply_rendered_active_source_range_change(
+        &mut selection,
+        Some(&previous_active),
+        Some(&current_active)
+    ));
+    assert_eq!(
+        selection,
+        Selection {
+            id: 7,
+            start: Point::new(0, 2),
+            end: Point::new(3, 1),
+            reversed: true,
+            goal: SelectionGoal::HorizontalPosition(48.),
+        }
+    );
+
+    selection.goal = SelectionGoal::WrappedHorizontalPosition((1, 24.));
+
+    assert!(!apply_rendered_active_source_range_change(
+        &mut selection,
+        Some(&current_active),
+        Some(&current_active)
+    ));
+    assert_eq!(
+        selection.goal,
+        SelectionGoal::WrappedHorizontalPosition((1, 24.))
+    );
+}
+
+#[test]
+fn replace_selection_inserts_text_and_collapses_after_inserted_text() {
+    let mut buffer = Buffer::local("abef");
+    let selection = Selection {
+        id: 1,
+        start: Point::new(0, 2),
+        end: Point::new(0, 2),
+        reversed: false,
+        goal: SelectionGoal::None,
+    };
+
+    let (selection, transaction_id) = replace_selection(&mut buffer, &selection, "cd");
+
+    assert_eq!(buffer.text(), "abcdef");
+    assert_eq!(selection, collapsed_selection(Point::new(0, 4)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn replace_selection_replaces_active_selection() {
+    let mut buffer = Buffer::local("abcdef");
+    let selection = Selection {
+        id: 1,
+        start: Point::new(0, 2),
+        end: Point::new(0, 4),
+        reversed: false,
+        goal: SelectionGoal::None,
+    };
+
+    let (selection, transaction_id) = replace_selection(&mut buffer, &selection, "ZZ");
+
+    assert_eq!(buffer.text(), "abZZef");
+    assert_eq!(selection, collapsed_selection(Point::new(0, 4)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn backspace_selection_deletes_previous_utf8_character() {
+    let mut buffer = Buffer::local("aβ");
+    let selection = collapsed_selection(Point::new(0, "aβ".len() as u32));
+
+    let (selection, transaction_id) = backspace_selection(&mut buffer, &selection);
+
+    assert_eq!(buffer.text(), "a");
+    assert_eq!(selection, collapsed_selection(Point::new(0, 1)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn delete_selection_deletes_selected_range() {
+    let mut buffer = Buffer::local("abcdef");
+    let selection = Selection {
+        id: 1,
+        start: Point::new(0, 1),
+        end: Point::new(0, 4),
+        reversed: false,
+        goal: SelectionGoal::None,
+    };
+
+    let (selection, transaction_id) = delete_selection(&mut buffer, &selection);
+
+    assert_eq!(buffer.text(), "aef");
+    assert_eq!(selection, collapsed_selection(Point::new(0, 1)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn rendered_backspace_deletes_previous_inactive_inline_atom() {
+    let mut buffer = Buffer::local("Before $x + y$ after\n");
+    let atom_start = "Before ".len();
+    let atom_end = "Before $x + y$".len();
+    let selection = collapsed_selection(Point::new(0, atom_end as u32));
+
+    let (selection, transaction_id) =
+        backspace_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "Before  after\n");
+    assert_eq!(
+        selection,
+        collapsed_selection(Point::new(0, atom_start as u32))
+    );
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn rendered_delete_deletes_next_inactive_inline_atom() {
+    let mut buffer = Buffer::local("Before $x + y$ after\n");
+    let atom_start = "Before ".len();
+    let selection = collapsed_selection(Point::new(0, atom_start as u32));
+
+    let (selection, transaction_id) =
+        delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "Before  after\n");
+    assert_eq!(
+        selection,
+        collapsed_selection(Point::new(0, atom_start as u32))
+    );
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn rendered_backspace_deletes_previous_image_block() {
+    let image_source = "![alt](https://example.com/cat.png)";
+    let mut buffer = Buffer::local(&format!("{image_source}\nnext\n"));
+    let selection = collapsed_selection(Point::new(0, image_source.len() as u32));
+
+    let (selection, transaction_id) =
+        backspace_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "\nnext\n");
+    assert_eq!(selection, collapsed_selection(Point::new(0, 0)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn rendered_delete_deletes_next_image_block() {
+    let image_source = "![alt](https://example.com/cat.png)";
+    let mut buffer = Buffer::local(&format!("{image_source}\nnext\n"));
+    let selection = collapsed_selection(Point::new(0, 0));
+
+    let (selection, transaction_id) =
+        delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "\nnext\n");
+    assert_eq!(selection, collapsed_selection(Point::new(0, 0)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn rendered_backspace_deletes_previous_formula_block() {
+    let formula_source = "$$x + y$$";
+    let mut buffer = Buffer::local(&format!("{formula_source}\nnext\n"));
+    let selection = collapsed_selection(Point::new(0, formula_source.len() as u32));
+
+    let (selection, transaction_id) =
+        backspace_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "\nnext\n");
+    assert_eq!(selection, collapsed_selection(Point::new(0, 0)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn rendered_delete_deletes_next_formula_block() {
+    let formula_source = "$$x + y$$";
+    let mut buffer = Buffer::local(&format!("{formula_source}\nnext\n"));
+    let selection = collapsed_selection(Point::new(0, 0));
+
+    let (selection, transaction_id) =
+        delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "\nnext\n");
+    assert_eq!(selection, collapsed_selection(Point::new(0, 0)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn rendered_delete_deletes_next_inactive_inline_image() {
+    let mut buffer = Buffer::local("before ![alt](https://example.com/cat.png) after\n");
+    let image_start = "before ".len();
+    let selection = collapsed_selection(Point::new(0, image_start as u32));
+
+    let (selection, transaction_id) =
+        delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "before  after\n");
+    assert_eq!(
+        selection,
+        collapsed_selection(Point::new(0, image_start as u32))
+    );
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn rendered_delete_inside_inline_atom_uses_character_movement() {
+    let mut buffer = Buffer::local("Before $x + y$ after\n");
+    let atom_content_start = "Before $".len();
+    let selection = collapsed_selection(Point::new(0, atom_content_start as u32));
+
+    let (selection, transaction_id) =
+        delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "Before $ + y$ after\n");
+    assert_eq!(
+        selection,
+        collapsed_selection(Point::new(0, atom_content_start as u32))
+    );
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn source_delete_keeps_inline_atom_source_character_movement() {
+    let mut buffer = Buffer::local("Before $x + y$ after\n");
+    let atom_start = "Before ".len();
+    let selection = collapsed_selection(Point::new(0, atom_start as u32));
+
+    let (selection, transaction_id) =
+        delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Source);
+
+    assert_eq!(buffer.text(), "Before x + y$ after\n");
+    assert_eq!(
+        selection,
+        collapsed_selection(Point::new(0, atom_start as u32))
+    );
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn tab_inserts_soft_tab_spaces() {
+    let mut buffer = Buffer::local("ab");
+    let selection = collapsed_selection(Point::new(0, 1));
+
+    // Soft tabs: tab_size=4 → insert 4 spaces
+    let tab_text = "    "; // 4 spaces
+    let (selection, transaction_id) = replace_selection(&mut buffer, &selection, tab_text);
+
+    assert_eq!(buffer.text(), "a    b");
+    assert_eq!(selection, collapsed_selection(Point::new(0, 5)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn tab_inserts_hard_tab_character() {
+    let mut buffer = Buffer::local("ab");
+    let selection = collapsed_selection(Point::new(0, 1));
+
+    let (_selection, transaction_id) = replace_selection(&mut buffer, &selection, "\t");
+
+    assert_eq!(buffer.text(), "a\tb");
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn auto_indent_preserves_current_line_indent_on_newline() {
+    let mut buffer = Buffer::local("    hello");
+    let cursor = Point::new(0, 7); // after 'l' in 'hello'
+    let indent = current_line_indent(&buffer.snapshot(), cursor);
+
+    assert_eq!(indent, "    "); // 4 spaces preserved
+
+    // Simulating InsertNewline: "\n" + indent
+    let selection = collapsed_selection(cursor);
+    let insert_text = format!("\n{indent}");
+    let (selection, _) = replace_selection(&mut buffer, &selection, &insert_text);
+
+    assert_eq!(buffer.text(), "    hel\n    lo");
+    assert_eq!(selection, collapsed_selection(Point::new(1, 4)));
+}
+
+#[test]
+fn auto_indent_no_indent_for_unindented_line() {
+    let mut buffer = Buffer::local("hello");
+    let cursor = Point::new(0, 3);
+    let indent = current_line_indent(&buffer.snapshot(), cursor);
+
+    assert_eq!(indent, "");
+
+    let selection = collapsed_selection(cursor);
+    let (_selection, _) = replace_selection(&mut buffer, &selection, "\n");
+
+    assert_eq!(buffer.text(), "hel\nlo");
+}

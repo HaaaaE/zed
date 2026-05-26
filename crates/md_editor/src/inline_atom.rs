@@ -8,7 +8,8 @@ use md_assets::EDITOR_FONT_FAMILY;
 use md_theme::editor_palette;
 
 use super::{
-    DisplayRow, DisplayTextStyle, RowDisplayStyle, StyledDisplaySegment, inline_style,
+    DisplayRow, DisplayTextStyle, RowDisplayStyle, StyledDisplaySegment,
+    layout::inline_style,
     rendered_element::{RenderedElementDescriptor, RenderedElementKind, RenderedElementPlacement},
 };
 
