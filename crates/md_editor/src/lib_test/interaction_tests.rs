@@ -146,6 +146,10 @@ fn source_render_prewarms_display_rows_and_layout_inputs(cx: &mut gpui::TestAppC
             editor.row_layout_input_cache.len() >= 64,
             "source prewarm should populate layout input cache beyond visible rows"
         );
+        assert!(
+            editor.row_layout_cache.len() >= 64,
+            "source prewarm should populate current-width row layout cache beyond visible rows"
+        );
     });
 }
 

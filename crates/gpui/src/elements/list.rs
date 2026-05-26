@@ -348,6 +348,40 @@ impl ListState {
         self
     }
 
+    /// Set a size hint for an item that has not been measured yet.
+    ///
+    /// Measured items keep their measured size. This lets clients improve
+    /// scroll-height estimates as they compute item heights out of band without
+    /// forcing a remeasure of already-rendered items.
+    pub fn set_item_size_hint(&self, item_ix: usize, size_hint: Size<Pixels>) {
+        let state = &mut *self.0.borrow_mut();
+        if item_ix >= state.items.summary().count {
+            return;
+        }
+
+        let new_items = {
+            let mut cursor = state.items.cursor::<Count>(());
+            let mut new_items = cursor.slice(&Count(item_ix), Bias::Right);
+            if let Some(item) = cursor.item() {
+                let item = match item {
+                    ListItem::Unmeasured { focus_handle, .. } => ListItem::Unmeasured {
+                        size_hint: Some(size_hint),
+                        focus_handle: focus_handle.clone(),
+                    },
+                    ListItem::Measured { size, focus_handle } => ListItem::Measured {
+                        size: *size,
+                        focus_handle: focus_handle.clone(),
+                    },
+                };
+                new_items.extend(std::iter::once(item), ());
+            }
+            cursor.seek(&Count(item_ix.saturating_add(1)), Bias::Right);
+            new_items.append(cursor.suffix(), ());
+            new_items
+        };
+        state.items = new_items;
+    }
+
     /// Set the list to measure all items in the list in the first layout phase.
     ///
     /// This is useful for ensuring that the scrollbar size is correct instead of based on only rendered elements.
@@ -1532,6 +1566,16 @@ mod test {
         state.splice(100..100, 50);
 
         assert_eq!(state.max_offset_for_scrollbar().y, px(3000.));
+    }
+
+    #[test]
+    fn test_item_size_hint_updates_unmeasured_total_height() {
+        let state = ListState::new(100, crate::ListAlignment::Top, px(0.))
+            .with_default_size_hint(size(px(0.), px(20.)));
+
+        state.set_item_size_hint(3, size(px(0.), px(50.)));
+
+        assert_eq!(state.max_offset_for_scrollbar().y, px(2030.));
     }
 
     #[gpui::test]

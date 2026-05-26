@@ -23,6 +23,11 @@
   - Each flush is capped at 64 rows and a 2ms budget, fills only editor-owned caches, and never calls list remeasure.
   - Added a regression test covering prewarmed `display_row_cache` and `row_layout_input_cache` population beyond visible rows.
   - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
+- 2026-05-27: Added current-width Source row height prewarming and list height hints.
+  - Added a narrow GPUI `ListState::set_item_size_hint` API for unmeasured item height hints.
+  - Source prewarm now computes current-width text layouts, caches them, and updates list item size hints without calling `remeasure_items`.
+  - Extended the Source prewarm regression test to cover `row_layout_cache`, and added a focused GPUI size-hint test.
+  - Verified with `cargo fmt -p md_editor -p gpui`, `cargo check -p md_editor`, `cargo test -p gpui test_item_size_hint_updates_unmeasured_total_height`, and `cargo test -p md_editor`.
 
 ## 背景
 

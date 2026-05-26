@@ -400,7 +400,21 @@ impl MarkdownEditor {
             let Some(display_row) = self.cached_source_display_row(&snapshot, row) else {
                 continue;
             };
-            self.cached_source_row_layout_inputs(&display_row, row_style, window);
+            let text_layout = self.cached_source_text_layout(
+                &display_row,
+                row_style,
+                wrap_width,
+                false,
+                window,
+                cx,
+            );
+            self.display_list_state.set_item_size_hint(
+                row,
+                gpui::size(
+                    gpui::px(0.),
+                    row_style.min_height.max(text_layout.height(row_style)),
+                ),
+            );
         }
 
         if has_more_rows {
