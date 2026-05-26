@@ -1,7 +1,7 @@
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, path::PathBuf, sync::Arc};
 
 use gpui::{
-    Context, Entity, Focusable as _, IntoElement, KeyBinding, PathPromptOptions, Render,
+    App, Context, Entity, Focusable as _, IntoElement, KeyBinding, PathPromptOptions, Render,
     SharedString, Subscription, Window, WindowOptions, div, prelude::*,
 };
 use md_editor::{MarkdownEditor, MarkdownEditorEvent, MarkdownEditorMode, init_standalone};
@@ -400,6 +400,7 @@ pub fn run() {
 
     gpui_platform::application().run(move |cx| {
         init_standalone(cx);
+        configure_http_client(cx);
         cx.bind_keys(app_keybindings());
 
         let path = path.clone();
@@ -413,6 +414,18 @@ pub fn run() {
             }
         }
     });
+}
+
+fn configure_http_client(cx: &mut App) {
+    const USER_AGENT: &str = concat!("markdown-editor/", env!("CARGO_PKG_VERSION"));
+
+    match reqwest_client::ReqwestClient::proxy_and_user_agent(
+        http_client::read_proxy_from_env(),
+        USER_AGENT,
+    ) {
+        Ok(client) => cx.set_http_client(Arc::new(client)),
+        Err(error) => eprintln!("failed to initialize HTTP client: {error:#}"),
+    }
 }
 
 fn is_markdown_path(path: &PathBuf) -> bool {

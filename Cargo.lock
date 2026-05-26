@@ -3815,9 +3815,11 @@ version = "0.1.0"
 dependencies = [
  "gpui",
  "gpui_platform",
+ "http_client",
  "md_editor",
  "md_settings",
  "md_theme",
+ "reqwest_client",
 ]
 
 [[package]]
