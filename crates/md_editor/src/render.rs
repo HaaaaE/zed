@@ -6,8 +6,9 @@ use md_text::{Point, Selection};
 use md_theme::editor_palette;
 
 use super::{
-    DisplayInlineFragment, DisplayRow, MarkdownEditor, RowDisplayStyle, TextBufferSnapshot,
-    clip_cursor_in_text_snapshot, render_text_piece, selected_range_for_row_in_text_snapshot,
+    DisplayInlineFragment, MarkdownEditor, RowDisplayStyle, TextBufferSnapshot,
+    clip_cursor_in_text_snapshot, display_model::DisplayRow, render_text_piece,
+    selected_range_for_row_in_text_snapshot,
 };
 use super::{
     layout::{DisplayRowLayout, DisplayRowTextLayout, VisualDisplayRow},

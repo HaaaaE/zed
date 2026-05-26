@@ -11,11 +11,11 @@ use md_text::{Point, Selection};
 use md_theme::{default_row_metrics, editor_palette, gutter_width, heading_row_metrics};
 
 use super::{
-    DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, DisplayRow, DisplayTextStyle,
-    MarkdownEditorMode, RowDisplayStyle, StyledDisplaySegment, active_source_range_for_selection,
-    block::DisplayBlockLayout, inactive_rendered_element_source_ranges_for_selection,
-    ranges_overlap, rendered_element_descriptor_for_inline_span_in_row,
-    visual_row::display_x_for_offset,
+    DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, MarkdownEditorMode,
+    RowDisplayStyle, active_source_range_for_selection, block::DisplayBlockLayout,
+    display_model::{DisplayRow, DisplayTextStyle, StyledDisplaySegment},
+    inactive_rendered_element_source_ranges_for_selection, ranges_overlap,
+    rendered_element_descriptor_for_inline_span_in_row, visual_row::display_x_for_offset,
 };
 
 #[derive(Clone, Debug, PartialEq)]

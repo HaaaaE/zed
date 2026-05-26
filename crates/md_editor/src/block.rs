@@ -13,9 +13,10 @@ use super::rendered_element::{
     RenderedElementDescriptor, RenderedElementKind, RenderedElementPlacement,
 };
 use super::{
-    DisplayRow, MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, VisualLineBoundary,
-    clip_cursor, range_contains, rendered_element_descriptor_for_inline_span_in_row,
-    rendered_element_source_range_is_active, selection_byte_range, visual_horizontal_goal,
+    MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, VisualLineBoundary, clip_cursor,
+    display_model::DisplayRow, range_contains,
+    rendered_element_descriptor_for_inline_span_in_row, rendered_element_source_range_is_active,
+    selection_byte_range, visual_horizontal_goal,
 };
 
 pub(super) const RENDERED_IMAGE_BLOCK_MAX_WIDTH: gpui::Pixels = px(600.);

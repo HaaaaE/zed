@@ -3,8 +3,8 @@ use md_buffer::BufferSnapshot;
 use md_text::{Point, SelectionGoal};
 
 use super::{
-    DisplayInlineFragment, DisplayRow, DisplayRowTextLayout, TextBufferSnapshot, VisualDisplayRow,
-    ranges_overlap,
+    DisplayInlineFragment, DisplayRowTextLayout, TextBufferSnapshot, VisualDisplayRow,
+    display_model::DisplayRow, ranges_overlap,
 };
 
 pub(super) fn visual_row_index_for_caret(

@@ -5,8 +5,8 @@ use md_buffer::BufferSnapshot;
 use md_text::{Point, Selection};
 
 use super::{
-    HorizontalDirection, clip_cursor, clip_selection, is_remote_image_url, range_contains,
-    ranges_overlap, row_source_range, row_text, selection_byte_range,
+    clip_cursor, clip_selection, is_remote_image_url, range_contains, ranges_overlap,
+    row_source_range, row_text, selection::HorizontalDirection, selection_byte_range,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
