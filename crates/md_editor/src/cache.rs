@@ -277,7 +277,7 @@ impl MarkdownEditor {
         measure_inline_atoms: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> DisplayRowTextLayout {
+    ) -> Arc<DisplayRowTextLayout> {
         let cache_key = RowLayoutCacheKey {
             row: display_row.row,
             mode: MarkdownEditorMode::Source,
@@ -287,7 +287,7 @@ impl MarkdownEditor {
         };
 
         if let Some(DisplayRowLayout::Text(cached_layout)) = self.row_layout_cache.get(&cache_key) {
-            return (**cached_layout).clone();
+            return cached_layout.clone();
         }
 
         let inputs = self.cached_source_row_layout_inputs(display_row, row_style, window);
@@ -299,7 +299,7 @@ impl MarkdownEditor {
             window,
             cx,
         );
-        let layout = text_layout_for_display_row_inputs(
+        let layout = Arc::new(text_layout_for_display_row_inputs(
             &display_row.text,
             &inputs,
             row_style,
@@ -307,10 +307,10 @@ impl MarkdownEditor {
             &atom_measurements,
             window,
             cx,
-        );
+        ));
         if layout.cacheable {
             self.row_layout_cache
-                .insert(cache_key, DisplayRowLayout::Text(Arc::new(layout.clone())));
+                .insert(cache_key, DisplayRowLayout::Text(layout.clone()));
         }
         layout
     }

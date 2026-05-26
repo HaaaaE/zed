@@ -28,6 +28,9 @@
   - Source prewarm now computes current-width text layouts, caches them, and updates list item size hints without calling `remeasure_items`.
   - Extended the Source prewarm regression test to cover `row_layout_cache`, and added a focused GPUI size-hint test.
   - Verified with `cargo fmt -p md_editor -p gpui`, `cargo check -p md_editor`, `cargo test -p gpui test_item_size_hint_updates_unmeasured_total_height`, and `cargo test -p md_editor`.
+- 2026-05-27: Tightened the stage-1 shared-layout path for Source mode.
+  - `cached_source_text_layout` now returns the shared cached text layout instead of cloning the cached layout payload on cache hits.
+  - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
 
 ## 背景
 
