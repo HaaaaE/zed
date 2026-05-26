@@ -14,6 +14,16 @@ use md_settings::EditorSettings;
 use md_text::{Bias, BufferSnapshot as TextBufferSnapshot, Point, Selection, SelectionGoal};
 use md_theme::{default_row_metrics, editor_palette, gutter_width, heading_row_metrics};
 
+mod block;
+
+use block::DisplayBlockLayout;
+#[cfg(test)]
+use block::{
+    RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT, RENDERED_IMAGE_BLOCK_VERTICAL_PADDING,
+    RenderedImageBlock, RenderedImageBlockLayout, image_block_height_for_size,
+    image_block_source_offset_for_x, rendered_image_block_for_row,
+};
+
 gpui::actions!(
     md_editor,
     [
@@ -498,173 +508,11 @@ impl DisplayRowTextLayout {
     }
 }
 
-const RENDERED_IMAGE_BLOCK_MAX_WIDTH: gpui::Pixels = px(600.);
-const RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT: gpui::Pixels = px(120.);
-const RENDERED_IMAGE_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(4.);
 const INLINE_MATH_ATOM_EXTRA_HEIGHT: gpui::Pixels = px(4.);
 const INLINE_MATH_ATOM_HORIZONTAL_PADDING: gpui::Pixels = px(4.);
 const INLINE_IMAGE_ATOM_SIZE: gpui::Pixels = px(24.);
 const INLINE_IMAGE_ATOM_MAX_WIDTH: gpui::Pixels = px(96.);
 const INLINE_IMAGE_PLACEHOLDER: &str = "\u{fffc}";
-
-#[derive(Clone, Debug, PartialEq)]
-enum DisplayBlockLayout {
-    RemoteImage(RenderedImageBlockLayout),
-}
-
-impl DisplayBlockLayout {
-    fn for_display_row(
-        snapshot: &BufferSnapshot,
-        display_row: &DisplayRow,
-        selection: &Selection<Point>,
-        mode: MarkdownEditorMode,
-        wrap_width: gpui::Pixels,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Option<Self> {
-        rendered_image_block_for_row(snapshot, display_row, selection, mode).map(|image_block| {
-            Self::RemoteImage(RenderedImageBlockLayout::new(
-                image_block,
-                wrap_width,
-                window,
-                cx,
-            ))
-        })
-    }
-
-    fn height(&self) -> gpui::Pixels {
-        match self {
-            Self::RemoteImage(image_layout) => image_layout.height(),
-        }
-    }
-
-    fn cacheable(&self) -> bool {
-        match self {
-            Self::RemoteImage(image_layout) => image_layout.cacheable(),
-        }
-    }
-
-    fn source_range(&self) -> &Range<usize> {
-        match self {
-            Self::RemoteImage(image_layout) => &image_layout.image_block.source_range,
-        }
-    }
-
-    fn visible_x_for_source_offset(&self, source_offset: usize) -> gpui::Pixels {
-        match self {
-            Self::RemoteImage(image_layout) => image_block_visible_x_for_source_offset(
-                &image_layout.image_block.source_range,
-                image_layout.width,
-                source_offset,
-            ),
-        }
-    }
-
-    fn source_offset_for_x(&self, x: gpui::Pixels) -> usize {
-        match self {
-            Self::RemoteImage(image_layout) => {
-                image_block_source_offset_for_x(&image_layout.image_block, image_layout.width, x)
-            }
-        }
-    }
-
-    fn point_for_x(&self, snapshot: &BufferSnapshot, x: gpui::Pixels) -> Point {
-        let offset = self.source_offset_for_x(x);
-        let offset = snapshot
-            .as_text_snapshot()
-            .as_rope()
-            .floor_char_boundary(offset);
-
-        clip_cursor(
-            snapshot,
-            snapshot.as_text_snapshot().offset_to_point(offset),
-        )
-    }
-
-    fn point_for_mouse_x(&self, snapshot: &BufferSnapshot, x: gpui::Pixels) -> Point {
-        self.point_for_x(snapshot, x - gutter_width())
-    }
-
-    fn mouse_target_for_x(
-        &self,
-        snapshot: &BufferSnapshot,
-        x: gpui::Pixels,
-    ) -> (Point, SelectionGoal) {
-        let point = self.point_for_mouse_x(snapshot, x);
-        let source_offset = snapshot.as_text_snapshot().point_to_offset(point);
-        (
-            point,
-            visual_horizontal_goal(0, self.visible_x_for_source_offset(source_offset)),
-        )
-    }
-
-    fn line_boundary_target(
-        &self,
-        snapshot: &BufferSnapshot,
-        boundary: VisualLineBoundary,
-    ) -> (Point, SelectionGoal) {
-        let source_range = self.source_range();
-        let source_offset = match boundary {
-            VisualLineBoundary::Start => source_range.start,
-            VisualLineBoundary::End => source_range.end,
-        };
-        let x = self.visible_x_for_source_offset(source_offset);
-        (
-            snapshot.as_text_snapshot().offset_to_point(source_offset),
-            visual_horizontal_goal(0, x),
-        )
-    }
-
-    fn caret_x(
-        &self,
-        snapshot: &BufferSnapshot,
-        selection: &Selection<Point>,
-    ) -> Option<gpui::Pixels> {
-        if !selection.is_empty() {
-            return None;
-        }
-
-        let source_offset = snapshot
-            .as_text_snapshot()
-            .point_to_offset(clip_cursor(snapshot, selection.head()));
-        let source_range = self.source_range();
-        if source_offset == source_range.start || source_offset == source_range.end {
-            Some(self.visible_x_for_source_offset(source_offset))
-        } else {
-            None
-        }
-    }
-
-    fn is_whole_selected(&self, snapshot: &BufferSnapshot, selection: &Selection<Point>) -> bool {
-        !selection.is_empty()
-            && range_contains(
-                &selection_byte_range(snapshot, selection),
-                self.source_range(),
-            )
-    }
-
-    fn render(
-        self,
-        snapshot: &BufferSnapshot,
-        selection: &Selection<Point>,
-        row_style: RowDisplayStyle,
-        cx: &mut Context<MarkdownEditor>,
-    ) -> Vec<gpui::AnyElement> {
-        let selected = self.is_whole_selected(snapshot, selection);
-        let caret_x = self.caret_x(snapshot, selection);
-        match self {
-            Self::RemoteImage(image_layout) => {
-                vec![render_image_block(
-                    image_layout,
-                    selected,
-                    caret_x,
-                    row_style,
-                    cx,
-                )]
-            }
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 enum DisplayRowLayout {
@@ -692,62 +540,6 @@ impl DisplayRowLayout {
             Self::Text(text_layout) => text_layout.height(row_style),
             Self::Block(block_layout) => row_style.min_height.max(block_layout.height()),
         }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct RenderedImageBlock {
-    url: String,
-    alt_text: String,
-    source_range: Range<usize>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct RenderedImageBlockLayout {
-    image_block: RenderedImageBlock,
-    width: gpui::Pixels,
-    image_height: gpui::Pixels,
-    cacheable: bool,
-}
-
-impl RenderedImageBlockLayout {
-    fn new(
-        image_block: RenderedImageBlock,
-        wrap_width: gpui::Pixels,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Self {
-        let width = wrap_width.max(px(1.)).min(RENDERED_IMAGE_BLOCK_MAX_WIDTH);
-        let resource = Resource::Uri(image_block.url.clone().into());
-        let loaded_height = window
-            .use_asset::<ImgResourceLoader>(&resource, cx)
-            .and_then(|image| {
-                let image = image.ok()?;
-                let size = image.size(0);
-                image_block_height_for_size(width, size.width.0, size.height.0)
-            });
-        let (image_height, cacheable) = loaded_height
-            .map(|height| (height, true))
-            .unwrap_or((RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT, false));
-
-        Self {
-            image_block,
-            width,
-            image_height,
-            cacheable,
-        }
-    }
-
-    fn image_height(&self) -> gpui::Pixels {
-        self.image_height
-    }
-
-    fn height(&self) -> gpui::Pixels {
-        self.image_height() + RENDERED_IMAGE_BLOCK_VERTICAL_PADDING * 2.
-    }
-
-    fn cacheable(&self) -> bool {
-        self.cacheable
     }
 }
 
@@ -3680,18 +3472,6 @@ fn compute_display_row_layout(
     ))
 }
 
-fn image_block_height_for_size(
-    width: gpui::Pixels,
-    image_width: i32,
-    image_height: i32,
-) -> Option<gpui::Pixels> {
-    if image_width <= 0 || image_height <= 0 {
-        return None;
-    }
-
-    Some(width * (image_height as f32 / image_width as f32))
-}
-
 fn inline_image_atom_size_for_size(
     image_width: i32,
     image_height: i32,
@@ -4674,108 +4454,6 @@ fn display_x_for_offset(
     shaped_line.x_for_index(display_offset) + delta
 }
 
-fn image_block_source_offset_for_x(
-    image_block: &RenderedImageBlock,
-    image_width: gpui::Pixels,
-    x: gpui::Pixels,
-) -> usize {
-    let image_x = x.max(px(0.));
-    if image_x < image_width * 0.5 {
-        image_block.source_range.start
-    } else {
-        image_block.source_range.end
-    }
-}
-
-fn image_block_visible_x_for_source_offset(
-    source_range: &Range<usize>,
-    image_width: gpui::Pixels,
-    source_offset: usize,
-) -> gpui::Pixels {
-    if source_offset <= source_range.start {
-        px(0.)
-    } else if source_offset >= source_range.end {
-        image_width
-    } else {
-        image_width * 0.5
-    }
-}
-
-fn render_image_block(
-    image_layout: RenderedImageBlockLayout,
-    selected: bool,
-    caret_x: Option<gpui::Pixels>,
-    row_style: RowDisplayStyle,
-    cx: &mut Context<MarkdownEditor>,
-) -> gpui::AnyElement {
-    let palette = editor_palette();
-    let image_height = image_layout.image_height();
-    let mouse_down_block_layout = DisplayBlockLayout::RemoteImage(image_layout.clone());
-    let mouse_move_block_layout = mouse_down_block_layout.clone();
-    let image_block = image_layout.image_block;
-    let fallback_label = if image_block.alt_text.trim().is_empty() {
-        image_block
-            .url
-            .split('?')
-            .next()
-            .unwrap_or(&image_block.url)
-            .to_string()
-    } else {
-        image_block.alt_text
-    };
-
-    div()
-        .w_full()
-        .py(RENDERED_IMAGE_BLOCK_VERTICAL_PADDING)
-        .relative()
-        .when(selected, |this| {
-            this.bg(palette.selection_background.opacity(0.20))
-        })
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, event, window, cx| {
-                this.mouse_left_down_on_block(&mouse_down_block_layout, event, window, cx)
-            }),
-        )
-        .on_mouse_move(cx.listener(move |this, event, window, cx| {
-            this.mouse_move_on_block(&mouse_move_block_layout, event, window, cx)
-        }))
-        .child(
-            div()
-                .w(image_layout.width)
-                .h(image_height)
-                .rounded_md()
-                .border_1()
-                .border_color(if selected {
-                    palette.selection_background
-                } else {
-                    palette.gutter_text
-                })
-                .bg(palette.fenced_code_background)
-                .overflow_hidden()
-                .child(
-                    img(image_block.url)
-                        .size_full()
-                        .object_fit(gpui::ObjectFit::Contain)
-                        .with_fallback(move || {
-                            div()
-                                .size_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .px_3()
-                                .text_color(palette.muted_text)
-                                .child(SharedString::from(fallback_label.clone()))
-                                .into_any_element()
-                        }),
-                ),
-        )
-        .when_some(caret_x, |this, caret_x| {
-            this.child(caret_element(caret_x, row_style))
-        })
-        .into_any_element()
-}
-
 fn caret_element(caret_x: gpui::Pixels, row_style: RowDisplayStyle) -> gpui::AnyElement {
     let palette = editor_palette();
     div()
@@ -4788,41 +4466,6 @@ fn caret_element(caret_x: gpui::Pixels, row_style: RowDisplayStyle) -> gpui::Any
         .items_center()
         .child(div().w(px(1.)).h(row_style.caret_height).bg(palette.caret))
         .into_any_element()
-}
-
-fn rendered_image_block_for_row(
-    snapshot: &BufferSnapshot,
-    display_row: &DisplayRow,
-    selection: &Selection<Point>,
-    mode: MarkdownEditorMode,
-) -> Option<RenderedImageBlock> {
-    if mode != MarkdownEditorMode::Rendered {
-        return None;
-    }
-
-    let row_source_range = &display_row.source_range;
-    let source_text = &display_row.source_text;
-    let mut matching_spans = snapshot
-        .syntax_tree()
-        .inline_spans_in_source_range(row_source_range.clone())
-        .filter(|span| {
-            span.kind == MarkdownInlineKind::Image
-                && rendered_remote_image_span_is_block_in_row(span, source_text, row_source_range)
-        });
-
-    let span = matching_spans.next()?;
-    if matching_spans.next().is_some() {
-        return None;
-    }
-    if rendered_element_source_range_is_active(snapshot, selection, &span.source_range) {
-        return None;
-    }
-
-    Some(RenderedImageBlock {
-        url: span.url.clone()?,
-        alt_text: display_row.text.trim().to_string(),
-        source_range: span.source_range.clone(),
-    })
 }
 
 fn render_text_piece(text: String, style: &DisplayTextStyle) -> gpui::AnyElement {
