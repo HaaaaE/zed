@@ -281,6 +281,84 @@ fn rendered_mode_actions_follow_formula_block_boundaries(cx: &mut gpui::TestAppC
 }
 
 #[gpui::test]
+fn rendered_mode_select_actions_extend_across_image_block(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(500.), px(240.)));
+    let image_source = "![alt](https://example.com/cat.png)";
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(&format!("Intro\n{image_source}\nAfter\n"), cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(0, 0));
+
+        editor.select_down(&SelectDown, window, cx);
+        assert_eq!(editor.selection.start, Point::new(0, 0));
+        assert_eq!(editor.selection.end, Point::new(1, 0));
+        assert!(!editor.selection.reversed);
+
+        editor.select_to_end_of_line(&SelectToEndOfLine, window, cx);
+        assert_eq!(editor.selection.start, Point::new(0, 0));
+        assert_eq!(
+            editor.selection.end,
+            Point::new(1, image_source.len() as u32)
+        );
+        assert!(!editor.selection.reversed);
+
+        editor.select_to_beginning_of_line(&SelectToBeginningOfLine, window, cx);
+        assert_eq!(editor.selection.start, Point::new(0, 0));
+        assert_eq!(editor.selection.end, Point::new(1, 0));
+        assert!(!editor.selection.reversed);
+
+        editor.select_up(&SelectUp, window, cx);
+        assert_eq!(editor.selection.start, Point::new(0, 0));
+        assert_eq!(editor.selection.end, Point::new(0, 0));
+        assert!(!editor.selection.reversed);
+    });
+}
+
+#[gpui::test]
+fn rendered_mode_select_actions_extend_across_formula_block(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(500.), px(240.)));
+    let formula_source = "$$x + y$$";
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(&format!("Intro\n{formula_source}\nAfter\n"), cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(0, 0));
+
+        editor.select_down(&SelectDown, window, cx);
+        assert_eq!(editor.selection.start, Point::new(0, 0));
+        assert_eq!(editor.selection.end, Point::new(1, 0));
+        assert!(!editor.selection.reversed);
+
+        editor.select_to_end_of_line(&SelectToEndOfLine, window, cx);
+        assert_eq!(editor.selection.start, Point::new(0, 0));
+        assert_eq!(
+            editor.selection.end,
+            Point::new(1, formula_source.len() as u32)
+        );
+        assert!(!editor.selection.reversed);
+
+        editor.select_to_beginning_of_line(&SelectToBeginningOfLine, window, cx);
+        assert_eq!(editor.selection.start, Point::new(0, 0));
+        assert_eq!(editor.selection.end, Point::new(1, 0));
+        assert!(!editor.selection.reversed);
+
+        editor.select_up(&SelectUp, window, cx);
+        assert_eq!(editor.selection.start, Point::new(0, 0));
+        assert_eq!(editor.selection.end, Point::new(0, 0));
+        assert!(!editor.selection.reversed);
+    });
+}
+
+#[gpui::test]
 fn source_render_uses_text_snapshot_without_refreshing_markdown_syntax(
     cx: &mut gpui::TestAppContext,
 ) {
