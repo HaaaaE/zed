@@ -4,10 +4,11 @@ use gpui::{
     App, ImgResourceLoader, IntoElement, LineFragment, Resource, SharedString, Window, div, img,
     prelude::*, px,
 };
+use markdown_wysiwyg::{MarkdownInlineKind, MarkdownInlineSpan};
 use md_assets::EDITOR_FONT_FAMILY;
 use md_theme::editor_palette;
 
-use super::{DisplayTextStyle, RowDisplayStyle, StyledDisplaySegment};
+use super::{DisplayRow, DisplayTextStyle, RowDisplayStyle, StyledDisplaySegment};
 
 pub(super) const INLINE_MATH_ATOM_EXTRA_HEIGHT: gpui::Pixels = px(4.);
 pub(super) const INLINE_MATH_ATOM_HORIZONTAL_PADDING: gpui::Pixels = px(4.);
@@ -52,6 +53,17 @@ pub(super) enum DisplayInlineAtomKind {
 }
 
 impl DisplayInlineAtomKind {
+    pub(super) fn for_inline_span(
+        span: &MarkdownInlineSpan,
+        inline_image_is_block: bool,
+    ) -> Option<Self> {
+        match span.kind {
+            MarkdownInlineKind::InlineMath => Some(Self::InlineMath),
+            MarkdownInlineKind::Image if !inline_image_is_block => Some(Self::InlineImage),
+            _ => None,
+        }
+    }
+
     pub(super) fn height(self, row_style: RowDisplayStyle) -> gpui::Pixels {
         match self {
             Self::InlineMath => row_style.line_height + INLINE_MATH_ATOM_EXTRA_HEIGHT,
@@ -284,6 +296,34 @@ impl DisplayInlineAtom {
         } else {
             self.display_range.end
         }
+    }
+
+    pub(super) fn from_span(
+        display_row: &DisplayRow,
+        span: &MarkdownInlineSpan,
+        kind: DisplayInlineAtomKind,
+        row_style: RowDisplayStyle,
+        style: DisplayTextStyle,
+    ) -> Option<Self> {
+        let display_range = display_row.source_to_display(span.source_range.start)
+            ..display_row.source_to_display(span.source_range.end);
+        let fallback_text = display_row.text.get(display_range.clone())?.to_string();
+        if fallback_text.is_empty() {
+            return None;
+        }
+
+        Some(Self {
+            kind,
+            source_range: span.source_range.clone(),
+            display_range,
+            fallback_text,
+            image_url: (kind == DisplayInlineAtomKind::InlineImage)
+                .then_some(span.url.clone())
+                .flatten(),
+            style,
+            height: kind.height(row_style),
+            width: px(0.),
+        })
     }
 }
 

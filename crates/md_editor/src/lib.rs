@@ -4347,75 +4347,31 @@ fn display_inline_row_inputs(
             continue;
         }
 
-        let atom = match span.kind {
-            MarkdownInlineKind::InlineMath => {
-                inline_math_atom_for_span(display_row, span, row_style)
-            }
-            MarkdownInlineKind::Image
-                if !rendered_remote_image_span_is_block_in_row(
+        let inline_image_is_block = rendered_remote_image_span_is_block_in_row(
+            span,
+            &display_row.source_text,
+            row_source_range,
+        );
+        let atom =
+            DisplayInlineAtomKind::for_inline_span(span, inline_image_is_block).and_then(|kind| {
+                let style_kind = match kind {
+                    DisplayInlineAtomKind::InlineMath => MarkdownInlineKind::InlineMath,
+                    DisplayInlineAtomKind::InlineImage => MarkdownInlineKind::Image,
+                };
+                DisplayInlineAtom::from_span(
+                    display_row,
                     span,
-                    &display_row.source_text,
-                    &display_row.source_range,
-                ) =>
-            {
-                inline_image_atom_for_span(display_row, span, row_style)
-            }
-            _ => None,
-        };
+                    kind,
+                    row_style,
+                    inline_style(style_kind),
+                )
+            });
         if let Some(atom) = atom {
             inputs.atom_ranges.push(atom);
         }
     }
 
     inputs
-}
-
-fn inline_math_atom_for_span(
-    display_row: &DisplayRow,
-    span: &markdown_wysiwyg::MarkdownInlineSpan,
-    row_style: RowDisplayStyle,
-) -> Option<DisplayInlineAtom> {
-    let display_range = display_row.source_to_display(span.source_range.start)
-        ..display_row.source_to_display(span.source_range.end);
-    let fallback_text = display_row.text.get(display_range.clone())?.to_string();
-    if fallback_text.is_empty() {
-        return None;
-    }
-
-    Some(DisplayInlineAtom {
-        kind: DisplayInlineAtomKind::InlineMath,
-        source_range: span.source_range.clone(),
-        display_range,
-        fallback_text,
-        image_url: None,
-        style: inline_style(MarkdownInlineKind::InlineMath),
-        height: DisplayInlineAtomKind::InlineMath.height(row_style),
-        width: px(0.),
-    })
-}
-
-fn inline_image_atom_for_span(
-    display_row: &DisplayRow,
-    span: &markdown_wysiwyg::MarkdownInlineSpan,
-    row_style: RowDisplayStyle,
-) -> Option<DisplayInlineAtom> {
-    let display_range = display_row.source_to_display(span.source_range.start)
-        ..display_row.source_to_display(span.source_range.end);
-    let fallback_text = display_row.text.get(display_range.clone())?.to_string();
-    if fallback_text.is_empty() {
-        return None;
-    }
-
-    Some(DisplayInlineAtom {
-        kind: DisplayInlineAtomKind::InlineImage,
-        source_range: span.source_range.clone(),
-        display_range,
-        fallback_text,
-        image_url: span.url.clone(),
-        style: inline_style(MarkdownInlineKind::Image),
-        height: DisplayInlineAtomKind::InlineImage.height(row_style),
-        width: px(0.),
-    })
 }
 
 fn collect_block_style_ranges_for_row(
