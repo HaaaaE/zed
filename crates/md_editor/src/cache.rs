@@ -1,4 +1,9 @@
-use std::{ops::Range, sync::Arc};
+use std::{
+    collections::{HashSet, VecDeque},
+    ops::Range,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use gpui::{Context, Window};
 use md_buffer::BufferSnapshot;
@@ -24,6 +29,7 @@ impl MarkdownEditor {
     pub(crate) fn clear_display_row_cache(&mut self) {
         self.display_row_cache.clear();
         self.row_layout_input_cache.clear();
+        self.source_prewarm = None;
     }
 
     pub(crate) fn rekey_source_display_row_cache_for_local_edit(
@@ -309,6 +315,99 @@ impl MarkdownEditor {
         layout
     }
 
+    pub(crate) fn schedule_source_cache_prewarm(
+        &mut self,
+        wrap_width: gpui::Pixels,
+        row_style: RowDisplayStyle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.mode != MarkdownEditorMode::Source {
+            self.source_prewarm = None;
+            return;
+        }
+
+        let snapshot = self.buffer.as_text_snapshot();
+        let version = snapshot.version().clone();
+        let row_count = snapshot.row_count() as usize;
+        if row_count == 0 {
+            self.source_prewarm = None;
+            return;
+        }
+
+        let reset_queue = self.source_prewarm.as_ref().is_none_or(|state| {
+            state.version != version
+                || state.wrap_width != wrap_width
+                || state.row_style != row_style
+        });
+        if reset_queue {
+            let start_row = self.display_list_state.logical_scroll_top().item_ix;
+            let byte_len = self.buffer.len();
+            self.source_prewarm = Some(super::SourcePrewarmState {
+                version,
+                wrap_width,
+                row_style,
+                rows: source_prewarm_rows(row_count, byte_len, start_row),
+                scheduled: false,
+            });
+        }
+
+        if self
+            .source_prewarm
+            .as_ref()
+            .is_some_and(|state| state.scheduled || state.rows.is_empty())
+        {
+            return;
+        }
+
+        if let Some(state) = self.source_prewarm.as_mut() {
+            state.scheduled = true;
+        }
+        cx.on_next_frame(window, |this, window, cx| {
+            this.flush_source_cache_prewarm(window, cx);
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn flush_source_cache_prewarm(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let snapshot = self.buffer.text_snapshot();
+        let Some(state) = self.source_prewarm.as_mut() else {
+            return;
+        };
+        state.scheduled = false;
+        if self.mode != MarkdownEditorMode::Source || state.version != *snapshot.version() {
+            self.source_prewarm = None;
+            return;
+        }
+
+        let deadline = Instant::now() + Duration::from_millis(2);
+        let mut rows = Vec::new();
+        while rows.len() < 64 && Instant::now() < deadline {
+            let Some(row) = state.rows.pop_front() else {
+                break;
+            };
+            rows.push(row);
+        }
+        let has_more_rows = !state.rows.is_empty();
+        let wrap_width = state.wrap_width;
+        let row_style = state.row_style;
+
+        for row in rows {
+            let Some(display_row) = self.cached_source_display_row(&snapshot, row) else {
+                continue;
+            };
+            self.cached_source_row_layout_inputs(&display_row, row_style, window);
+        }
+
+        if has_more_rows {
+            self.schedule_source_cache_prewarm(wrap_width, row_style, window, cx);
+        }
+    }
+
     fn cached_row_layout_inputs(
         &mut self,
         snapshot: &BufferSnapshot,
@@ -496,4 +595,42 @@ impl MarkdownEditor {
         }
         cx.notify();
     }
+}
+
+fn source_prewarm_rows(row_count: usize, byte_len: usize, start_row: usize) -> VecDeque<usize> {
+    const SMALL_FILE_MAX_BYTES: usize = 1024 * 1024;
+    const SMALL_FILE_MAX_ROWS: usize = 20_000;
+    const MEDIUM_FILE_MAX_BYTES: usize = 5 * 1024 * 1024;
+    const MEDIUM_FILE_MAX_ROWS: usize = 100_000;
+    const NEARBY_FORWARD_ROWS: usize = 512;
+    const NEARBY_BACKWARD_ROWS: usize = 128;
+
+    let mut rows = VecDeque::new();
+    let mut queued = HashSet::new();
+    let mut push_row = |row: usize, rows: &mut VecDeque<usize>| {
+        if row < row_count && queued.insert(row) {
+            rows.push_back(row);
+        }
+    };
+
+    let start_row = start_row.min(row_count.saturating_sub(1));
+    for row in start_row..row_count.min(start_row.saturating_add(NEARBY_FORWARD_ROWS)) {
+        push_row(row, &mut rows);
+    }
+    let before_start = start_row.saturating_sub(NEARBY_BACKWARD_ROWS);
+    for row in before_start..start_row {
+        push_row(row, &mut rows);
+    }
+
+    if byte_len <= SMALL_FILE_MAX_BYTES && row_count <= SMALL_FILE_MAX_ROWS {
+        for row in 0..row_count {
+            push_row(row, &mut rows);
+        }
+    } else if byte_len <= MEDIUM_FILE_MAX_BYTES && row_count <= MEDIUM_FILE_MAX_ROWS {
+        for row in start_row.saturating_add(NEARBY_FORWARD_ROWS)..row_count {
+            push_row(row, &mut rows);
+        }
+    }
+
+    rows
 }

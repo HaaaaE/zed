@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
@@ -209,6 +209,7 @@ pub struct MarkdownEditor {
     pending_inline_atom_rows: HashMap<InlineAtomMeasurementKey, HashSet<usize>>,
     pending_inline_atom_remeasure_rows: HashSet<usize>,
     inline_atom_remeasure_scheduled: bool,
+    source_prewarm: Option<SourcePrewarmState>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -249,6 +250,14 @@ enum EditLayoutInvalidation {
 struct LocalSourceEditInvalidation {
     rows: Range<usize>,
     byte_delta: Option<isize>,
+}
+
+struct SourcePrewarmState {
+    version: md_text::Global,
+    wrap_width: gpui::Pixels,
+    row_style: RowDisplayStyle,
+    rows: VecDeque<usize>,
+    scheduled: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -300,6 +309,7 @@ impl MarkdownEditor {
             pending_inline_atom_rows: HashMap::default(),
             pending_inline_atom_remeasure_rows: HashSet::default(),
             inline_atom_remeasure_scheduled: false,
+            source_prewarm: None,
         }
     }
 
@@ -1612,6 +1622,7 @@ impl Render for MarkdownEditor {
                 let snapshot = self.buffer.text_snapshot();
                 let selection = clip_selection_in_text_snapshot(&snapshot, &self.selection);
                 let cursor = selection.head();
+                self.schedule_source_cache_prewarm(wrap_width, default_metrics.into(), window, cx);
 
                 list(
                     self.display_list_state.clone(),

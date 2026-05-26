@@ -119,6 +119,37 @@ fn source_layout_input_cache_reuses_width_independent_inputs_without_refreshing_
 }
 
 #[gpui::test]
+fn source_render_prewarms_display_rows_and_layout_inputs(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let text = (0..200)
+        .map(|row| format!("source prewarm row {row}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let editor = cx.new(|cx| MarkdownEditor::for_text(text, cx));
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(240.), px(160.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+    editor.update_in(cx, |editor, window, cx| {
+        editor.flush_source_cache_prewarm(window, cx);
+    });
+
+    editor.read_with(cx, |editor, _| {
+        assert_eq!(editor.mode(), MarkdownEditorMode::Source);
+        assert!(
+            editor.display_row_cache.len() >= 64,
+            "source prewarm should populate display row cache beyond visible rows"
+        );
+        assert!(
+            editor.row_layout_input_cache.len() >= 64,
+            "source prewarm should populate layout input cache beyond visible rows"
+        );
+    });
+}
+
+#[gpui::test]
 fn rendered_interaction_layouts_cache_plain_text_rows(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     cx.simulate_resize(gpui::size(px(90.), px(200.)));

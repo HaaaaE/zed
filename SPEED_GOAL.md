@@ -17,6 +17,12 @@
   - Added Source and Rendered scroll tests for short documents, plus cached-region second-scroll tests for both short and large documents.
   - Verified the normal build with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
   - Perf-enabled check/test commands still timed out after 3 minutes in this workspace, so the new perf cases are not runtime-verified here.
+- 2026-05-27: Added Source-mode cache prewarming for display rows and width-independent layout inputs.
+  - Source render now schedules next-frame cache prewarm work keyed by buffer version, wrap width, and row style.
+  - Prewarm prioritizes rows near the current scroll position, then continues across small documents within the plan's 1MB / 20,000 row guard; larger documents stay bounded to nearby or forward rows.
+  - Each flush is capped at 64 rows and a 2ms budget, fills only editor-owned caches, and never calls list remeasure.
+  - Added a regression test covering prewarmed `display_row_cache` and `row_layout_input_cache` population beyond visible rows.
+  - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
 
 ## 背景
 
