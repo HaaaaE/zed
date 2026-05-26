@@ -86,7 +86,7 @@
 下面这些条目是类别，不代表优先级或执行顺序。
 
 - [暂不做 / Paused / 非当前优先] 用 300KB 级 Markdown 文件在 Source 和 Rendered 模式下做 profiling，定位剩余的 source-row-local 热点，再决定后续性能修改。
-  说明：这一项当前仍先不推进，不作为当前工作重点。现在已经完成为 `md_editor` 接现有 `cargo perf-test` / `#[perf]` 流程的最小入口、perf harness 识别和首轮基线运行，但这条 profiling 工作仍不切回主线；在下面两个 `[P1]` 项完成前，不继续围绕 profiling 结果展开后续优化。
+  说明：这一项当前仍先不推进，不作为当前工作重点。现在已经完成为 `md_editor` 接现有 `cargo perf-test` / `#[perf]` 流程的最小入口、perf harness 识别和首轮基线运行，但这条 profiling 工作仍不切回主线；在下面两个 `[P1]` 项完成前，不继续围绕 profiling 结果展开后续优化。当前 perf 已覆盖纯文本 source-row 主线，mixed-content perf 仍 deferred，不纳入当前优先级结论。
 - [P1] 继续在 source-row 架构内做优化：降低 row layout 成本、减少 string / fragment churn、增强 row-layout cache 复用、缩小 remeasure 和缓存失效范围，并改善大但不过分极端文档的表现。
 - [P1] 将 inline atom 的 measurement 继续泛化，超出当前 inactive inline math atom 路径的假设范围；同时补上当未来 atom 内容可能在缓存后继续变尺寸时的失效机制。
 - [P2] 为 profiling 或手工使用中发现的剩余 visual-row 键盘移动缺口补更强的 runtime 或 visual tests。
