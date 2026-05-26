@@ -22,9 +22,9 @@ use block::DisplayBlockLayout;
 #[cfg(test)]
 use block::{
     RENDERED_FORMULA_BLOCK_VERTICAL_PADDING, RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT,
-    RENDERED_IMAGE_BLOCK_VERTICAL_PADDING, RenderedFormulaBlock, RenderedImageBlock,
-    RenderedImageBlockLayout, image_block_height_for_size, image_block_source_offset_for_x,
-    rendered_formula_block_for_row, rendered_image_block_for_row,
+    RENDERED_IMAGE_BLOCK_VERTICAL_PADDING, RenderedFormulaBlock, RenderedFormulaBlockLayout,
+    RenderedImageBlock, RenderedImageBlockLayout, image_block_height_for_size,
+    image_block_source_offset_for_x, rendered_formula_block_for_row, rendered_image_block_for_row,
 };
 use inline_atom::{
     DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, INLINE_IMAGE_PLACEHOLDER,
@@ -4716,6 +4716,14 @@ mod tests {
         })
     }
 
+    fn formula_block_layout(source_range: Range<usize>, width: gpui::Pixels) -> DisplayBlockLayout {
+        DisplayBlockLayout::Formula(RenderedFormulaBlockLayout {
+            formula_block: rendered_formula_block(source_range, "x + y"),
+            width,
+            height: px(36.),
+        })
+    }
+
     fn rendered_image_block(
         source_range: Range<usize>,
         alt_text: impl Into<String>,
@@ -6627,6 +6635,40 @@ mod tests {
     }
 
     #[test]
+    fn formula_block_whole_selection_is_selected_state() {
+        let formula_source = "$$x + y$$";
+        let mut buffer = Buffer::local(&format!("{formula_source}\nnext\n"));
+        let snapshot = buffer.snapshot();
+        let block_layout = formula_block_layout(0..formula_source.len(), px(200.));
+        let whole_selection = Selection {
+            id: 0,
+            start: Point::new(0, 0),
+            end: Point::new(0, formula_source.len() as u32),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        let containing_selection = Selection {
+            id: 0,
+            start: Point::new(0, 0),
+            end: Point::new(1, 0),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        let partial_selection = Selection {
+            id: 0,
+            start: Point::new(0, 0),
+            end: Point::new(0, 1),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+
+        assert!(block_layout.is_whole_selected(&snapshot, &whole_selection));
+        assert!(block_layout.is_whole_selected(&snapshot, &containing_selection));
+        assert!(!block_layout.is_whole_selected(&snapshot, &partial_selection));
+        assert!(!block_layout.is_whole_selected(&snapshot, &collapsed_selection(Point::new(0, 0))));
+    }
+
+    #[test]
     fn image_block_mouse_x_maps_to_source_range_edges() {
         let mut buffer = Buffer::local("![alt](https://example.com/cat.png)\n");
         let snapshot = buffer.snapshot();
@@ -6647,6 +6689,27 @@ mod tests {
     }
 
     #[test]
+    fn formula_block_mouse_x_maps_to_source_range_edges() {
+        let formula_source = "$$x + y$$";
+        let mut buffer = Buffer::local(&format!("{formula_source}\n"));
+        let snapshot = buffer.snapshot();
+        let block_layout = formula_block_layout(0..formula_source.len(), px(200.));
+
+        assert_eq!(
+            block_layout.point_for_mouse_x(&snapshot, gutter_width()),
+            Point::new(0, 0)
+        );
+        assert_eq!(
+            block_layout.point_for_mouse_x(&snapshot, gutter_width() + px(160.)),
+            Point::new(0, formula_source.len() as u32)
+        );
+        assert_eq!(
+            block_layout.point_for_mouse_x(&snapshot, gutter_width() + px(260.)),
+            Point::new(0, formula_source.len() as u32)
+        );
+    }
+
+    #[test]
     fn image_block_mouse_target_tracks_visible_caret_goal() {
         let mut buffer = Buffer::local("![alt](https://example.com/cat.png)\n");
         let snapshot = buffer.snapshot();
@@ -6663,6 +6726,33 @@ mod tests {
         assert_eq!(
             block_layout.mouse_target_for_x(&snapshot, gutter_width() + px(260.)),
             (Point::new(0, 35), visual_horizontal_goal(0, px(200.)))
+        );
+    }
+
+    #[test]
+    fn formula_block_mouse_target_tracks_visible_caret_goal() {
+        let formula_source = "$$x + y$$";
+        let mut buffer = Buffer::local(&format!("{formula_source}\n"));
+        let snapshot = buffer.snapshot();
+        let block_layout = formula_block_layout(0..formula_source.len(), px(200.));
+
+        assert_eq!(
+            block_layout.mouse_target_for_x(&snapshot, gutter_width()),
+            (Point::new(0, 0), visual_horizontal_goal(0, px(0.)))
+        );
+        assert_eq!(
+            block_layout.mouse_target_for_x(&snapshot, gutter_width() + px(160.)),
+            (
+                Point::new(0, formula_source.len() as u32),
+                visual_horizontal_goal(0, px(200.))
+            )
+        );
+        assert_eq!(
+            block_layout.mouse_target_for_x(&snapshot, gutter_width() + px(260.)),
+            (
+                Point::new(0, formula_source.len() as u32),
+                visual_horizontal_goal(0, px(200.))
+            )
         );
     }
 
@@ -6698,6 +6788,15 @@ mod tests {
     }
 
     #[test]
+    fn formula_block_source_offset_maps_to_visible_x() {
+        let block_layout = formula_block_layout(4..13, px(200.));
+
+        assert_eq!(block_layout.visible_x_for_source_offset(4), px(0.));
+        assert_eq!(block_layout.visible_x_for_source_offset(8), px(100.));
+        assert_eq!(block_layout.visible_x_for_source_offset(13), px(200.));
+    }
+
+    #[test]
     fn image_block_line_boundary_targets_source_edges() {
         let mut buffer = Buffer::local("    ![alt](https://example.com/cat.png)\n");
         let snapshot = buffer.snapshot();
@@ -6710,6 +6809,22 @@ mod tests {
         assert_eq!(
             block_layout.line_boundary_target(&snapshot, VisualLineBoundary::End),
             (Point::new(0, 39), visual_horizontal_goal(0, px(200.)))
+        );
+    }
+
+    #[test]
+    fn formula_block_line_boundary_targets_source_edges() {
+        let mut buffer = Buffer::local("    $$x + y$$\n");
+        let snapshot = buffer.snapshot();
+        let block_layout = formula_block_layout(4..13, px(200.));
+
+        assert_eq!(
+            block_layout.line_boundary_target(&snapshot, VisualLineBoundary::Start),
+            (Point::new(0, 4), visual_horizontal_goal(0, px(0.)))
+        );
+        assert_eq!(
+            block_layout.line_boundary_target(&snapshot, VisualLineBoundary::End),
+            (Point::new(0, 13), visual_horizontal_goal(0, px(200.)))
         );
     }
 
@@ -6746,6 +6861,38 @@ mod tests {
     }
 
     #[test]
+    fn formula_block_caret_x_tracks_collapsed_source_boundaries() {
+        let formula_source = "$$x + y$$";
+        let mut buffer = Buffer::local(&format!("{formula_source}\n"));
+        let snapshot = buffer.snapshot();
+        let block_layout = formula_block_layout(0..formula_source.len(), px(200.));
+        let selection = Selection {
+            id: 0,
+            start: Point::new(0, 0),
+            end: Point::new(0, formula_source.len() as u32),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+
+        assert_eq!(
+            block_layout.caret_x(&snapshot, &collapsed_selection(Point::new(0, 0))),
+            Some(px(0.))
+        );
+        assert_eq!(
+            block_layout.caret_x(
+                &snapshot,
+                &collapsed_selection(Point::new(0, formula_source.len() as u32))
+            ),
+            Some(px(200.))
+        );
+        assert_eq!(
+            block_layout.caret_x(&snapshot, &collapsed_selection(Point::new(0, 1))),
+            None
+        );
+        assert_eq!(block_layout.caret_x(&snapshot, &selection), None);
+    }
+
+    #[test]
     fn image_block_layout_height_includes_vertical_padding() {
         let image_layout = RenderedImageBlockLayout {
             image_block: rendered_image_block(4..39, "alt"),
@@ -6759,6 +6906,20 @@ mod tests {
             image_layout.height(),
             px(120.) + RENDERED_IMAGE_BLOCK_VERTICAL_PADDING * 2.
         );
+    }
+
+    #[test]
+    fn formula_block_layout_is_cacheable_and_uses_measured_height() {
+        let formula_layout = RenderedFormulaBlockLayout {
+            formula_block: rendered_formula_block(4..13, "x + y"),
+            width: px(200.),
+            height: px(36.),
+        };
+        let block_layout =
+            DisplayRowLayout::Block(DisplayBlockLayout::Formula(formula_layout.clone()));
+
+        assert!(block_layout.cacheable());
+        assert_eq!(formula_layout.height(), px(36.));
     }
 
     #[test]

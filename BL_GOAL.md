@@ -34,6 +34,8 @@
 - 独立的非文本渲染内容目前先收窄到 descriptor 驱动的图片 / 公式处理；fenced code 和 pipe table 暂时继续留在文本管线中，而不是走通用块布局路径。
 - 公式处理正在拆成明确的行内与块级结构路径：`$...$` 代表 inline formula，`$$...$$` 代表 block formula；二者不应再被压成同一种仅行内模型。
 - 在真实公式渲染器接入前，公式继续使用占位或文本式 fallback 渲染；当前目标是先把公式的语义、布局、交互和缓存边界做对，而不是先接入最终渲染器。
+- 块级公式现在已经走 descriptor 驱动的 block rendered-element 路径：`$$...$$` 会在 projection 中隐藏双分隔符，Rendered 模式下作为独立块布局、测量和渲染，而 `$...$` 继续保留为 inline atom。
+- 块级公式当前使用文本式 fallback 块渲染，支持块级 padding、整行鼠标命中、边界 caret、整块 Shift-selection、左右边界移动，以及边界上的 Backspace / Delete；布局当前可缓存，不依赖异步资源。
 - 当满足条件时，渲染元素边界以及整块 / 包含块的 rendered-element selection 仍会保持 inactive，这样 inline atom 和独立图片块可以继续以渲染形态显示，同时周围被选中的 Markdown 仍可显露 source 语法。
 - 块几何现在统一通过共享的块接口提供 source range、可见 x 位置、鼠标目标、行边界移动、caret 位置和选择状态。
 - 远程图片块布局现在显式区分是否可缓存：已加载图片尺寸可以缓存，仍在加载或图片资源无效时的 placeholder 布局不缓存。
@@ -65,12 +67,12 @@
 - Block row selection 现在会先经过共享的 rendered-element discovery 阶段，再 materialize `DisplayBlockLayout`，从而把独立图片处理隔离开，同时为未来非文本 block descriptor 留出接口，而不把它们纳入当前工作范围。
 - Rendered-element 边界与 active-range helper 现在都放在内部 `rendered_element` 模块里，降低了 `lib.rs` 中与非布局逻辑的耦合，同时保持 movement、selection reveal / hide 和 inactive rendered-element 行为不变。
 - `md_editor` 仍然需要继续做更多内部模块边界清理；`lib.rs` 现在仍承载 projection、row layout / cache、selection / movement、hit-testing、rendering 和大量测试。
-- 目前测试覆盖已经包括：wrapped movement、action-level Source wrapped keyboard movement、Source display-row 与 render 快路径、Source wrapped mouse hit testing 与跨 visual row 的 shift-selection、Rendered marker reveal / hide 过渡、resize reflow、模式切换时 wrapped position 处理、visual-row bounds、rendered inline math、inline image、空 alt inline image、remote image block、Rendered image block 的鼠标命中和 shift-selection、cache dependency key、range-local span query、source-row fast path、Source undo / redo 局部缓存失效、Rendered interaction layout caching、remote image block cacheability、snapshot sharing、default list size hint，以及 rendered image block 的 crash 路径。
+- 目前测试覆盖已经包括：wrapped movement、action-level Source wrapped keyboard movement、Source display-row 与 render 快路径、Source wrapped mouse hit testing 与跨 visual row 的 shift-selection、Rendered marker reveal / hide 过渡、resize reflow、模式切换时 wrapped position 处理、visual-row bounds、rendered inline math、inline image、空 alt inline image、remote image block、block formula projection / detection / interaction、Rendered image block 与 formula block 的鼠标命中和 shift-selection、cache dependency key、range-local span query、source-row fast path、Source undo / redo 局部缓存失效、Rendered interaction layout caching、remote image block cacheability、snapshot sharing、default list size hint，以及 rendered image block 的 crash 路径。
 
 ## 验证
 
-- 最近相关 crate 的检查已经通过，包括 `cargo fmt -p md_buffer -p md_editor`、`cargo check -p md_buffer`、`cargo check -p md_editor`、`cargo test -p md_buffer` 和 `cargo test -p md_editor`（当前为 127 个测试）。最近一次模块边界调整还额外通过了 `cargo fmt -p md_editor`、`cargo check -p md_editor`、`cargo test -p md_editor` 和 `git diff --check`。
-- 当前的聚焦测试覆盖已验证 wrapped movement、inline atom / image、source display-row / cache / render 快路径、Source edit 与 undo / redo 缓存失效、Rendered interaction layout caching、remote image block cacheability、default list size hint、Rendered image block 绘制与鼠标交互。
+- 最近相关 crate 的检查已经通过，包括 `cargo fmt -p markdown_wysiwyg -p md_editor`、`cargo check -p markdown_wysiwyg -p md_editor`、`cargo test -p markdown_wysiwyg -p md_editor`；当前 `markdown_wysiwyg` 为 17 个测试，`md_editor` 为 134 个测试。
+- 当前的聚焦测试覆盖已验证 wrapped movement、inline atom / image、source display-row / cache / render 快路径、Source edit 与 undo / redo 缓存失效、Rendered interaction layout caching、remote image block cacheability、default list size hint、Rendered image block 绘制与鼠标交互，以及 block formula 的 projection、边界移动、Shift-selection、Backspace / Delete 与鼠标命中。
 - `git diff --check` 当前只剩 LF / CRLF 警告；在修复 Rendered image block 问题后做过简短的 markdown-editor smoke run，没有复现之前的 panic。
 
 ## 已知剩余工作
@@ -80,7 +82,6 @@
 - 用 300KB 级 Markdown 文件在 Source 和 Rendered 模式下做 profiling，定位剩余的 source-row-local 热点，再决定后续性能修改。
 - 继续在 source-row 架构内做优化：降低 row layout 成本、减少 string / fragment churn、增强 row-layout cache 复用、缩小 remeasure 和缓存失效范围，并改善大但不过分极端文档的表现。
 - 将 inline atom 的 measurement 继续泛化，超出当前 inactive inline math atom 路径的假设范围；同时补上当未来 atom 内容可能在缓存后继续变尺寸时的失效机制。
-- 实现块级公式作为 descriptor 驱动的 block rendered element，包括正确区分 `$...$` 与 `$$...$$`、块布局与交互行为，以及在不引入真实公式渲染器前提下的缓存语义。
 - 在保持 source-row virtualization 约束不变的前提下继续做代码架构清理。`crates/md_editor/src/lib.rs` 现在已经足够大，display-row projection、row layout / cache、inline atom、selection / movement、mouse hit testing、rendering 和 tests 都应继续拆到更清晰的内部模块边界中。这不意味着切换 away from source-row virtualization，也不意味着现在就要把 `md_editor` 拆成更多 crate。
 - 为 profiling 或手工使用中发现的剩余 visual-row 键盘移动缺口补更强的 runtime 或 visual tests。
 - 为 Rendered image / block 行为以及剩余 wrapped-layout 交互缺口补更强的 runtime 或 visual tests。
