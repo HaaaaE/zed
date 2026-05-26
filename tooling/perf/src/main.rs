@@ -1,6 +1,6 @@
 //! Perf profiler for Zed tests. Outputs timings of tests marked with the `#[perf]`
-//! attribute to stdout in Markdown. See the documentation of `util_macros::perf`
-//! for usage details on the actual attribute.
+//! attribute to stdout in Markdown and saves run history to `.perf-runs`. See the
+//! documentation of `util_macros::perf` for usage details on the actual attribute.
 //!
 //! # Setup
 //! Make sure `hyperfine` is installed and in the shell path.
@@ -30,10 +30,12 @@
 //! These flags can be combined.
 //!
 //! ## Comparing runs
-//! Passing `--json=ident` will save per-crate run files in `.perf-runs`, e.g.
-//! `cargo perf-test -p gpui -- --json=blah` will result in `.perf-runs/blah.gpui.json`
-//! being created (unless no tests were run). These results can be automatically
-//! compared. To do so, run `cargo perf-compare new-ident old-ident`.
+//! Perf runs save per-crate run files in `.perf-runs` by default. If no explicit
+//! name is provided, the run name is based on a timestamp and git SHA. Passing
+//! `--json=ident` overrides that name, e.g. `cargo perf-test -p gpui -- --json=blah`
+//! will result in `.perf-runs/blah.gpui.json` being created (unless no tests were
+//! run). Passing `--json` or `--json=` keeps the automatic name. These results can
+//! be automatically compared. To do so, run `cargo perf-compare new-ident old-ident`.
 //!
 //! To save the markdown output to a file instead, run `cargo perf-compare --save=$FILE
 //! new-ident old-ident`.
@@ -85,29 +87,23 @@ macro_rules! fail {
 }
 
 /// How does this perf run return its output?
-enum OutputKind<'a> {
-    /// Print markdown to the terminal.
-    Markdown,
-    /// Save JSON to a file.
-    Json(&'a Path),
+enum OutputKind {
+    /// Print markdown and save JSON to a file.
+    MarkdownAndJson(PathBuf),
 }
 
-impl OutputKind<'_> {
+impl OutputKind {
     /// Logs the output of a run as per the `OutputKind`.
     fn log(&self, output: &Output, t_bin: &str) {
+        println!("{output}");
         match self {
-            OutputKind::Markdown => println!("{output}"),
-            OutputKind::Json(ident) => {
+            OutputKind::MarkdownAndJson(ident) => {
                 // We're going to be in tooling/perf/$whatever.
                 let wspace_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
                     .join("..")
                     .join("..");
                 let runs_dir = PathBuf::from(&wspace_dir).join(consts::RUNS_DIR);
                 std::fs::create_dir_all(&runs_dir).unwrap();
-                assert!(
-                    !ident.to_string_lossy().is_empty(),
-                    "FATAL: Empty filename specified!"
-                );
                 // Get the test binary's crate's name; a path like
                 // target/release-fast/deps/gpui-061ff76c9b7af5d7
                 // would be reduced to just "gpui".
@@ -138,6 +134,28 @@ impl OutputKind<'_> {
             }
         }
     }
+}
+
+/// Gets the short git SHA to include in automatically named perf run files.
+fn git_short_sha() -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let sha = String::from_utf8(output.stdout).ok()?;
+    let sha = sha.trim();
+    (!sha.is_empty()).then(|| sha.to_string())
+}
+
+/// Generates the default perf run identifier used when no name is provided.
+fn default_run_ident() -> PathBuf {
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let git_sha = git_short_sha().unwrap_or_else(|| "unknown".to_string());
+    PathBuf::from(format!("{timestamp}-{git_sha}"))
 }
 
 /// Runs a given metadata-returning function from a test handler, parsing its
@@ -480,8 +498,8 @@ fn main() {
 
     // Minimum test importance we care about this run.
     let mut thresh = Importance::Iffy;
-    // Where to print the output of this run.
-    let mut out_kind = OutputKind::Markdown;
+    // Override for the automatically generated run identifier.
+    let mut run_ident = None;
 
     for arg in args.iter().skip(2) {
         match arg.as_str() {
@@ -491,15 +509,20 @@ fn main() {
             "--iffy" => thresh = Importance::Iffy,
             "--fluff" => thresh = Importance::Fluff,
             "--quiet" => QUIET.store(true, Ordering::Relaxed),
+            "--json" => run_ident = None,
+            s if s.starts_with("--json=") => {
+                run_ident = s
+                    .strip_prefix("--json=")
+                    .filter(|ident| !ident.is_empty())
+                    .map(PathBuf::from);
+            }
             s if s.starts_with("--json") => {
-                out_kind = OutputKind::Json(Path::new(
-                    s.strip_prefix("--json=")
-                        .expect("FATAL: Invalid json parameter; pass --json=ident"),
-                ));
+                panic!("FATAL: Invalid json parameter; pass --json=ident, --json=, or omit it");
             }
             _ => (),
         }
     }
+    let out_kind = OutputKind::MarkdownAndJson(run_ident.unwrap_or_else(default_run_ident));
     if !QUIET.load(Ordering::Relaxed) {
         eprintln!("Starting perf check");
     }

@@ -27,6 +27,7 @@ missing_safety_doc = "forbid"
 disallowed_methods = { level = "allow", priority = 1}
 
 [dependencies]
+chrono.workspace = true
 collections.workspace = true
 serde.workspace = true
 serde_json.workspace = true
