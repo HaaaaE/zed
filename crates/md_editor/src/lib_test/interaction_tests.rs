@@ -219,6 +219,100 @@ fn rendered_mode_actions_follow_wrapped_visual_rows_with_inline_image(
 }
 
 #[gpui::test]
+fn rendered_mode_select_actions_follow_wrapped_visual_rows_with_inline_image(
+    cx: &mut gpui::TestAppContext,
+) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(110.), px(240.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(
+            "Before ![alt](https://example.com/cat.png) after more words here\n",
+            cx,
+        );
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        let source_line_end = editor.buffer.as_text_snapshot().line_len(0);
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
+            .expect("display row should exist");
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let wrap_width = text_wrap_width(window);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            wrap_width,
+            false,
+            window,
+            cx,
+        );
+
+        let DisplayRowLayout::Text(text_layout) = row_layout else {
+            panic!("expected wrapped text layout");
+        };
+        assert!(
+            text_layout.visual_rows.len() >= 3,
+            "expected at least three visual rows, got {:?}",
+            text_layout.visual_rows
+        );
+
+        let second_visual_row = &text_layout.visual_rows[1];
+        let wrapped_row_start = point_for_visual_row_x(
+            &snapshot,
+            &display_row,
+            &text_layout,
+            second_visual_row,
+            px(0.),
+        )
+        .expect("second visual row should map to a point");
+        let wrapped_row_end = point_for_display_offset(
+            &snapshot,
+            &display_row,
+            &text_layout,
+            second_visual_row.display_range.end,
+        );
+
+        assert_eq!(wrapped_row_start.row, 0);
+        assert!(wrapped_row_start.column > 0);
+        assert!(wrapped_row_start.column < source_line_end);
+        assert_eq!(wrapped_row_end.row, 0);
+        assert!(wrapped_row_end.column > wrapped_row_start.column);
+        assert!(wrapped_row_end.column < source_line_end);
+
+        editor.set_cursor(Point::new(0, 0));
+
+        editor.select_down(&SelectDown, window, cx);
+        assert_eq!(editor.selection.start, Point::new(0, 0));
+        assert_eq!(editor.selection.end, wrapped_row_start);
+        assert!(!editor.selection.reversed);
+
+        editor.select_to_end_of_line(&SelectToEndOfLine, window, cx);
+        assert_eq!(editor.selection.start, Point::new(0, 0));
+        assert_eq!(editor.selection.end, wrapped_row_end);
+        assert!(!editor.selection.reversed);
+
+        editor.select_to_beginning_of_line(&SelectToBeginningOfLine, window, cx);
+        assert_eq!(editor.selection.start, Point::new(0, 0));
+        assert_eq!(editor.selection.end, wrapped_row_start);
+        assert!(!editor.selection.reversed);
+
+        editor.select_up(&SelectUp, window, cx);
+        assert_eq!(editor.selection.start, Point::new(0, 0));
+        assert_eq!(editor.selection.end, Point::new(0, 0));
+        assert!(!editor.selection.reversed);
+    });
+}
+
+#[gpui::test]
 fn rendered_mode_actions_follow_image_block_boundaries(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     cx.simulate_resize(gpui::size(px(500.), px(240.)));

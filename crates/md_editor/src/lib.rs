@@ -1302,9 +1302,8 @@ impl MarkdownEditor {
         let previous_active = active_source_range_for_selection(&snapshot, previous_selection);
         let current_active = active_source_range_for_selection(&snapshot, &self.selection);
         let current_goal = self.selection.goal;
-        let preserve_wrapped_visual_goal = previous_selection.is_empty()
-            && self.selection.is_empty()
-            && previous_selection.head().row == self.selection.head().row
+        let preserve_wrapped_visual_goal = previous_selection.head().row
+            == self.selection.head().row
             && matches!(current_goal, SelectionGoal::WrappedHorizontalPosition(_));
         let active_rows = source_rows_for_active_range_change(
             &snapshot,
