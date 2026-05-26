@@ -12,6 +12,11 @@
   - Source-mode plain text fragments now store only their display range and style; shaping and rendering recover text from `display_row.text` on demand.
   - Updated text-run construction and fragment rendering to use a shared segment text helper, preserving rendered-mode behavior and atom fallback text.
   - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
+- 2026-05-27: Added the missing stage-0 scroll perf cases.
+  - Added a 5KB fixture alongside the existing 300KB fixture.
+  - Added Source and Rendered scroll tests for short documents, plus cached-region second-scroll tests for both short and large documents.
+  - Verified the normal build with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
+  - Perf-enabled check/test commands still timed out after 3 minutes in this workspace, so the new perf cases are not runtime-verified here.
 
 ## 背景
 

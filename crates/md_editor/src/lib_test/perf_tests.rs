@@ -3,19 +3,20 @@ use gpui::{ListOffset, TestApp, px, size};
 use util_macros::perf;
 
 const LARGE_MARKDOWN_TARGET_BYTES: usize = 300 * 1024;
+const SHORT_MARKDOWN_TARGET_BYTES: usize = 5 * 1024;
 const PERF_WINDOW_WIDTH: f32 = 900.;
 const PERF_WINDOW_HEIGHT: f32 = 700.;
 const PERF_NARROW_WINDOW_WIDTH: f32 = 560.;
 const SCROLL_STEP_PIXELS: f32 = 168.;
 const SCROLL_STEPS: usize = 12;
 
-fn large_plain_markdown_fixture() -> String {
-    let mut text = String::with_capacity(LARGE_MARKDOWN_TARGET_BYTES + 1024);
+fn plain_markdown_fixture(target_bytes: usize) -> String {
+    let mut text = String::with_capacity(target_bytes + 1024);
     let paragraph = "Before **bold** text and regular wrapped prose repeated for source-row layout profiling.\n";
     let block = "## Heading\n\n";
     let list = "- first item in a long wrapped list entry for layout profiling\n";
 
-    while text.len() < LARGE_MARKDOWN_TARGET_BYTES {
+    while text.len() < target_bytes {
         text.push_str(block);
         text.push_str(paragraph);
         text.push_str(paragraph);
@@ -24,6 +25,14 @@ fn large_plain_markdown_fixture() -> String {
     }
 
     text
+}
+
+fn short_plain_markdown_fixture() -> String {
+    plain_markdown_fixture(SHORT_MARKDOWN_TARGET_BYTES)
+}
+
+fn large_plain_markdown_fixture() -> String {
+    plain_markdown_fixture(LARGE_MARKDOWN_TARGET_BYTES)
 }
 
 fn middle_row_containing(text: &str, needle: &str) -> u32 {
@@ -91,6 +100,17 @@ fn scroll_and_draw(
         window.draw();
         app.run_until_parked();
     }
+}
+
+fn scroll_same_region_twice(window: &mut gpui::TestAppWindow<MarkdownEditor>, app: &mut TestApp) {
+    let initial_offset =
+        window.update(|editor, _, _| editor.display_list_state.logical_scroll_top());
+    scroll_and_draw(window, app, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+    window.update(|editor, _, _| {
+        editor.display_list_state.scroll_to(initial_offset);
+    });
+    warm_draw(window, app);
+    scroll_and_draw(window, app, SCROLL_STEPS, SCROLL_STEP_PIXELS);
 }
 
 fn replace_middle_row_word(
@@ -198,6 +218,20 @@ fn rendered_mode_redraw_large_markdown_cached() {
 }
 
 #[perf(important, iterations = 1)]
+fn source_mode_scroll_short_markdown() {
+    let mut app = TestApp::new();
+    let text = short_plain_markdown_fixture();
+    let mut window = open_source_perf_window(&mut app, &text);
+
+    warm_draw(&mut window, &mut app);
+    scroll_and_draw(&mut window, &mut app, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+
+    window.read(|editor, _| {
+        assert_eq!(editor.mode(), MarkdownEditorMode::Source);
+    });
+}
+
+#[perf(important, iterations = 1)]
 fn source_mode_scroll_large_markdown() {
     let mut app = TestApp::new();
     let text = large_plain_markdown_fixture();
@@ -212,6 +246,48 @@ fn source_mode_scroll_large_markdown() {
 }
 
 #[perf(important, iterations = 1)]
+fn source_mode_scroll_short_markdown_cached_region() {
+    let mut app = TestApp::new();
+    let text = short_plain_markdown_fixture();
+    let mut window = open_source_perf_window(&mut app, &text);
+
+    warm_draw(&mut window, &mut app);
+    scroll_same_region_twice(&mut window, &mut app);
+
+    window.read(|editor, _| {
+        assert_eq!(editor.mode(), MarkdownEditorMode::Source);
+    });
+}
+
+#[perf(important, iterations = 1)]
+fn source_mode_scroll_large_markdown_cached_region() {
+    let mut app = TestApp::new();
+    let text = large_plain_markdown_fixture();
+    let mut window = open_source_perf_window(&mut app, &text);
+
+    warm_draw(&mut window, &mut app);
+    scroll_same_region_twice(&mut window, &mut app);
+
+    window.read(|editor, _| {
+        assert_eq!(editor.mode(), MarkdownEditorMode::Source);
+    });
+}
+
+#[perf(important, iterations = 1)]
+fn rendered_mode_scroll_short_markdown() {
+    let mut app = TestApp::new();
+    let text = short_plain_markdown_fixture();
+    let mut window = open_rendered_perf_window(&mut app, &text);
+
+    warm_draw(&mut window, &mut app);
+    scroll_and_draw(&mut window, &mut app, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+
+    window.read(|editor, _| {
+        assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
+    });
+}
+
+#[perf(important, iterations = 1)]
 fn rendered_mode_scroll_large_markdown() {
     let mut app = TestApp::new();
     let text = large_plain_markdown_fixture();
@@ -219,6 +295,34 @@ fn rendered_mode_scroll_large_markdown() {
 
     warm_draw(&mut window, &mut app);
     scroll_and_draw(&mut window, &mut app, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+
+    window.read(|editor, _| {
+        assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
+    });
+}
+
+#[perf(important, iterations = 1)]
+fn rendered_mode_scroll_short_markdown_cached_region() {
+    let mut app = TestApp::new();
+    let text = short_plain_markdown_fixture();
+    let mut window = open_rendered_perf_window(&mut app, &text);
+
+    warm_draw(&mut window, &mut app);
+    scroll_same_region_twice(&mut window, &mut app);
+
+    window.read(|editor, _| {
+        assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
+    });
+}
+
+#[perf(important, iterations = 1)]
+fn rendered_mode_scroll_large_markdown_cached_region() {
+    let mut app = TestApp::new();
+    let text = large_plain_markdown_fixture();
+    let mut window = open_rendered_perf_window(&mut app, &text);
+
+    warm_draw(&mut window, &mut app);
+    scroll_same_region_twice(&mut window, &mut app);
 
     window.read(|editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
