@@ -190,7 +190,7 @@ pub(super) fn display_row_layout_inputs_for_fragments(
     row_style: RowDisplayStyle,
     window: &mut Window,
 ) -> DisplayRowLayoutInputs {
-    let segments = text_segments_for_fragments(&fragments);
+    let segments = text_segments_for_fragments(&display_row.text, &fragments);
     let text_runs = text_runs_for_segments(&segments);
     let shaped_line = window.text_system().shape_line(
         SharedString::from(display_row.text.clone()),
@@ -620,12 +620,20 @@ pub(super) fn display_inline_fragments(
 }
 
 pub(super) fn text_segments_for_fragments(
+    display_text: &str,
     fragments: &[DisplayInlineFragment],
 ) -> Vec<StyledDisplaySegment> {
     let mut segments: Vec<StyledDisplaySegment> = Vec::new();
     for fragment in fragments {
         let segment = match fragment {
-            DisplayInlineFragment::Text(segment) => segment.clone(),
+            DisplayInlineFragment::Text(segment) => {
+                let text = segment_text(display_text, segment).unwrap_or_default();
+                StyledDisplaySegment {
+                    display_range: segment.display_range.clone(),
+                    text,
+                    style: segment.style.clone(),
+                }
+            }
             DisplayInlineFragment::Atom(atom) => StyledDisplaySegment {
                 display_range: atom.display_range.clone(),
                 text: atom.fallback_text.clone(),
@@ -645,6 +653,16 @@ pub(super) fn text_segments_for_fragments(
     }
 
     segments
+}
+
+pub(super) fn segment_text(display_text: &str, segment: &StyledDisplaySegment) -> Option<String> {
+    if !segment.text.is_empty() || segment.display_range.is_empty() {
+        return Some(segment.text.clone());
+    }
+
+    display_text
+        .get(segment.display_range.clone())
+        .map(str::to_string)
 }
 
 pub(super) fn display_inline_row_inputs(
@@ -805,7 +823,7 @@ fn range_contains(container: &Range<usize>, candidate: &Range<usize>) -> bool {
 pub(super) fn source_display_fragments(display_row: &DisplayRow) -> Vec<DisplayInlineFragment> {
     vec![DisplayInlineFragment::Text(StyledDisplaySegment {
         display_range: 0..display_row.text.len(),
-        text: display_row.text.clone(),
+        text: String::new(),
         style: DisplayTextStyle::default(),
     })]
 }

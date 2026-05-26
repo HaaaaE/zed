@@ -21,7 +21,7 @@ fn rendered_styled_segments_apply_heading_semantics() {
         row_style,
         None,
     );
-    let segments = text_segments_for_fragments(&fragments);
+    let segments = text_segments_for_fragments(&row.text, &fragments);
 
     assert_eq!(segments.len(), 1);
     assert_eq!(segments[0].text, "Title");
@@ -53,7 +53,7 @@ fn rendered_styled_segments_apply_inline_semantics() {
         row_style,
         None,
     );
-    let segments = text_segments_for_fragments(&fragments);
+    let segments = text_segments_for_fragments(&row.text, &fragments);
 
     assert_eq!(
         segments

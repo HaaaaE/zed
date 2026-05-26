@@ -303,7 +303,7 @@ fn source_fragments_use_plain_text_fast_path() {
         fragments,
         vec![DisplayInlineFragment::Text(StyledDisplaySegment {
             display_range: 0..row.text.len(),
-            text: row.text.clone(),
+            text: String::new(),
             style: DisplayTextStyle::default(),
         })]
     );
@@ -348,7 +348,7 @@ fn rendered_inline_fragments_create_inline_math_atom() {
         row_style.line_height + INLINE_MATH_ATOM_EXTRA_HEIGHT
     );
     assert_eq!(
-        text_segments_for_fragments(&fragments)
+        text_segments_for_fragments(&row.text, &fragments)
             .iter()
             .map(|segment| segment.text.as_str())
             .collect::<Vec<_>>(),
@@ -398,7 +398,7 @@ fn rendered_inline_fragments_create_inline_image_atom() {
     assert_eq!(atom.display_range, 7..10);
     assert_eq!(atom.height, INLINE_IMAGE_ATOM_SIZE);
     assert_eq!(
-        text_segments_for_fragments(&fragments)
+        text_segments_for_fragments(&row.text, &fragments)
             .iter()
             .map(|segment| segment.text.as_str())
             .collect::<Vec<_>>(),
@@ -449,7 +449,7 @@ fn rendered_inline_fragments_create_empty_alt_inline_image_atom() {
     assert_eq!(atom.display_range, 7..7 + INLINE_IMAGE_PLACEHOLDER.len());
     assert_eq!(atom.height, INLINE_IMAGE_ATOM_SIZE);
     assert_eq!(
-        text_segments_for_fragments(&fragments)
+        text_segments_for_fragments(&row.text, &fragments)
             .iter()
             .map(|segment| segment.text.clone())
             .collect::<Vec<_>>(),

@@ -11,7 +11,7 @@ use super::{
     selected_range_for_row_in_text_snapshot,
 };
 use super::{
-    layout::{DisplayRowLayout, DisplayRowTextLayout, VisualDisplayRow},
+    layout::{DisplayRowLayout, DisplayRowTextLayout, VisualDisplayRow, segment_text},
     visual_row::{display_x_for_offset, visual_row_index_for_caret},
 };
 
@@ -176,6 +176,7 @@ fn render_visual_text_row(
             &visual_row,
         ))
         .children(render_fragments_for_visual_row(
+            &display_row.text,
             &text_layout.fragments,
             &visual_row,
             selected_range,
@@ -221,6 +222,7 @@ fn selection_elements_for_visual_row(
 }
 
 fn render_fragments_for_visual_row(
+    display_text: &str,
     fragments: &[DisplayInlineFragment],
     visual_row: &VisualDisplayRow,
     selected_range: Option<&Range<usize>>,
@@ -231,9 +233,12 @@ fn render_fragments_for_visual_row(
     for fragment in fragments {
         match fragment {
             DisplayInlineFragment::Text(segment) => {
+                let Some(text_for_segment) = segment_text(display_text, segment) else {
+                    continue;
+                };
                 let Some(text) = fragment_text_for_visual_row(
                     &segment.display_range,
-                    segment.text.as_str(),
+                    text_for_segment.as_str(),
                     visual_row,
                 ) else {
                     continue;

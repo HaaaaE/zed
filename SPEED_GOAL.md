@@ -8,6 +8,10 @@
   - Text-row mouse callbacks now capture `Arc<DisplayRow>` handles instead of cloning whole `DisplayRow` values into every callback.
   - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
   - `cargo perf-test -p md_editor` was attempted but timed out after 3 minutes, so no perf numbers are recorded for this slice.
+- 2026-05-27: Completed a focused stage-2 source-mode string-copy reduction.
+  - Source-mode plain text fragments now store only their display range and style; shaping and rendering recover text from `display_row.text` on demand.
+  - Updated text-run construction and fragment rendering to use a shared segment text helper, preserving rendered-mode behavior and atom fallback text.
+  - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
 
 ## 背景
 
