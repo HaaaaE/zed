@@ -1,4 +1,4 @@
-use std::{ops::Range, path::Path};
+use std::{ops::Range, path::Path, sync::Arc};
 
 use gpui::{
     App, FontStyle, FontWeight, LineFragment, SharedString, StrikethroughStyle, TextRun,
@@ -70,8 +70,8 @@ impl DisplayRowTextLayout {
 
 #[derive(Clone, Debug)]
 pub(super) enum DisplayRowLayout {
-    Text(DisplayRowTextLayout),
-    Block(DisplayBlockLayout),
+    Text(Arc<DisplayRowTextLayout>),
+    Block(Arc<DisplayBlockLayout>),
 }
 
 impl DisplayRowLayout {

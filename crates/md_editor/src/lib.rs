@@ -1636,7 +1636,7 @@ impl Render for MarkdownEditor {
                         let row_contents = render_row_text(
                             &snapshot,
                             &display_row,
-                            text_layout,
+                            &text_layout,
                             &selection,
                             row_style,
                             _cx,
@@ -1692,7 +1692,7 @@ impl Render for MarkdownEditor {
                         let row_contents = render_display_row_layout(
                             &snapshot,
                             &display_row,
-                            row_layout,
+                            &row_layout,
                             &selection,
                             row_style,
                             _cx,

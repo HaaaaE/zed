@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
 use gpui::{Context, IntoElement, MouseButton, SharedString, div, prelude::*, px};
 use md_buffer::BufferSnapshot;
@@ -17,8 +17,8 @@ use super::{
 
 pub(super) fn render_row_text(
     snapshot: &TextBufferSnapshot,
-    display_row: &DisplayRow,
-    text_layout: DisplayRowTextLayout,
+    display_row: &Arc<DisplayRow>,
+    text_layout: &DisplayRowTextLayout,
     selection: &Selection<Point>,
     row_style: RowDisplayStyle,
     cx: &mut Context<MarkdownEditor>,
@@ -31,11 +31,11 @@ pub(super) fn render_row_text(
     };
 
     let mut elements = Vec::new();
-    for (visual_row_index, visual_row) in text_layout.visual_rows.clone().into_iter().enumerate() {
+    for (visual_row_index, visual_row) in text_layout.visual_rows.iter().enumerate() {
         elements.push(render_visual_text_row(
             snapshot,
             display_row,
-            &text_layout,
+            text_layout,
             visual_row_index,
             visual_row,
             selection,
@@ -49,8 +49,8 @@ pub(super) fn render_row_text(
 
 pub(super) fn render_display_row_layout(
     snapshot: &BufferSnapshot,
-    display_row: &DisplayRow,
-    row_layout: DisplayRowLayout,
+    display_row: &Arc<DisplayRow>,
+    row_layout: &DisplayRowLayout,
     selection: &Selection<Point>,
     row_style: RowDisplayStyle,
     cx: &mut Context<MarkdownEditor>,
@@ -124,10 +124,10 @@ pub(super) fn fragment_text_for_visual_row(
 
 fn render_visual_text_row(
     snapshot: &TextBufferSnapshot,
-    display_row: &DisplayRow,
+    display_row: &Arc<DisplayRow>,
     text_layout: &DisplayRowTextLayout,
     visual_row_index: usize,
-    visual_row: VisualDisplayRow,
+    visual_row: &VisualDisplayRow,
     selection: &Selection<Point>,
     selected_range: Option<&Range<usize>>,
     row_style: RowDisplayStyle,

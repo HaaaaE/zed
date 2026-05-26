@@ -222,7 +222,7 @@ impl DisplayBlockLayout {
     }
 
     pub(super) fn render(
-        self,
+        &self,
         snapshot: &BufferSnapshot,
         selection: &Selection<Point>,
         row_style: RowDisplayStyle,
@@ -449,7 +449,7 @@ fn block_visible_x_for_source_offset(
 }
 
 fn render_image_block(
-    image_layout: RenderedImageBlockLayout,
+    image_layout: &RenderedImageBlockLayout,
     selected: bool,
     caret_x: Option<gpui::Pixels>,
     row_style: RowDisplayStyle,
@@ -459,7 +459,7 @@ fn render_image_block(
     let image_height = image_layout.image_height();
     let mouse_down_block_layout = DisplayBlockLayout::RemoteImage(image_layout.clone());
     let mouse_move_block_layout = mouse_down_block_layout.clone();
-    let image_block = image_layout.image_block;
+    let image_block = &image_layout.image_block;
     let fallback_label = image_block.image_source.fallback_label();
     let invalid_fallback_label = fallback_label.clone();
     let image_source = image_block.image_source.image_source();
@@ -531,7 +531,7 @@ fn render_image_block(
 }
 
 fn render_formula_block(
-    formula_layout: RenderedFormulaBlockLayout,
+    formula_layout: &RenderedFormulaBlockLayout,
     selected: bool,
     caret_x: Option<gpui::Pixels>,
     row_style: RowDisplayStyle,
@@ -556,7 +556,7 @@ fn render_formula_block(
             this.mouse_move_on_block(&mouse_move_block_layout, event, window, cx)
         }))
         .child(render_formula_block_inner(
-            formula_layout.clone(),
+            formula_layout,
             row_style,
             selected,
         ))
@@ -567,7 +567,7 @@ fn render_formula_block(
 }
 
 fn render_formula_block_inner(
-    formula_layout: RenderedFormulaBlockLayout,
+    formula_layout: &RenderedFormulaBlockLayout,
     row_style: RowDisplayStyle,
     selected: bool,
 ) -> gpui::AnyElement {
@@ -588,8 +588,8 @@ fn render_formula_block_inner(
         element = element.bg(palette.selection_background.opacity(0.12));
     }
 
-    if let Some(asset) = formula_layout.rendered_formula {
-        element = element.child(img(asset.image).h(asset.logical_size.height));
+    if let Some(asset) = &formula_layout.rendered_formula {
+        element = element.child(img(asset.image.clone()).h(asset.logical_size.height));
     }
 
     element.into_any_element()

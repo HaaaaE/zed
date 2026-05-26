@@ -235,7 +235,7 @@ impl MarkdownEditor {
             window,
             cx,
         ) {
-            DisplayRowLayout::Block(block_layout)
+            DisplayRowLayout::Block(Arc::new(block_layout))
         } else {
             let inputs =
                 self.cached_row_layout_inputs(snapshot, display_row, mode, row_style, window);
@@ -247,7 +247,7 @@ impl MarkdownEditor {
                 window,
                 cx,
             );
-            DisplayRowLayout::Text(text_layout_for_display_row_inputs(
+            DisplayRowLayout::Text(Arc::new(text_layout_for_display_row_inputs(
                 &display_row.text,
                 &inputs,
                 row_style,
@@ -255,7 +255,7 @@ impl MarkdownEditor {
                 &atom_measurements,
                 window,
                 cx,
-            ))
+            )))
         };
         if layout.cacheable() {
             self.row_layout_cache.insert(cache_key, layout.clone());
@@ -281,7 +281,7 @@ impl MarkdownEditor {
         };
 
         if let Some(DisplayRowLayout::Text(cached_layout)) = self.row_layout_cache.get(&cache_key) {
-            return cached_layout.clone();
+            return (**cached_layout).clone();
         }
 
         let inputs = self.cached_source_row_layout_inputs(display_row, row_style, window);
@@ -304,7 +304,7 @@ impl MarkdownEditor {
         );
         if layout.cacheable {
             self.row_layout_cache
-                .insert(cache_key, DisplayRowLayout::Text(layout.clone()));
+                .insert(cache_key, DisplayRowLayout::Text(Arc::new(layout.clone())));
         }
         layout
     }

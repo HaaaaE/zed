@@ -1,5 +1,14 @@
 # Markdown Editor 滚动性能目标
 
+## Progress
+
+- 2026-05-27: Completed the first stage-1 slice for reducing cached-layout copy cost.
+  - `row_layout_cache` now stores shared text/block layouts through `Arc` inside `DisplayRowLayout`, so returning a cached row layout no longer clones the full text/block layout payload.
+  - Render paths now borrow `DisplayRowTextLayout`, `DisplayRowLayout`, and `visual_rows` instead of cloning the visual row vector for rendering.
+  - Text-row mouse callbacks now capture `Arc<DisplayRow>` handles instead of cloning whole `DisplayRow` values into every callback.
+  - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
+  - `cargo perf-test -p md_editor` was attempted but timed out after 3 minutes, so no perf numbers are recorded for this slice.
+
 ## 背景
 
 300KB Markdown 比短 Markdown 滑动更慢，主要原因不是每次滑动都处理整篇文档。当前编辑器只处理屏幕附近的 source row。

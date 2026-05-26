@@ -1526,7 +1526,8 @@ fn formula_block_layout_is_cacheable_and_uses_measured_height() {
         rendered_formula: None,
         cacheable: true,
     };
-    let block_layout = DisplayRowLayout::Block(DisplayBlockLayout::Formula(formula_layout.clone()));
+    let block_layout =
+        DisplayRowLayout::Block(DisplayBlockLayout::Formula(formula_layout.clone()).into());
 
     assert!(block_layout.cacheable());
     assert_eq!(formula_layout.height(), px(36.));
@@ -1535,20 +1536,24 @@ fn formula_block_layout_is_cacheable_and_uses_measured_height() {
 #[test]
 fn image_block_layout_cacheability_tracks_loaded_size() {
     let image_block = rendered_image_block(4..39, "alt");
-    let loaded_layout =
-        DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(RenderedImageBlockLayout {
+    let loaded_layout = DisplayRowLayout::Block(
+        DisplayBlockLayout::RemoteImage(RenderedImageBlockLayout {
             image_block: image_block.clone(),
             width: px(200.),
             image_height: px(120.),
             cacheable: true,
-        }));
-    let placeholder_layout =
-        DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(RenderedImageBlockLayout {
+        })
+        .into(),
+    );
+    let placeholder_layout = DisplayRowLayout::Block(
+        DisplayBlockLayout::RemoteImage(RenderedImageBlockLayout {
             image_block,
             width: px(200.),
             image_height: RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT,
             cacheable: false,
-        }));
+        })
+        .into(),
+    );
 
     assert!(loaded_layout.cacheable());
     assert!(!placeholder_layout.cacheable());
