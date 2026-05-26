@@ -433,6 +433,61 @@ fn rendered_inline_fragments_create_empty_alt_inline_image_atom() {
 }
 
 #[test]
+fn inline_atom_measurement_key_tracks_descriptor_content_and_row_style() {
+    let row_style: RowDisplayStyle = md_theme::default_row_metrics().into();
+    let heading_style: RowDisplayStyle = md_theme::heading_row_metrics(1).into();
+    let image = DisplayInlineAtom {
+        descriptor: image_descriptor(
+            0..30,
+            "https://example.com/cat.png",
+            "cat",
+            RenderedElementPlacement::Inline,
+        ),
+        source_range: 0..30,
+        display_range: 0..3,
+        fallback_text: "cat".to_string(),
+        image_url: Some("https://example.com/cat.png".to_string()),
+        style: inline_style(MarkdownInlineKind::Image),
+        height: INLINE_IMAGE_ATOM_SIZE,
+        width: px(0.),
+    };
+    let same_image = image.measurement_key(row_style);
+    let different_url = DisplayInlineAtom {
+        descriptor: image_descriptor(
+            0..30,
+            "https://example.com/dog.png",
+            "cat",
+            RenderedElementPlacement::Inline,
+        ),
+        image_url: Some("https://example.com/dog.png".to_string()),
+        ..image.clone()
+    }
+    .measurement_key(row_style);
+    let different_style = image.measurement_key(heading_style);
+    let math = DisplayInlineAtom {
+        descriptor: math_descriptor(0..3, "x"),
+        source_range: 0..3,
+        display_range: 0..1,
+        fallback_text: "x".to_string(),
+        image_url: None,
+        style: inline_style(MarkdownInlineKind::InlineMath),
+        height: row_style.line_height + INLINE_MATH_ATOM_EXTRA_HEIGHT,
+        width: px(0.),
+    };
+    let different_math = DisplayInlineAtom {
+        descriptor: math_descriptor(0..3, "y"),
+        fallback_text: "y".to_string(),
+        ..math.clone()
+    }
+    .measurement_key(row_style);
+
+    assert_eq!(same_image, image.measurement_key(row_style));
+    assert_ne!(same_image, different_url);
+    assert_ne!(same_image, different_style);
+    assert_ne!(math.measurement_key(row_style), different_math);
+}
+
+#[test]
 fn inline_atom_display_boundaries_map_to_source_boundaries() {
     let mut buffer = Buffer::local("Before $x + y$ after\n");
     let snapshot = buffer.snapshot();

@@ -43,16 +43,39 @@ pub(super) struct DisplayInlineAtom {
     pub(super) width: gpui::Pixels,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct DisplayInlineAtomMeasurement {
-    pub(super) size: gpui::Size<gpui::Pixels>,
-    pub(super) cacheable: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum DisplayInlineAtomKind {
     InlineMath,
     InlineImage,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) struct InlineAtomMeasurementKey {
+    pub(super) kind: DisplayInlineAtomKind,
+    pub(super) source_range: Range<usize>,
+    pub(super) descriptor: RenderedElementDescriptor,
+    pub(super) fallback_text: String,
+    pub(super) row_style: RowDisplayStyle,
+    pub(super) resource_id: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum InlineAtomMeasurementState {
+    Ready(gpui::Size<gpui::Pixels>),
+    Pending(gpui::Size<gpui::Pixels>),
+    Invalid(gpui::Size<gpui::Pixels>),
+}
+
+impl InlineAtomMeasurementState {
+    pub(super) fn size(self) -> gpui::Size<gpui::Pixels> {
+        match self {
+            Self::Ready(size) | Self::Pending(size) | Self::Invalid(size) => size,
+        }
+    }
+
+    pub(super) fn cacheable(self) -> bool {
+        matches!(self, Self::Ready(_) | Self::Invalid(_))
+    }
 }
 
 impl DisplayInlineAtomKind {
@@ -96,6 +119,17 @@ impl DisplayInlineAtom {
             .expect("inline atom descriptor must map to an atom kind")
     }
 
+    pub(super) fn measurement_key(&self, row_style: RowDisplayStyle) -> InlineAtomMeasurementKey {
+        InlineAtomMeasurementKey {
+            kind: self.kind(),
+            source_range: self.source_range.clone(),
+            descriptor: self.descriptor.clone(),
+            fallback_text: self.fallback_text.clone(),
+            row_style,
+            resource_id: self.image_url.clone(),
+        }
+    }
+
     pub(super) fn fallback_size(
         &self,
         shaped_line: &gpui::ShapedLine,
@@ -114,13 +148,13 @@ impl DisplayInlineAtom {
         (end_x - start_x).max(px(1.))
     }
 
-    pub(super) fn measure_size(
+    pub(super) fn measure_size_state(
         &self,
         fallback_size: gpui::Size<gpui::Pixels>,
         row_style: RowDisplayStyle,
         window: &mut Window,
         cx: &mut App,
-    ) -> DisplayInlineAtomMeasurement {
+    ) -> InlineAtomMeasurementState {
         if self.kind() == DisplayInlineAtomKind::InlineImage {
             return self.measure_inline_image_size(fallback_size, window, cx);
         }
@@ -135,13 +169,10 @@ impl DisplayInlineAtom {
             cx,
         );
 
-        DisplayInlineAtomMeasurement {
-            size: gpui::size(
-                size.width.max(fallback_size.width).max(px(1.)),
-                size.height.max(fallback_size.height).max(px(1.)),
-            ),
-            cacheable: true,
-        }
+        InlineAtomMeasurementState::Ready(gpui::size(
+            size.width.max(fallback_size.width).max(px(1.)),
+            size.height.max(fallback_size.height).max(px(1.)),
+        ))
     }
 
     fn measure_inline_image_size(
@@ -149,33 +180,25 @@ impl DisplayInlineAtom {
         fallback_size: gpui::Size<gpui::Pixels>,
         window: &mut Window,
         cx: &mut App,
-    ) -> DisplayInlineAtomMeasurement {
+    ) -> InlineAtomMeasurementState {
         let Some(image_url) = self.image_url.as_ref() else {
-            return DisplayInlineAtomMeasurement {
-                size: fallback_size,
-                cacheable: true,
-            };
+            return InlineAtomMeasurementState::Invalid(fallback_size);
         };
 
         let resource = Resource::Uri(image_url.clone().into());
         let Some(image) = window.use_asset::<ImgResourceLoader>(&resource, cx) else {
-            return DisplayInlineAtomMeasurement {
-                size: fallback_size,
-                cacheable: false,
-            };
+            return InlineAtomMeasurementState::Pending(fallback_size);
         };
 
-        let size = image
-            .ok()
-            .and_then(|image| {
+        match image {
+            Ok(image) => {
                 let size = image.size(0);
-                inline_image_atom_size_for_size(size.width.0, size.height.0)
-            })
-            .unwrap_or(fallback_size);
-
-        DisplayInlineAtomMeasurement {
-            size,
-            cacheable: true,
+                InlineAtomMeasurementState::Ready(
+                    inline_image_atom_size_for_size(size.width.0, size.height.0)
+                        .unwrap_or(fallback_size),
+                )
+            }
+            Err(_) => InlineAtomMeasurementState::Invalid(fallback_size),
         }
     }
 

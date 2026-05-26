@@ -11,8 +11,9 @@ use md_text::{Point, Selection};
 use md_theme::{default_row_metrics, editor_palette, gutter_width, heading_row_metrics};
 
 use super::{
-    DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, MarkdownEditorMode,
-    RowDisplayStyle, active_source_range_for_selection,
+    DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, InlineAtomMeasurementKey,
+    InlineAtomMeasurementState, MarkdownEditorMode, RowDisplayStyle,
+    active_source_range_for_selection,
     block::DisplayBlockLayout,
     display_model::{DisplayRow, DisplayTextStyle, StyledDisplaySegment},
     inactive_rendered_element_source_ranges_for_selection, ranges_overlap,
@@ -35,6 +36,25 @@ pub(super) struct DisplayRowTextLayout {
     pub(super) shaped_line: gpui::ShapedLine,
     pub(super) text_len: usize,
     pub(super) cacheable: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct DisplayRowLayoutInputs {
+    pub(super) fragments: Vec<DisplayInlineFragment>,
+    pub(super) text_runs: Vec<TextRun>,
+    pub(super) shaped_line: gpui::ShapedLine,
+    pub(super) text_len: usize,
+    pub(super) has_inline_atoms: bool,
+    pub(super) inline_atom_keys: Vec<InlineAtomMeasurementKey>,
+}
+
+impl DisplayRowLayoutInputs {
+    pub(super) fn inline_atoms(&self) -> impl Iterator<Item = &DisplayInlineAtom> {
+        self.fragments.iter().filter_map(|fragment| match fragment {
+            DisplayInlineFragment::Text(_) => None,
+            DisplayInlineFragment::Atom(atom) => Some(atom),
+        })
+    }
 }
 
 impl DisplayRowTextLayout {
@@ -120,101 +140,54 @@ impl DisplayRowProjectionState {
 pub(super) struct RowLayoutCacheKey {
     pub(super) row: u32,
     pub(super) mode: MarkdownEditorMode,
+    pub(super) row_style: RowDisplayStyle,
     pub(super) wrap_width: gpui::Pixels,
     pub(super) active_projection_source_ranges: Vec<Range<usize>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) struct RowLayoutInputCacheKey {
+    pub(super) version: md_text::Global,
+    pub(super) row: u32,
+    pub(super) mode: MarkdownEditorMode,
+    pub(super) active_projection_source_ranges: Vec<Range<usize>>,
+    pub(super) row_style: RowDisplayStyle,
 }
 
 pub(super) fn text_wrap_width(window: &Window) -> gpui::Pixels {
     (window.bounds().size.width - gutter_width()).max(px(1.))
 }
 
-pub(super) fn compute_display_row_layout(
-    snapshot: &BufferSnapshot,
-    display_row: &DisplayRow,
-    selection: &Selection<Point>,
-    mode: MarkdownEditorMode,
-    row_style: RowDisplayStyle,
-    wrap_width: gpui::Pixels,
-    measure_layout: bool,
-    window: &mut Window,
-    cx: &mut App,
-) -> DisplayRowLayout {
-    if let Some(block_layout) = DisplayBlockLayout::for_display_row(
-        snapshot,
-        display_row,
-        selection,
-        mode,
-        wrap_width,
-        row_style,
-        measure_layout,
-        window,
-        cx,
-    ) {
-        return DisplayRowLayout::Block(block_layout);
-    }
-
-    DisplayRowLayout::Text(text_layout_for_display_row(
-        snapshot,
-        display_row,
-        mode,
-        row_style,
-        wrap_width,
-        measure_layout,
-        window,
-        cx,
-    ))
-}
-
-pub(super) fn text_layout_for_display_row(
+pub(super) fn display_row_layout_inputs(
     snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
     mode: MarkdownEditorMode,
     row_style: RowDisplayStyle,
-    wrap_width: gpui::Pixels,
-    measure_inline_atoms: bool,
     window: &mut Window,
-    cx: &mut App,
-) -> DisplayRowTextLayout {
+) -> DisplayRowLayoutInputs {
     let fragments = display_fragments_for_text_layout(snapshot, display_row, mode, row_style);
-    text_layout_for_fragments(
-        display_row,
-        fragments,
-        row_style,
-        wrap_width,
-        measure_inline_atoms,
-        window,
-        cx,
-    )
+    display_row_layout_inputs_for_fragments(display_row, fragments, row_style, window)
 }
 
-pub(super) fn source_text_layout_for_display_row(
+pub(super) fn source_display_row_layout_inputs(
     display_row: &DisplayRow,
     row_style: RowDisplayStyle,
-    wrap_width: gpui::Pixels,
-    measure_inline_atoms: bool,
     window: &mut Window,
-    cx: &mut App,
-) -> DisplayRowTextLayout {
-    text_layout_for_fragments(
+) -> DisplayRowLayoutInputs {
+    display_row_layout_inputs_for_fragments(
         display_row,
         source_display_fragments(display_row),
         row_style,
-        wrap_width,
-        measure_inline_atoms,
         window,
-        cx,
     )
 }
 
-pub(super) fn text_layout_for_fragments(
+pub(super) fn display_row_layout_inputs_for_fragments(
     display_row: &DisplayRow,
-    mut fragments: Vec<DisplayInlineFragment>,
+    fragments: Vec<DisplayInlineFragment>,
     row_style: RowDisplayStyle,
-    wrap_width: gpui::Pixels,
-    measure_inline_atoms: bool,
     window: &mut Window,
-    cx: &mut App,
-) -> DisplayRowTextLayout {
+) -> DisplayRowLayoutInputs {
     let segments = text_segments_for_fragments(&fragments);
     let text_runs = text_runs_for_segments(&segments);
     let shaped_line = window.text_system().shape_line(
@@ -224,38 +197,58 @@ pub(super) fn text_layout_for_fragments(
         None,
     );
     let has_inline_atoms = has_inline_atoms(&fragments);
-    let mut cacheable = true;
-    if has_inline_atoms {
-        if measure_inline_atoms {
-            cacheable =
-                measure_inline_atom_sizes(&mut fragments, &shaped_line, row_style, window, cx);
-        } else {
-            assign_inline_atom_fallback_sizes(&mut fragments, &shaped_line, row_style);
-            cacheable = false;
-        }
+    let inline_atom_keys = fragments
+        .iter()
+        .filter_map(|fragment| match fragment {
+            DisplayInlineFragment::Text(_) => None,
+            DisplayInlineFragment::Atom(atom) => Some(atom.measurement_key(row_style)),
+        })
+        .collect();
+
+    DisplayRowLayoutInputs {
+        fragments,
+        text_runs,
+        shaped_line,
+        text_len: display_row.text.len(),
+        has_inline_atoms,
+        inline_atom_keys,
     }
-    let visual_rows = if has_inline_atoms {
+}
+
+pub(super) fn text_layout_for_display_row_inputs(
+    display_text: &str,
+    inputs: &DisplayRowLayoutInputs,
+    row_style: RowDisplayStyle,
+    wrap_width: gpui::Pixels,
+    inline_atom_measurements: &[InlineAtomMeasurementState],
+    window: &mut Window,
+    cx: &mut App,
+) -> DisplayRowTextLayout {
+    let mut fragments = inputs.fragments.clone();
+    let cacheable =
+        apply_inline_atom_measurements(&mut fragments, inputs, row_style, inline_atom_measurements);
+    let visual_rows = if inputs.has_inline_atoms {
         visual_rows_for_fragments(
-            &display_row.text,
+            display_text,
             &fragments,
-            &shaped_line,
+            &inputs.shaped_line,
             row_style,
             wrap_width,
             cx,
         )
     } else if let Some(visual_rows) = unwrapped_visual_rows_if_fits(
-        display_row.text.len(),
+        inputs.text_len,
         &fragments,
         row_style,
-        shaped_line.width(),
+        inputs.shaped_line.width(),
         wrap_width,
     ) {
         visual_rows
     } else {
         match window.text_system().shape_text(
-            SharedString::from(display_row.text.clone()),
+            SharedString::from(display_text.to_string()),
             row_style.text_size,
-            &text_runs,
+            &inputs.text_runs,
             Some(wrap_width),
             None,
         ) {
@@ -264,18 +257,16 @@ pub(super) fn text_layout_for_fragments(
                 .map(|wrapped_line| {
                     visual_rows_for_wrapped_line(wrapped_line, &fragments, row_style)
                 })
-                .unwrap_or_else(|| {
-                    fallback_visual_rows(display_row.text.len(), &fragments, row_style)
-                }),
-            Err(_) => fallback_visual_rows(display_row.text.len(), &fragments, row_style),
+                .unwrap_or_else(|| fallback_visual_rows(inputs.text_len, &fragments, row_style)),
+            Err(_) => fallback_visual_rows(inputs.text_len, &fragments, row_style),
         }
     };
 
     DisplayRowTextLayout {
         fragments,
         visual_rows,
-        shaped_line,
-        text_len: display_row.text.len(),
+        shaped_line: inputs.shaped_line.clone(),
+        text_len: inputs.text_len,
         cacheable,
     }
 }
@@ -303,38 +294,30 @@ pub(super) fn display_fragments_for_text_layout(
     display_inline_fragments(snapshot, display_row, mode, row_style)
 }
 
-pub(super) fn assign_inline_atom_fallback_sizes(
+pub(super) fn apply_inline_atom_measurements(
     fragments: &mut [DisplayInlineFragment],
-    shaped_line: &gpui::ShapedLine,
+    inputs: &DisplayRowLayoutInputs,
     row_style: RowDisplayStyle,
-) {
+    inline_atom_measurements: &[InlineAtomMeasurementState],
+) -> bool {
+    if !inputs.has_inline_atoms {
+        return true;
+    }
+
+    let mut cacheable = true;
+    let mut measurements = inline_atom_measurements.iter().copied();
     for fragment in fragments {
         let DisplayInlineFragment::Atom(atom) = fragment else {
             continue;
         };
-        let size = atom.fallback_size(shaped_line, row_style);
+        let fallback_size = atom.fallback_size(&inputs.shaped_line, row_style);
+        let measurement = measurements
+            .next()
+            .unwrap_or(InlineAtomMeasurementState::Pending(fallback_size));
+        let size = measurement.size();
         atom.width = size.width;
         atom.height = size.height;
-    }
-}
-
-pub(super) fn measure_inline_atom_sizes(
-    fragments: &mut [DisplayInlineFragment],
-    shaped_line: &gpui::ShapedLine,
-    row_style: RowDisplayStyle,
-    window: &mut Window,
-    cx: &mut App,
-) -> bool {
-    let mut cacheable = true;
-    for fragment in fragments {
-        let DisplayInlineFragment::Atom(atom) = fragment else {
-            continue;
-        };
-        let fallback_size = atom.fallback_size(shaped_line, row_style);
-        let measurement = atom.measure_size(fallback_size, row_style, window, cx);
-        atom.width = measurement.size.width;
-        atom.height = measurement.size.height;
-        cacheable &= measurement.cacheable;
+        cacheable &= measurement.cacheable();
     }
     cacheable
 }

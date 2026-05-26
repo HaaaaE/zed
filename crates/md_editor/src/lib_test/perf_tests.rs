@@ -11,8 +11,7 @@ const SCROLL_STEPS: usize = 12;
 
 fn large_plain_markdown_fixture() -> String {
     let mut text = String::with_capacity(LARGE_MARKDOWN_TARGET_BYTES + 1024);
-    let paragraph =
-        "Before **bold** text and regular wrapped prose repeated for source-row layout profiling.\n";
+    let paragraph = "Before **bold** text and regular wrapped prose repeated for source-row layout profiling.\n";
     let block = "## Heading\n\n";
     let list = "- first item in a long wrapped list entry for layout profiling\n";
 
@@ -52,20 +51,14 @@ fn middle_row_containing(text: &str, needle: &str) -> u32 {
     panic!("fixture should contain target text");
 }
 
-fn open_source_perf_window(
-    app: &mut TestApp,
-    text: &str,
-) -> gpui::TestAppWindow<MarkdownEditor> {
+fn open_source_perf_window(app: &mut TestApp, text: &str) -> gpui::TestAppWindow<MarkdownEditor> {
     let text = text.to_string();
     let mut window = app.open_window(move |_, cx| MarkdownEditor::for_text(text.clone(), cx));
     window.simulate_resize(size(px(PERF_WINDOW_WIDTH), px(PERF_WINDOW_HEIGHT)));
     window
 }
 
-fn open_rendered_perf_window(
-    app: &mut TestApp,
-    text: &str,
-) -> gpui::TestAppWindow<MarkdownEditor> {
+fn open_rendered_perf_window(app: &mut TestApp, text: &str) -> gpui::TestAppWindow<MarkdownEditor> {
     let text = text.to_string();
     let mut window = app.open_window(move |_, cx| {
         let mut editor = MarkdownEditor::for_text(text.to_string(), cx);
@@ -127,12 +120,17 @@ fn replace_middle_row_word(
         editor.selection = previous_selection.clone();
         let row_count_before = editor.display_list_state.item_count();
         let buffer_len_before = editor.buffer.len();
-        let (selection, transaction_id) = replace_selection(&mut editor.buffer, &editor.selection, to);
+        let (selection, transaction_id) =
+            replace_selection(&mut editor.buffer, &editor.selection, to);
         let changed = transaction_id.is_some();
         let byte_delta = buffer_byte_delta(buffer_len_before, editor.buffer.len());
 
         editor.selection = selection;
-        editor.record_selection_history(transaction_id, previous_selection.clone(), editor.selection.clone());
+        editor.record_selection_history(
+            transaction_id,
+            previous_selection.clone(),
+            editor.selection.clone(),
+        );
         editor.notify_after_edit(
             changed,
             row_count_before,

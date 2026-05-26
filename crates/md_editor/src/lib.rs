@@ -1,4 +1,8 @@
-use std::{collections::HashMap, ops::Range, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Range,
+    sync::Arc,
+};
 
 #[cfg(test)]
 use gpui::FontWeight;
@@ -42,20 +46,20 @@ use edit::{
     backspace_selection_in_mode, current_line_indent_in_text_snapshot, delete_selection_in_mode,
 };
 use inline_atom::{
-    DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, INLINE_IMAGE_PLACEHOLDER,
+    DisplayInlineAtom, DisplayInlineAtomKind, DisplayInlineFragment, DisplayInlineRowInputs,
+    INLINE_IMAGE_PLACEHOLDER, InlineAtomMeasurementKey, InlineAtomMeasurementState,
     render_text_piece,
 };
 #[cfg(test)]
 use inline_atom::{
-    DisplayInlineAtomKind, INLINE_IMAGE_ATOM_MAX_WIDTH, INLINE_IMAGE_ATOM_SIZE,
-    INLINE_MATH_ATOM_EXTRA_HEIGHT, INLINE_MATH_ATOM_HORIZONTAL_PADDING,
-    inline_image_atom_size_for_size,
+    INLINE_IMAGE_ATOM_MAX_WIDTH, INLINE_IMAGE_ATOM_SIZE, INLINE_MATH_ATOM_EXTRA_HEIGHT,
+    INLINE_MATH_ATOM_HORIZONTAL_PADDING, inline_image_atom_size_for_size,
 };
 use interaction::mouse_target_for_text_layout;
 use layout::{
-    DisplayRowCacheKey, DisplayRowLayout, DisplayRowProjectionState, DisplayRowTextLayout,
-    RowLayoutCacheKey, VisualDisplayRow, compute_display_row_layout,
-    row_display_style_for_display_row, source_text_layout_for_display_row, text_wrap_width,
+    DisplayRowCacheKey, DisplayRowLayout, DisplayRowLayoutInputs, DisplayRowProjectionState,
+    DisplayRowTextLayout, RowLayoutCacheKey, RowLayoutInputCacheKey, VisualDisplayRow,
+    row_display_style_for_display_row, text_wrap_width,
 };
 #[cfg(test)]
 use layout::{
@@ -192,7 +196,12 @@ pub struct MarkdownEditor {
     settings: EditorSettings,
     last_text_wrap_width: Option<gpui::Pixels>,
     display_row_cache: HashMap<DisplayRowCacheKey, Arc<DisplayRow>>,
+    row_layout_input_cache: HashMap<RowLayoutInputCacheKey, DisplayRowLayoutInputs>,
     row_layout_cache: HashMap<RowLayoutCacheKey, DisplayRowLayout>,
+    inline_atom_measurement_cache: HashMap<InlineAtomMeasurementKey, InlineAtomMeasurementState>,
+    pending_inline_atom_rows: HashMap<InlineAtomMeasurementKey, HashSet<usize>>,
+    pending_inline_atom_remeasure_rows: HashSet<usize>,
+    inline_atom_remeasure_scheduled: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -235,7 +244,7 @@ struct LocalSourceEditInvalidation {
     byte_delta: Option<isize>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct RowDisplayStyle {
     min_height: gpui::Pixels,
     text_size: gpui::Pixels,
@@ -277,7 +286,12 @@ impl MarkdownEditor {
             settings: EditorSettings::default(),
             last_text_wrap_width: None,
             display_row_cache: HashMap::default(),
+            row_layout_input_cache: HashMap::default(),
             row_layout_cache: HashMap::default(),
+            inline_atom_measurement_cache: HashMap::default(),
+            pending_inline_atom_rows: HashMap::default(),
+            pending_inline_atom_remeasure_rows: HashSet::default(),
+            inline_atom_remeasure_scheduled: false,
         }
     }
 
@@ -1247,7 +1261,9 @@ impl MarkdownEditor {
         if changed {
             if let Some(invalidation) = local_source_edit_invalidation.as_ref() {
                 let version = self.buffer.as_text_snapshot().version().clone();
-                self.rekey_source_display_row_cache_for_local_edit(invalidation, version);
+                self.rekey_source_display_row_cache_for_local_edit(invalidation, version.clone());
+                self.rekey_source_row_layout_input_cache_for_local_edit(invalidation, version);
+                self.clear_row_layout_input_cache_for_rows(invalidation.rows.clone());
                 self.clear_row_layout_cache_for_rows(invalidation.rows.clone());
             } else {
                 self.clear_display_row_cache();

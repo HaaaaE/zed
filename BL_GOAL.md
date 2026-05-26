@@ -58,6 +58,10 @@
 - `ListState::with_default_size_hint` 为长的可变高度列表提供了默认的未测量行高，减少在行尚未测量前的滚动条塌陷和滚动位置抖动。
 - 宽度变化会清理编辑器行布局状态和过期的 selection goal，但不会触发额外的整列表重测，除 GPUI list 自身的宽度失效之外不增加额外 remeasure。
 - Source 模式下普通的单行编辑现在只会清理并重测被编辑那一行的缓存布局，并将可复用的 Source display-row cache entry 重新挂到新的 buffer version。长度变化的编辑只保留编辑之前的行，因为之后的 source range 可能整体偏移；长度不变的编辑则也会保留之后的行。Undo / redo 在 editor selection history 能证明该事务只发生在一个 Source row 上时，也会复用同样的局部失效逻辑；Rendered 编辑、跨行编辑、row-count 变化，以及没有 selection history 的事务仍然走保守路径。
+- Row layout 现在拆成宽度无关的 `DisplayRowLayoutInputs` 和宽度相关的 `DisplayRowLayout` 两层缓存。input cache 按 buffer version、source row、mode、active projection source ranges 和 row style 建 key，保存 display fragments、text runs、未换行 shaped line、inline atom keys 等中间产物；不同 wrap width 的 layout 可以复用同一份 row-local 输入，避免重复构建 fragments / text runs / shaped line。
+- Source 模式继续保持纯文本快路径：source display row 和 source layout inputs 都从 text snapshot 构建；在不需要 Rendered projection / inline atom 的路径上，不会为了 Source layout cache 命中而刷新 Markdown syntax tree。
+- Inline atom measurement 已从单纯的 `cacheable: bool` 升级为 keyed measurement state：`Ready(size)`、`Pending(fallback)`、`Invalid(fallback)`。measurement key 包含 atom kind、source range、descriptor 内容、fallback 内容、row style 和资源标识；行内图片 key 包含 URL，行内公式 key 包含 tex / fallback 内容。
+- `MarkdownEditor` 现在维护 inline atom measurement cache、pending atom row 集合和 deferred row remeasure 队列。渲染阶段发现 pending atom 变为最终尺寸或已缓存尺寸发生变化时，只清理对应 source row 的 row-layout cache，并通过下一帧回调执行 `remeasure_items(row..row+1)`，避免在 GPUI list layout / render 过程中 re-enter `ListState`。
 
 ### 模块形状与测试
 
@@ -68,11 +72,11 @@
 - Block row selection 现在会先经过共享的 rendered-element discovery 阶段，再 materialize `DisplayBlockLayout`，从而把独立图片处理隔离开，同时为未来非文本 block descriptor 留出接口，而不把它们纳入当前工作范围。
 - Rendered-element 边界与 active-range helper 现在都放在内部 `rendered_element` 模块里，降低了 `lib.rs` 中与非布局逻辑的耦合，同时保持 movement、selection reveal / hide 和 inactive rendered-element 行为不变。
 - `md_editor` 仍然需要继续做更多内部模块边界清理；`lib.rs` 现在仍承载 projection、row layout / cache、selection / movement、hit-testing、rendering 和大量测试。
-- 目前测试覆盖已经包括：wrapped movement、action-level Source wrapped keyboard movement、Rendered wrapped inline-image keyboard movement、Rendered wrapped inline-image keyboard selection extension、Rendered image / formula block keyboard boundary movement、Rendered image / formula block keyboard selection extension、Source display-row 与 render 快路径、Source wrapped mouse hit testing 与跨 visual row 的 shift-selection、Rendered marker reveal / hide 过渡、resize reflow、模式切换时 wrapped position 处理、visual-row bounds、rendered inline math、inline image、空 alt inline image、remote image block、block formula projection / detection / interaction、Rendered image block 与 formula block 的鼠标命中和 shift-selection、cache dependency key、range-local span query、source-row fast path、Source undo / redo 局部缓存失效、Rendered interaction layout caching、remote image block cacheability、snapshot sharing、default list size hint，以及 rendered image block 的 crash 路径。
+- 目前测试覆盖已经包括：wrapped movement、action-level Source wrapped keyboard movement、Rendered wrapped inline-image keyboard movement、Rendered wrapped inline-image keyboard selection extension、Rendered image / formula block keyboard boundary movement、Rendered image / formula block keyboard selection extension、Source display-row 与 render 快路径、Source wrapped mouse hit testing 与跨 visual row 的 shift-selection、Rendered marker reveal / hide 过渡、resize reflow、模式切换时 wrapped position 处理、visual-row bounds、rendered inline math、inline image、空 alt inline image、remote image block、block formula projection / detection / interaction、Rendered image block 与 formula block 的鼠标命中和 shift-selection、cache dependency key、range-local span query、source-row fast path、Source undo / redo 局部缓存失效、Rendered interaction layout caching、row layout input cache reuse、inline atom measurement key/state、pending inline image fallback cacheability、inline atom deferred row-local remeasure、remote image block cacheability、snapshot sharing、default list size hint，以及 rendered image block 的 crash 路径。
 
 ## 验证
 
-- 最近相关 crate 的检查已经通过，包括 `cargo fmt -p markdown_wysiwyg -p md_editor`、`cargo check -p markdown_wysiwyg -p md_editor`、`cargo test -p markdown_wysiwyg -p md_editor`；当前 `markdown_wysiwyg` 为 17 个测试，`md_editor` 为 145 个测试。
+- 最近相关 crate 的检查已经通过，包括 `cargo fmt -p markdown_wysiwyg -p md_editor`、`cargo check -p markdown_wysiwyg -p md_editor`、`cargo test -p markdown_wysiwyg -p md_editor`；当前 `markdown_wysiwyg` 为 17 个测试，`md_editor` 为 149 个测试。
 - `md_editor` 的最小 profiling 入口现在也已经跑通：`release-fast + perf_enabled` 构建可编译，perf harness 能识别新增的 300KB 级 Markdown Source / Rendered 用例，并且在安装 `hyperfine` 后，`cargo perf-test -p md_editor -- --quiet` 已能产出首轮基线结果；当前一次迭代下，Rendered draw large markdown 约为 908.50ms，Source draw large markdown 约为 947.10ms。
 - 当前的聚焦测试覆盖已验证 wrapped movement、inline atom / image、source display-row / cache / render 快路径、Source edit 与 undo / redo 缓存失效、Rendered interaction layout caching、remote image block cacheability、default list size hint、Rendered image block 绘制与鼠标交互，以及 block formula 的 projection、边界移动、Shift-selection、Backspace / Delete 与鼠标命中。
 - 新补的回归确认了一个此前未覆盖的 Rendered wrapped-layout 缺口：当同一 source row 内的 inline image 让 visual row 从 atom 边界开始或结束时，`MoveDown` / `End` / `Home` 会继续保持当前 visual-row 语义，不会因为 rendered active-range 同步而意外退化到整条 source row 的行首/行尾语义。
@@ -86,9 +90,7 @@
 下面这些条目是类别，不代表优先级或执行顺序。
 
 - [暂不做 / Paused / 非当前优先] 用 300KB 级 Markdown 文件在 Source 和 Rendered 模式下做 profiling，定位剩余的 source-row-local 热点，再决定后续性能修改。
-  说明：这一项当前仍先不推进，不作为当前工作重点。现在已经完成为 `md_editor` 接现有 `cargo perf-test` / `#[perf]` 流程的最小入口、perf harness 识别和首轮基线运行，但这条 profiling 工作仍不切回主线；在下面两个 `[P1]` 项完成前，不继续围绕 profiling 结果展开后续优化。当前 perf 已覆盖纯文本 source-row 主线，mixed-content perf 仍 deferred，不纳入当前优先级结论。
-- [P1] 继续在 source-row 架构内做优化：降低 row layout 成本、减少 string / fragment churn、增强 row-layout cache 复用、缩小 remeasure 和缓存失效范围，并改善大但不过分极端文档的表现。
-- [P1] 将 inline atom 的 measurement 继续泛化，超出当前 inactive inline math atom 路径的假设范围；同时补上当未来 atom 内容可能在缓存后继续变尺寸时的失效机制。
+  说明：这一项当前仍先不推进，不作为当前工作重点。现在已经完成为 `md_editor` 接现有 `cargo perf-test` / `#[perf]` 流程的最小入口、perf harness 识别和首轮基线运行；两个 `[P1]` 项已经完成后，后续是否继续围绕 profiling 结果展开，需要按新的手工或 perf 证据重新定优先级。当前 perf 已覆盖纯文本 source-row 主线，mixed-content perf 仍 deferred，不纳入当前优先级结论。
 - [P2] 为 profiling 或手工使用中发现的剩余 visual-row 键盘移动缺口补更强的 runtime 或 visual tests。
 - [P2] 为 Rendered image / block 行为以及剩余 wrapped-layout 交互缺口补更强的 runtime 或 visual tests。
 

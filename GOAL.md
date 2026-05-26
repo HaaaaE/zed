@@ -394,3 +394,14 @@ cargo run -p markdown_editor --bin markdown-editor -- path\to\file.md
   - 光标 offset 通过 `snapshot.point_to_offset(selection.start)` 从 `text::BufferSnapshot` 获取。
 - 验收结果：`cargo check -p markdown_editor` 和 `cargo test -p markdown_wysiwyg` 通过。
 - 对后续目标的影响：光标靠近 marker 时字符级显示已实现。下一步可扩展 margin 范围、支持 drag freeze、扩展到 block 级内容（table/image/code fence）。
+
+### 2026-05-27 - Markdown 布局 P1：Row layout 输入缓存与 Inline atom 测量泛化
+
+- 对应目标：完成 `BL_GOAL.md` 中两个 P1：继续在 source-row 架构内降低 row-local layout 成本，并把 inline atom measurement 泛化为可扩展的状态、缓存键和局部失效机制。
+- 完成情况：
+  - `md_editor` 新增宽度无关的 row layout input cache，按 buffer version、row、mode、active projection source ranges 和 row style 缓存 display fragments、text runs、未换行 shaped line、inline atom measurement keys 等中间产物；既有 row layout cache 继续按 wrap width 缓存最终布局。
+  - Inline atom measurement 从 `cacheable: bool` 改为 `Ready(size)` / `Pending(fallback)` / `Invalid(fallback)` 状态，并新增稳定 key，覆盖 atom kind、source range、descriptor 内容、fallback 内容、row style 和资源标识。
+  - Rendered 阶段发现 pending atom 变为最终尺寸或已缓存尺寸变化时，只让受影响的 source row 清理 row-layout cache，并通过下一帧 deferred `remeasure_items(row..row+1)` 做局部重测，避免在 GPUI list layout / render 中 re-enter `ListState`。
+  - Source 模式的 display row 与 row layout input 继续走 text snapshot 快路径，不会因为纯文本 layout cache 复用刷新 Markdown syntax tree。
+- 验收结果：新增 row layout input cache 复用、Source syntax fast path、inline atom measurement key/state、pending inline image fallback、inline math ready cacheability 和 deferred row-local remeasure 回归；`cargo test -p md_editor` 通过，当前 149 个测试。
+- 对后续目标的影响：`BL_GOAL.md` 中这两个 P1 已完成。后续性能工作应回到 profiling / 手工证据驱动；更广义的 block GPUI 元素和真实公式渲染器仍不在当前完成范围内。

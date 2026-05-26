@@ -9,7 +9,7 @@ use super::{
     row_source_range, row_text, selection::HorizontalDirection, selection_byte_range,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) enum RenderedElementKind {
     Image {
         url: String,
@@ -24,13 +24,13 @@ pub(super) enum RenderedElementKind {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(super) enum RenderedElementPlacement {
     Inline,
     Block,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct RenderedElementDescriptor {
     pub(super) kind: RenderedElementKind,
     pub(super) placement: RenderedElementPlacement,

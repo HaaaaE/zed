@@ -82,6 +82,43 @@ fn source_interaction_layouts_cache_wrapped_text_rows(cx: &mut gpui::TestAppCont
 }
 
 #[gpui::test]
+fn source_layout_input_cache_reuses_width_independent_inputs_without_refreshing_syntax(
+    cx: &mut gpui::TestAppContext,
+) {
+    let cx = cx.add_empty_window();
+    let editor = cx.new(|cx| MarkdownEditor::for_text("# Heading and plain wrapped text\n", cx));
+
+    editor.update_in(cx, |editor, window, cx| {
+        let _snapshot = editor.buffer.snapshot();
+        let cached_syntax_version = editor.buffer.cached_syntax_version_for_tests();
+        assert!(editor.buffer.edit([(0..0, "Plain ")]).is_some());
+        assert_ne!(
+            editor.buffer.as_text_snapshot().version(),
+            &cached_syntax_version
+        );
+
+        let text_snapshot = editor.buffer.text_snapshot();
+        let display_row = editor
+            .cached_source_display_row(&text_snapshot, 0)
+            .expect("source row should exist");
+        let row_style = default_row_metrics().into();
+        let _ =
+            editor.cached_source_text_layout(&display_row, row_style, px(120.), false, window, cx);
+        assert_eq!(editor.row_layout_input_cache.len(), 1);
+        assert_eq!(editor.row_layout_cache.len(), 1);
+
+        let _ =
+            editor.cached_source_text_layout(&display_row, row_style, px(220.), false, window, cx);
+        assert_eq!(editor.row_layout_input_cache.len(), 1);
+        assert_eq!(editor.row_layout_cache.len(), 2);
+        assert_eq!(
+            editor.buffer.cached_syntax_version_for_tests(),
+            cached_syntax_version
+        );
+    });
+}
+
+#[gpui::test]
 fn rendered_interaction_layouts_cache_plain_text_rows(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     cx.simulate_resize(gpui::size(px(90.), px(200.)));
@@ -825,6 +862,36 @@ fn rendered_mode_draws_inline_image_atom(cx: &mut gpui::TestAppContext) {
 }
 
 #[gpui::test]
+fn rendered_inline_math_ready_measurement_makes_row_layout_cacheable(
+    cx: &mut gpui::TestAppContext,
+) {
+    let cx = cx.add_empty_window();
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("Before $x + y$ after", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(500.), px(120.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    editor.read_with(cx, |editor, _| {
+        assert_eq!(editor.row_layout_input_cache.len(), 1);
+        assert_eq!(editor.inline_atom_measurement_cache.len(), 1);
+        assert!(
+            editor
+                .inline_atom_measurement_cache
+                .values()
+                .all(|state| { matches!(state, InlineAtomMeasurementState::Ready(_)) })
+        );
+        assert_eq!(editor.row_layout_cache.len(), 1);
+    });
+}
+
+#[gpui::test]
 fn rendered_mode_does_not_cache_loading_inline_image_layout(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     let editor = cx.new(|cx| {
@@ -844,6 +911,10 @@ fn rendered_mode_does_not_cache_loading_inline_image_layout(cx: &mut gpui::TestA
         editor.read_with(cx, |editor, _| editor.row_layout_cache.len()),
         0
     );
+    editor.read_with(cx, |editor, _| {
+        assert_eq!(editor.inline_atom_measurement_cache.len(), 0);
+        assert_eq!(editor.pending_inline_atom_rows.len(), 1);
+    });
 }
 
 #[gpui::test]
@@ -861,6 +932,70 @@ fn rendered_mode_draws_empty_alt_inline_image_atom(cx: &mut gpui::TestAppContext
         gpui::size(px(500.), px(120.)),
         |_, _| editor.clone().into_any_element(),
     );
+}
+
+#[gpui::test]
+fn inline_atom_deferred_remeasure_only_clears_affected_row(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("first cached row\nsecond cached row\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let selection = editor.selection.clone();
+        let wrap_width = text_wrap_width(window);
+        for row in 0..2 {
+            let display_row = editor
+                .cached_display_row(&snapshot, row, editor.mode, &display_row_state)
+                .expect("display row should exist");
+            let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+            let _ = editor.cached_row_layout(
+                &snapshot,
+                &display_row,
+                &selection,
+                editor.mode,
+                row_style,
+                wrap_width,
+                false,
+                window,
+                cx,
+            );
+        }
+        assert_eq!(editor.row_layout_cache.len(), 2);
+
+        let row_style = default_row_metrics().into();
+        let key = InlineAtomMeasurementKey {
+            kind: DisplayInlineAtomKind::InlineMath,
+            source_range: 0..3,
+            descriptor: math_descriptor(0..3, "x"),
+            fallback_text: "x".to_string(),
+            row_style,
+            resource_id: None,
+        };
+        editor
+            .pending_inline_atom_rows
+            .entry(key.clone())
+            .or_default()
+            .insert(0);
+        editor.update_inline_atom_measurement_cache(
+            0,
+            key,
+            InlineAtomMeasurementState::Ready(gpui::size(px(40.), row_style.line_height)),
+            window,
+            cx,
+        );
+        assert!(editor.inline_atom_remeasure_scheduled);
+        assert_eq!(editor.row_layout_cache.len(), 2);
+
+        editor.flush_inline_atom_row_remeasures(cx);
+        assert!(!editor.row_layout_cache.keys().any(|key| key.row == 0));
+        assert!(editor.row_layout_cache.keys().any(|key| key.row == 1));
+    });
 }
 
 #[test]
