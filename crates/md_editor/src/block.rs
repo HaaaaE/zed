@@ -18,13 +18,13 @@ use super::{
 pub(super) const RENDERED_IMAGE_BLOCK_MAX_WIDTH: gpui::Pixels = px(600.);
 pub(super) const RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT: gpui::Pixels = px(120.);
 pub(super) const RENDERED_IMAGE_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(4.);
-pub(super) const RENDERED_FENCED_CODE_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(4.);
-pub(super) const RENDERED_FENCED_CODE_BLOCK_HORIZONTAL_PADDING: gpui::Pixels = px(8.);
+pub(super) const RENDERED_GENERIC_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(4.);
+pub(super) const RENDERED_GENERIC_BLOCK_HORIZONTAL_PADDING: gpui::Pixels = px(8.);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum DisplayBlockKind {
     RemoteImage(RenderedImageBlock),
-    FencedCode(RenderedFencedCodeBlock),
+    Generic(RenderedGenericBlock),
 }
 
 impl DisplayBlockKind {
@@ -37,8 +37,8 @@ impl DisplayBlockKind {
         rendered_image_block_for_row(snapshot, display_row, selection, mode)
             .map(Self::RemoteImage)
             .or_else(|| {
-                rendered_fenced_code_block_for_row(snapshot, display_row, selection, mode)
-                    .map(Self::FencedCode)
+                rendered_generic_block_for_row(snapshot, display_row, selection, mode)
+                    .map(Self::Generic)
             })
     }
 
@@ -53,8 +53,8 @@ impl DisplayBlockKind {
             Self::RemoteImage(image_block) => DisplayBlockLayout::RemoteImage(
                 RenderedImageBlockLayout::new(image_block, wrap_width, window, cx),
             ),
-            Self::FencedCode(code_block) => DisplayBlockLayout::FencedCode(
-                RenderedFencedCodeBlockLayout::new(code_block, wrap_width, row_style),
+            Self::Generic(generic_block) => DisplayBlockLayout::Generic(
+                RenderedGenericBlockLayout::new(generic_block, wrap_width, row_style),
             ),
         }
     }
@@ -63,7 +63,7 @@ impl DisplayBlockKind {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum DisplayBlockLayout {
     RemoteImage(RenderedImageBlockLayout),
-    FencedCode(RenderedFencedCodeBlockLayout),
+    Generic(RenderedGenericBlockLayout),
 }
 
 impl DisplayBlockLayout {
@@ -84,21 +84,21 @@ impl DisplayBlockLayout {
     pub(super) fn height(&self) -> gpui::Pixels {
         match self {
             Self::RemoteImage(image_layout) => image_layout.height(),
-            Self::FencedCode(code_layout) => code_layout.height(),
+            Self::Generic(generic_layout) => generic_layout.height(),
         }
     }
 
     pub(super) fn cacheable(&self) -> bool {
         match self {
             Self::RemoteImage(image_layout) => image_layout.cacheable(),
-            Self::FencedCode(code_layout) => code_layout.cacheable(),
+            Self::Generic(generic_layout) => generic_layout.cacheable(),
         }
     }
 
     pub(super) fn source_range(&self) -> &Range<usize> {
         match self {
             Self::RemoteImage(image_layout) => &image_layout.image_block.source_range,
-            Self::FencedCode(code_layout) => &code_layout.code_block.source_range,
+            Self::Generic(generic_layout) => &generic_layout.generic_block.source_range,
         }
     }
 
@@ -109,9 +109,9 @@ impl DisplayBlockLayout {
                 image_layout.width,
                 source_offset,
             ),
-            Self::FencedCode(code_layout) => image_block_visible_x_for_source_offset(
-                &code_layout.code_block.source_range,
-                code_layout.width,
+            Self::Generic(generic_layout) => image_block_visible_x_for_source_offset(
+                &generic_layout.generic_block.source_range,
+                generic_layout.width,
                 source_offset,
             ),
         }
@@ -122,9 +122,9 @@ impl DisplayBlockLayout {
             Self::RemoteImage(image_layout) => {
                 image_block_source_offset_for_x(&image_layout.image_block, image_layout.width, x)
             }
-            Self::FencedCode(code_layout) => block_source_offset_for_x(
-                &code_layout.code_block.source_range,
-                code_layout.width,
+            Self::Generic(generic_layout) => block_source_offset_for_x(
+                &generic_layout.generic_block.source_range,
+                generic_layout.width,
                 x,
             ),
         }
@@ -228,9 +228,9 @@ impl DisplayBlockLayout {
                     cx,
                 )]
             }
-            Self::FencedCode(code_layout) => {
-                vec![render_fenced_code_block(
-                    code_layout,
+            Self::Generic(generic_layout) => {
+                vec![render_generic_block(
+                    generic_layout,
                     selected,
                     caret_x,
                     row_style,
@@ -249,7 +249,7 @@ pub(super) struct RenderedImageBlock {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct RenderedFencedCodeBlock {
+pub(super) struct RenderedGenericBlock {
     pub(super) source_range: Range<usize>,
     pub(super) text: String,
 }
@@ -263,10 +263,10 @@ pub(super) struct RenderedImageBlockLayout {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct RenderedFencedCodeBlockLayout {
-    pub(super) code_block: RenderedFencedCodeBlock,
+pub(super) struct RenderedGenericBlockLayout {
+    pub(super) generic_block: RenderedGenericBlock,
     pub(super) width: gpui::Pixels,
-    pub(super) code_height: gpui::Pixels,
+    pub(super) content_height: gpui::Pixels,
 }
 
 impl RenderedImageBlockLayout {
@@ -310,21 +310,21 @@ impl RenderedImageBlockLayout {
     }
 }
 
-impl RenderedFencedCodeBlockLayout {
+impl RenderedGenericBlockLayout {
     pub(super) fn new(
-        code_block: RenderedFencedCodeBlock,
+        generic_block: RenderedGenericBlock,
         wrap_width: gpui::Pixels,
         row_style: RowDisplayStyle,
     ) -> Self {
         Self {
-            code_block,
+            generic_block,
             width: wrap_width.max(px(1.)),
-            code_height: row_style.line_height,
+            content_height: row_style.line_height,
         }
     }
 
     pub(super) fn height(&self) -> gpui::Pixels {
-        self.code_height + RENDERED_FENCED_CODE_BLOCK_VERTICAL_PADDING * 2.
+        self.content_height + RENDERED_GENERIC_BLOCK_VERTICAL_PADDING * 2.
     }
 
     pub(super) fn cacheable(&self) -> bool {
@@ -462,26 +462,26 @@ fn render_image_block(
         .into_any_element()
 }
 
-fn render_fenced_code_block(
-    code_layout: RenderedFencedCodeBlockLayout,
+fn render_generic_block(
+    generic_layout: RenderedGenericBlockLayout,
     selected: bool,
     caret_x: Option<gpui::Pixels>,
     row_style: RowDisplayStyle,
     cx: &mut Context<MarkdownEditor>,
 ) -> gpui::AnyElement {
     let palette = editor_palette();
-    let mouse_down_block_layout = DisplayBlockLayout::FencedCode(code_layout.clone());
+    let mouse_down_block_layout = DisplayBlockLayout::Generic(generic_layout.clone());
     let mouse_move_block_layout = mouse_down_block_layout.clone();
-    let code_block = code_layout.code_block;
-    let text = if code_block.text.is_empty() {
+    let generic_block = generic_layout.generic_block;
+    let text = if generic_block.text.is_empty() {
         " ".to_string()
     } else {
-        code_block.text
+        generic_block.text
     };
 
     div()
         .w_full()
-        .py(RENDERED_FENCED_CODE_BLOCK_VERTICAL_PADDING)
+        .py(RENDERED_GENERIC_BLOCK_VERTICAL_PADDING)
         .relative()
         .when(selected, |this| {
             this.bg(palette.selection_background.opacity(0.20))
@@ -497,9 +497,9 @@ fn render_fenced_code_block(
         }))
         .child(
             div()
-                .w(code_layout.width)
-                .h(code_layout.code_height)
-                .px(RENDERED_FENCED_CODE_BLOCK_HORIZONTAL_PADDING)
+                .w(generic_layout.width)
+                .h(generic_layout.content_height)
+                .px(RENDERED_GENERIC_BLOCK_HORIZONTAL_PADDING)
                 .rounded_md()
                 .border_1()
                 .border_color(if selected {
@@ -567,12 +567,12 @@ pub(super) fn rendered_image_block_for_row(
     })
 }
 
-pub(super) fn rendered_fenced_code_block_for_row(
+pub(super) fn rendered_generic_block_for_row(
     snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
-) -> Option<RenderedFencedCodeBlock> {
+) -> Option<RenderedGenericBlock> {
     if mode != MarkdownEditorMode::Rendered {
         return None;
     }
@@ -592,7 +592,7 @@ pub(super) fn rendered_fenced_code_block_for_row(
         return None;
     }
 
-    Some(RenderedFencedCodeBlock {
+    Some(RenderedGenericBlock {
         source_range: row_source_range.clone(),
         text: display_row.text.trim_end_matches(['\r', '\n']).to_string(),
     })

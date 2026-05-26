@@ -20,11 +20,10 @@ mod inline_atom;
 use block::DisplayBlockLayout;
 #[cfg(test)]
 use block::{
-    RENDERED_FENCED_CODE_BLOCK_VERTICAL_PADDING, RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT,
-    RENDERED_IMAGE_BLOCK_VERTICAL_PADDING, RenderedFencedCodeBlock, RenderedFencedCodeBlockLayout,
+    RENDERED_GENERIC_BLOCK_VERTICAL_PADDING, RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT,
+    RENDERED_IMAGE_BLOCK_VERTICAL_PADDING, RenderedGenericBlock, RenderedGenericBlockLayout,
     RenderedImageBlock, RenderedImageBlockLayout, image_block_height_for_size,
-    image_block_source_offset_for_x, rendered_fenced_code_block_for_row,
-    rendered_image_block_for_row,
+    image_block_source_offset_for_x, rendered_generic_block_for_row, rendered_image_block_for_row,
 };
 use inline_atom::{
     DisplayInlineAtom, DisplayInlineAtomKind, DisplayInlineFragment, DisplayInlineRowInputs,
@@ -4902,17 +4901,14 @@ mod tests {
         })
     }
 
-    fn fenced_code_block_layout(
-        source_range: Range<usize>,
-        width: gpui::Pixels,
-    ) -> DisplayBlockLayout {
-        DisplayBlockLayout::FencedCode(RenderedFencedCodeBlockLayout {
-            code_block: RenderedFencedCodeBlock {
+    fn generic_block_layout(source_range: Range<usize>, width: gpui::Pixels) -> DisplayBlockLayout {
+        DisplayBlockLayout::Generic(RenderedGenericBlockLayout {
+            generic_block: RenderedGenericBlock {
                 source_range,
                 text: "let x = 1;".to_string(),
             },
             width,
-            code_height: px(22.),
+            content_height: px(22.),
         })
     }
 
@@ -6597,7 +6593,7 @@ mod tests {
     }
 
     #[test]
-    fn rendered_fenced_code_block_detects_inactive_row() {
+    fn rendered_generic_block_detects_inactive_row() {
         let source = "```rust\nlet x = 1;\n```\nnext\n";
         let mut buffer = Buffer::local(source);
         let snapshot = buffer.snapshot();
@@ -6612,13 +6608,13 @@ mod tests {
 
         assert_eq!(row.text, "let x = 1;");
         assert_eq!(
-            rendered_fenced_code_block_for_row(
+            rendered_generic_block_for_row(
                 &snapshot,
                 &row,
                 &selection,
                 MarkdownEditorMode::Rendered
             ),
-            Some(RenderedFencedCodeBlock {
+            Some(RenderedGenericBlock {
                 source_range: source.find("let x = 1;").expect("code row start")
                     ..source.find("let x = 1;").expect("code row start") + "let x = 1;".len(),
                 text: "let x = 1;".to_string(),
@@ -6627,7 +6623,7 @@ mod tests {
     }
 
     #[test]
-    fn rendered_fenced_code_block_reveals_active_source() {
+    fn rendered_generic_block_reveals_active_source() {
         let source = "```rust\nlet x = 1;\n```\nnext\n";
         let mut buffer = Buffer::local(source);
         let snapshot = buffer.snapshot();
@@ -6643,7 +6639,7 @@ mod tests {
 
         assert_eq!(row.text, "let x = 1;");
         assert_eq!(
-            rendered_fenced_code_block_for_row(
+            rendered_generic_block_for_row(
                 &snapshot,
                 &row,
                 &selection,
@@ -6654,13 +6650,13 @@ mod tests {
     }
 
     #[test]
-    fn fenced_code_block_line_boundary_targets_source_edges() {
+    fn generic_block_line_boundary_targets_source_edges() {
         let source = "```rust\nlet x = 1;\n```\n";
         let mut buffer = Buffer::local(source);
         let snapshot = buffer.snapshot();
         let start = source.find("let x = 1;").expect("code row start");
         let end = start + "let x = 1;".len();
-        let block_layout = fenced_code_block_layout(start..end, px(240.));
+        let block_layout = generic_block_layout(start..end, px(240.));
 
         assert_eq!(
             block_layout.line_boundary_target(&snapshot, VisualLineBoundary::Start),
@@ -6676,19 +6672,19 @@ mod tests {
     }
 
     #[test]
-    fn fenced_code_block_layout_height_includes_vertical_padding() {
-        let layout = RenderedFencedCodeBlockLayout {
-            code_block: RenderedFencedCodeBlock {
+    fn generic_block_layout_height_includes_vertical_padding() {
+        let layout = RenderedGenericBlockLayout {
+            generic_block: RenderedGenericBlock {
                 source_range: 8..18,
                 text: "let x = 1;".to_string(),
             },
             width: px(240.),
-            code_height: px(22.),
+            content_height: px(22.),
         };
 
         assert_eq!(
             layout.height(),
-            px(22.) + RENDERED_FENCED_CODE_BLOCK_VERTICAL_PADDING * 2.
+            px(22.) + RENDERED_GENERIC_BLOCK_VERTICAL_PADDING * 2.
         );
         assert!(layout.cacheable());
     }
