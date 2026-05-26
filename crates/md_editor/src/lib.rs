@@ -21,26 +21,28 @@ mod rendered_element;
 use block::DisplayBlockLayout;
 #[cfg(test)]
 use block::{
-    RENDERED_GENERIC_BLOCK_VERTICAL_PADDING, RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT,
-    RENDERED_IMAGE_BLOCK_VERTICAL_PADDING, RenderedGenericBlock, RenderedGenericBlockLayout,
+    RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT, RENDERED_IMAGE_BLOCK_VERTICAL_PADDING,
     RenderedImageBlock, RenderedImageBlockLayout, image_block_height_for_size,
-    image_block_source_offset_for_x, rendered_generic_block_for_row, rendered_image_block_for_row,
+    image_block_source_offset_for_x, rendered_image_block_for_row,
 };
 use inline_atom::{
-    DisplayInlineAtom, DisplayInlineAtomKind, DisplayInlineFragment, DisplayInlineRowInputs,
-    INLINE_IMAGE_PLACEHOLDER, render_text_piece,
+    DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, INLINE_IMAGE_PLACEHOLDER,
+    render_text_piece,
 };
 #[cfg(test)]
 use inline_atom::{
+    DisplayInlineAtomKind,
     INLINE_IMAGE_ATOM_MAX_WIDTH, INLINE_IMAGE_ATOM_SIZE, INLINE_MATH_ATOM_EXTRA_HEIGHT,
     INLINE_MATH_ATOM_HORIZONTAL_PADDING, inline_image_atom_size_for_size,
 };
 #[cfg(test)]
 use rendered_element::source_offset_is_rendered_element_boundary;
+#[cfg(test)]
+use rendered_element::{RenderedElementDescriptor, RenderedElementKind, RenderedElementPlacement};
 use rendered_element::{
     active_source_range_for_selection, inactive_rendered_element_source_ranges_for_selection,
-    rendered_element_range_at_cursor, rendered_element_source_range_is_active,
-    rendered_remote_image_span_is_block_in_row,
+    rendered_element_descriptor_for_inline_span_in_row, rendered_element_range_at_cursor,
+    rendered_element_source_range_is_active, rendered_remote_image_span_is_block_in_row,
 };
 
 gpui::actions!(
@@ -4301,25 +4303,14 @@ fn display_inline_row_inputs(
             continue;
         }
 
-        let inline_image_is_block = rendered_remote_image_span_is_block_in_row(
+        let atom = rendered_element_descriptor_for_inline_span_in_row(
             span,
             &display_row.source_text,
             row_source_range,
-        );
-        let atom =
-            DisplayInlineAtomKind::for_inline_span(span, inline_image_is_block).and_then(|kind| {
-                let style_kind = match kind {
-                    DisplayInlineAtomKind::InlineMath => MarkdownInlineKind::InlineMath,
-                    DisplayInlineAtomKind::InlineImage => MarkdownInlineKind::Image,
-                };
-                DisplayInlineAtom::from_span(
-                    display_row,
-                    span,
-                    kind,
-                    row_style,
-                    inline_style(style_kind),
-                )
-            });
+        )
+        .and_then(|descriptor| {
+            DisplayInlineAtom::from_descriptor(display_row, descriptor, row_style)
+        });
         if let Some(atom) = atom {
             inputs.atom_ranges.push(atom);
         }
@@ -4672,28 +4663,58 @@ fn merge_overlapping_row_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usiz
 mod tests {
     use super::*;
 
+    fn image_descriptor(
+        source_range: Range<usize>,
+        url: impl Into<String>,
+        alt_text: impl Into<String>,
+        placement: RenderedElementPlacement,
+    ) -> RenderedElementDescriptor {
+        RenderedElementDescriptor {
+            kind: RenderedElementKind::Image {
+                url: url.into(),
+                alt_text: alt_text.into(),
+            },
+            placement,
+            source_range,
+        }
+    }
+
+    fn math_descriptor(
+        source_range: Range<usize>,
+        tex: impl Into<String>,
+    ) -> RenderedElementDescriptor {
+        RenderedElementDescriptor {
+            kind: RenderedElementKind::Math { tex: tex.into() },
+            placement: RenderedElementPlacement::Inline,
+            source_range,
+        }
+    }
+
     fn image_block_layout(source_range: Range<usize>, width: gpui::Pixels) -> DisplayBlockLayout {
         DisplayBlockLayout::RemoteImage(RenderedImageBlockLayout {
-            image_block: RenderedImageBlock {
-                url: "https://example.com/cat.png".to_string(),
-                alt_text: "alt".to_string(),
-                source_range,
-            },
+            image_block: rendered_image_block(source_range, "alt"),
             width,
             image_height: px(120.),
             cacheable: true,
         })
     }
 
-    fn generic_block_layout(source_range: Range<usize>, width: gpui::Pixels) -> DisplayBlockLayout {
-        DisplayBlockLayout::Generic(RenderedGenericBlockLayout {
-            generic_block: RenderedGenericBlock {
-                source_range,
-                text: "let x = 1;".to_string(),
-            },
-            width,
-            content_height: px(22.),
-        })
+    fn rendered_image_block(
+        source_range: Range<usize>,
+        alt_text: impl Into<String>,
+    ) -> RenderedImageBlock {
+        let alt_text = alt_text.into();
+        RenderedImageBlock {
+            descriptor: image_descriptor(
+                source_range.clone(),
+                "https://example.com/cat.png",
+                alt_text.clone(),
+                RenderedElementPlacement::Block,
+            ),
+            url: "https://example.com/cat.png".to_string(),
+            alt_text,
+            source_range,
+        }
     }
 
     fn cached_row_text_for_current_selection(editor: &mut MarkdownEditor, row: usize) -> String {
@@ -5533,7 +5554,7 @@ mod tests {
             range == &bold_range && style.font_weight == Some(FontWeight::BOLD)
         }));
         assert!(inputs.atom_ranges.iter().any(|atom| {
-            atom.kind == DisplayInlineAtomKind::InlineMath
+            atom.kind() == DisplayInlineAtomKind::InlineMath
                 && atom.source_range == math_source_range
                 && atom.fallback_text == "x"
         }));
@@ -5596,7 +5617,7 @@ mod tests {
             })
             .expect("expected inline math atom fragment");
 
-        assert_eq!(atom.kind, DisplayInlineAtomKind::InlineMath);
+        assert_eq!(atom.kind(), DisplayInlineAtomKind::InlineMath);
         assert_eq!(atom.fallback_text, "x + y");
         assert_eq!(atom.display_range, 7..12);
         assert_eq!(
@@ -5638,7 +5659,7 @@ mod tests {
             })
             .expect("expected inline image atom fragment");
 
-        assert_eq!(atom.kind, DisplayInlineAtomKind::InlineImage);
+        assert_eq!(atom.kind(), DisplayInlineAtomKind::InlineImage);
         assert_eq!(atom.fallback_text, "alt");
         assert_eq!(
             atom.image_url.as_deref(),
@@ -5682,7 +5703,7 @@ mod tests {
             })
             .expect("expected empty-alt inline image atom fragment");
 
-        assert_eq!(atom.kind, DisplayInlineAtomKind::InlineImage);
+        assert_eq!(atom.kind(), DisplayInlineAtomKind::InlineImage);
         assert_eq!(atom.fallback_text, INLINE_IMAGE_PLACEHOLDER);
         assert_eq!(
             atom.image_url.as_deref(),
@@ -5767,7 +5788,7 @@ mod tests {
                 style: DisplayTextStyle::default(),
             }),
             DisplayInlineFragment::Atom(DisplayInlineAtom {
-                kind: DisplayInlineAtomKind::InlineMath,
+                descriptor: math_descriptor(8..15, "x + y"),
                 source_range: 8..15,
                 display_range: 7..12,
                 fallback_text: "x + y".to_string(),
@@ -5801,7 +5822,7 @@ mod tests {
     fn inline_atom_selected_state_requires_full_display_range() {
         let row_style: RowDisplayStyle = md_theme::default_row_metrics().into();
         let atom = DisplayInlineAtom {
-            kind: DisplayInlineAtomKind::InlineMath,
+            descriptor: math_descriptor(8..15, "x + y"),
             source_range: 8..15,
             display_range: 7..12,
             fallback_text: "x + y".to_string(),
@@ -5862,7 +5883,7 @@ mod tests {
                 style: DisplayTextStyle::default(),
             }),
             DisplayInlineFragment::Atom(DisplayInlineAtom {
-                kind: DisplayInlineAtomKind::InlineMath,
+                descriptor: math_descriptor(8..15, "x + y"),
                 source_range: 8..15,
                 display_range: 7..12,
                 fallback_text: "x + y".to_string(),
@@ -5907,7 +5928,12 @@ mod tests {
                 style: DisplayTextStyle::default(),
             }),
             DisplayInlineFragment::Atom(DisplayInlineAtom {
-                kind: DisplayInlineAtomKind::InlineImage,
+                descriptor: image_descriptor(
+                    7..42,
+                    "https://example.com/cat.png",
+                    "alt",
+                    RenderedElementPlacement::Inline,
+                ),
                 source_range: 7..42,
                 display_range: 7..10,
                 fallback_text: "alt".to_string(),
@@ -5954,7 +5980,12 @@ mod tests {
                 style: DisplayTextStyle::default(),
             }),
             DisplayInlineFragment::Atom(DisplayInlineAtom {
-                kind: DisplayInlineAtomKind::InlineImage,
+                descriptor: image_descriptor(
+                    7..39,
+                    "https://example.com/cat.png",
+                    "",
+                    RenderedElementPlacement::Inline,
+                ),
                 source_range: 7..39,
                 display_range: 7..placeholder_end,
                 fallback_text: INLINE_IMAGE_PLACEHOLDER.to_string(),
@@ -6020,7 +6051,7 @@ mod tests {
     #[test]
     fn atomic_wrap_boundary_keeps_inline_atom_on_one_visual_row() {
         let fragments = vec![DisplayInlineFragment::Atom(DisplayInlineAtom {
-            kind: DisplayInlineAtomKind::InlineMath,
+            descriptor: math_descriptor(8..15, "x + y"),
             source_range: 8..15,
             display_range: 7..12,
             fallback_text: "x + y".to_string(),
@@ -6044,7 +6075,7 @@ mod tests {
     #[test]
     fn inline_atom_x_position_snaps_to_nearest_boundary() {
         let atom = DisplayInlineAtom {
-            kind: DisplayInlineAtomKind::InlineMath,
+            descriptor: math_descriptor(8..15, "x + y"),
             source_range: 8..15,
             display_range: 7..12,
             fallback_text: "x + y".to_string(),
@@ -6272,11 +6303,7 @@ mod tests {
         assert_eq!(row.text, "alt");
         assert_eq!(
             rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
-            Some(RenderedImageBlock {
-                url: "https://example.com/cat.png".to_string(),
-                alt_text: "alt".to_string(),
-                source_range: 0..35,
-            })
+            Some(rendered_image_block(0..35, "alt"))
         );
     }
 
@@ -6304,11 +6331,7 @@ mod tests {
                     &selection,
                     MarkdownEditorMode::Rendered
                 ),
-                Some(RenderedImageBlock {
-                    url: "https://example.com/cat.png".to_string(),
-                    alt_text: "alt".to_string(),
-                    source_range: 0..image_source_end,
-                })
+                Some(rendered_image_block(0..image_source_end, "alt"))
             );
         }
     }
@@ -6336,11 +6359,7 @@ mod tests {
         assert_eq!(row.text, "alt");
         assert_eq!(
             rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
-            Some(RenderedImageBlock {
-                url: "https://example.com/cat.png".to_string(),
-                alt_text: "alt".to_string(),
-                source_range: 0..image_source_end,
-            })
+            Some(rendered_image_block(0..image_source_end, "alt"))
         );
     }
 
@@ -6368,16 +6387,15 @@ mod tests {
         assert_eq!(row.text, "alt");
         assert_eq!(
             rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
-            Some(RenderedImageBlock {
-                url: "https://example.com/cat.png".to_string(),
-                alt_text: "alt".to_string(),
-                source_range: image_source_start..image_source_start + image_source.len(),
-            })
+            Some(rendered_image_block(
+                image_source_start..image_source_start + image_source.len(),
+                "alt",
+            ))
         );
     }
 
     #[test]
-    fn rendered_generic_block_detects_inactive_row() {
+    fn fenced_code_stays_text_layout_in_rendered_mode() {
         let source = "```rust\nlet x = 1;\n```\nnext\n";
         let mut buffer = Buffer::local(source);
         let snapshot = buffer.snapshot();
@@ -6391,86 +6409,59 @@ mod tests {
         .remove(0);
 
         assert_eq!(row.text, "let x = 1;");
-        assert_eq!(
-            rendered_generic_block_for_row(
-                &snapshot,
-                &row,
-                &selection,
-                MarkdownEditorMode::Rendered
-            ),
-            Some(RenderedGenericBlock {
-                source_range: source.find("let x = 1;").expect("code row start")
-                    ..source.find("let x = 1;").expect("code row start") + "let x = 1;".len(),
-                text: "let x = 1;".to_string(),
-            })
+        assert!(
+            rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered)
+                .is_none()
+        );
+
+        let row_style =
+            row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
+        let fragments = display_fragments_for_text_layout(
+            &snapshot,
+            &row,
+            MarkdownEditorMode::Rendered,
+            row_style,
+        );
+        assert!(
+            fragments
+                .iter()
+                .all(|fragment| matches!(fragment, DisplayInlineFragment::Text(_)))
         );
     }
 
     #[test]
-    fn rendered_generic_block_reveals_active_source() {
-        let source = "```rust\nlet x = 1;\n```\nnext\n";
+    fn pipe_table_stays_text_layout_in_rendered_mode() {
+        let source = "| a | b |\n| - | - |\n| 1 | 2 |\n";
         let mut buffer = Buffer::local(source);
         let snapshot = buffer.snapshot();
-        let code_col = "```rust\nlet ".len();
-        let selection = collapsed_selection(Point::new(1, code_col as u32));
+        let selection = collapsed_selection(Point::new(2, 0));
         let row = display_rows_in_mode(
             &snapshot,
-            1..2,
+            2..3,
             Some(&selection),
             MarkdownEditorMode::Rendered,
         )
         .remove(0);
 
-        assert_eq!(row.text, "let x = 1;");
-        assert_eq!(
-            rendered_generic_block_for_row(
-                &snapshot,
-                &row,
-                &selection,
-                MarkdownEditorMode::Rendered
-            ),
-            None
+        assert_eq!(row.text, "| 1 | 2 |");
+        assert!(
+            rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered)
+                .is_none()
         );
-    }
 
-    #[test]
-    fn generic_block_line_boundary_targets_source_edges() {
-        let source = "```rust\nlet x = 1;\n```\n";
-        let mut buffer = Buffer::local(source);
-        let snapshot = buffer.snapshot();
-        let start = source.find("let x = 1;").expect("code row start");
-        let end = start + "let x = 1;".len();
-        let block_layout = generic_block_layout(start..end, px(240.));
-
-        assert_eq!(
-            block_layout.line_boundary_target(&snapshot, VisualLineBoundary::Start),
-            (Point::new(1, 0), visual_horizontal_goal(0, px(0.)))
+        let row_style =
+            row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
+        let fragments = display_fragments_for_text_layout(
+            &snapshot,
+            &row,
+            MarkdownEditorMode::Rendered,
+            row_style,
         );
-        assert_eq!(
-            block_layout.line_boundary_target(&snapshot, VisualLineBoundary::End),
-            (
-                Point::new(1, "let x = 1;".len() as u32),
-                visual_horizontal_goal(0, px(240.))
-            )
+        assert!(
+            fragments
+                .iter()
+                .all(|fragment| matches!(fragment, DisplayInlineFragment::Text(_)))
         );
-    }
-
-    #[test]
-    fn generic_block_layout_height_includes_vertical_padding() {
-        let layout = RenderedGenericBlockLayout {
-            generic_block: RenderedGenericBlock {
-                source_range: 8..18,
-                text: "let x = 1;".to_string(),
-            },
-            width: px(240.),
-            content_height: px(22.),
-        };
-
-        assert_eq!(
-            layout.height(),
-            px(22.) + RENDERED_GENERIC_BLOCK_VERTICAL_PADDING * 2.
-        );
-        assert!(layout.cacheable());
     }
 
     #[test]
@@ -6549,11 +6540,7 @@ mod tests {
 
     #[test]
     fn image_block_local_x_maps_to_source_range_edges() {
-        let image_block = RenderedImageBlock {
-            url: "https://example.com/cat.png".to_string(),
-            alt_text: "alt".to_string(),
-            source_range: 4..39,
-        };
+        let image_block = rendered_image_block(4..39, "alt");
 
         assert_eq!(
             image_block_source_offset_for_x(&image_block, px(200.), px(0.)),
@@ -6633,11 +6620,7 @@ mod tests {
     #[test]
     fn image_block_layout_height_includes_vertical_padding() {
         let image_layout = RenderedImageBlockLayout {
-            image_block: RenderedImageBlock {
-                url: "https://example.com/cat.png".to_string(),
-                alt_text: "alt".to_string(),
-                source_range: 4..39,
-            },
+            image_block: rendered_image_block(4..39, "alt"),
             width: px(200.),
             image_height: px(120.),
             cacheable: true,
@@ -6652,11 +6635,7 @@ mod tests {
 
     #[test]
     fn image_block_layout_cacheability_tracks_loaded_size() {
-        let image_block = RenderedImageBlock {
-            url: "https://example.com/cat.png".to_string(),
-            alt_text: "alt".to_string(),
-            source_range: 4..39,
-        };
+        let image_block = rendered_image_block(4..39, "alt");
         let loaded_layout =
             DisplayRowLayout::Block(DisplayBlockLayout::RemoteImage(RenderedImageBlockLayout {
                 image_block: image_block.clone(),
@@ -6735,7 +6714,7 @@ mod tests {
     }
 
     #[test]
-    fn rendered_inline_image_boundary_reveals_source() {
+    fn rendered_inline_image_boundary_stays_inactive() {
         let mut buffer = Buffer::local("before ![alt](https://example.com/cat.png) after\n");
         let snapshot = buffer.snapshot();
         let image_start = "before ".len();
@@ -6748,7 +6727,7 @@ mod tests {
         )
         .remove(0);
 
-        assert_eq!(row.text, "before ![alt](https://example.com/cat.png) after");
+        assert_eq!(row.text, "before alt after");
         assert_eq!(
             rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
             None
@@ -6756,7 +6735,7 @@ mod tests {
     }
 
     #[test]
-    fn rendered_inline_image_whole_selection_reveals_source() {
+    fn rendered_inline_image_whole_selection_stays_inactive() {
         let mut buffer = Buffer::local("before ![alt](https://example.com/cat.png) after\n");
         let snapshot = buffer.snapshot();
         let image_start = "before ".len();
@@ -6776,7 +6755,7 @@ mod tests {
         )
         .remove(0);
 
-        assert_eq!(row.text, "before ![alt](https://example.com/cat.png) after");
+        assert_eq!(row.text, "before alt after");
         assert_eq!(
             rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
             None
@@ -7001,10 +6980,11 @@ mod tests {
     }
 
     #[test]
-    fn rendered_horizontal_movement_keeps_inline_image_source_editable() {
+    fn rendered_horizontal_movement_skips_inactive_inline_image() {
         let mut buffer = Buffer::local("before ![alt](https://example.com/cat.png) after\n");
         let snapshot = buffer.snapshot();
         let image_start = "before ".len();
+        let image_end = "before ![alt](https://example.com/cat.png)".len();
 
         assert_eq!(
             move_horizontal_in_mode(
@@ -7013,7 +6993,16 @@ mod tests {
                 MarkdownEditorMode::Rendered,
                 HorizontalDirection::Right,
             ),
-            Point::new(0, image_start as u32 + 1)
+            Point::new(0, image_end as u32)
+        );
+        assert_eq!(
+            move_horizontal_in_mode(
+                &snapshot,
+                Point::new(0, image_end as u32),
+                MarkdownEditorMode::Rendered,
+                HorizontalDirection::Left,
+            ),
+            Point::new(0, image_start as u32)
         );
     }
 
@@ -8222,7 +8211,7 @@ mod tests {
     }
 
     #[test]
-    fn rendered_delete_keeps_inline_image_source_character_movement() {
+    fn rendered_delete_deletes_next_inactive_inline_image() {
         let mut buffer = Buffer::local("before ![alt](https://example.com/cat.png) after\n");
         let image_start = "before ".len();
         let selection = collapsed_selection(Point::new(0, image_start as u32));
@@ -8230,10 +8219,7 @@ mod tests {
         let (selection, transaction_id) =
             delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
 
-        assert_eq!(
-            buffer.text(),
-            "before [alt](https://example.com/cat.png) after\n"
-        );
+        assert_eq!(buffer.text(), "before  after\n");
         assert_eq!(
             selection,
             collapsed_selection(Point::new(0, image_start as u32))

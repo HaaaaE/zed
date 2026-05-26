@@ -4,11 +4,13 @@ use gpui::{
     App, ImgResourceLoader, IntoElement, LineFragment, Resource, SharedString, Window, div, img,
     prelude::*, px,
 };
-use markdown_wysiwyg::{MarkdownInlineKind, MarkdownInlineSpan};
 use md_assets::EDITOR_FONT_FAMILY;
 use md_theme::editor_palette;
 
-use super::{DisplayRow, DisplayTextStyle, RowDisplayStyle, StyledDisplaySegment};
+use super::{
+    DisplayRow, DisplayTextStyle, RowDisplayStyle, StyledDisplaySegment, inline_style,
+    rendered_element::{RenderedElementDescriptor, RenderedElementKind, RenderedElementPlacement},
+};
 
 pub(super) const INLINE_MATH_ATOM_EXTRA_HEIGHT: gpui::Pixels = px(4.);
 pub(super) const INLINE_MATH_ATOM_HORIZONTAL_PADDING: gpui::Pixels = px(4.);
@@ -30,7 +32,7 @@ pub(super) struct DisplayInlineRowInputs {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct DisplayInlineAtom {
-    pub(super) kind: DisplayInlineAtomKind,
+    pub(super) descriptor: RenderedElementDescriptor,
     pub(super) source_range: Range<usize>,
     pub(super) display_range: Range<usize>,
     pub(super) fallback_text: String,
@@ -53,14 +55,15 @@ pub(super) enum DisplayInlineAtomKind {
 }
 
 impl DisplayInlineAtomKind {
-    pub(super) fn for_inline_span(
-        span: &MarkdownInlineSpan,
-        inline_image_is_block: bool,
-    ) -> Option<Self> {
-        match span.kind {
-            MarkdownInlineKind::InlineMath => Some(Self::InlineMath),
-            MarkdownInlineKind::Image if !inline_image_is_block => Some(Self::InlineImage),
-            _ => None,
+    pub(super) fn for_descriptor(descriptor: &RenderedElementDescriptor) -> Option<Self> {
+        if descriptor.placement != RenderedElementPlacement::Inline {
+            return None;
+        }
+
+        match descriptor.kind {
+            RenderedElementKind::Math { .. } => Some(Self::InlineMath),
+            RenderedElementKind::Image { .. } => Some(Self::InlineImage),
+            RenderedElementKind::Custom { .. } => None,
         }
     }
 
@@ -87,6 +90,11 @@ impl DisplayInlineAtomKind {
 }
 
 impl DisplayInlineAtom {
+    pub(super) fn kind(&self) -> DisplayInlineAtomKind {
+        DisplayInlineAtomKind::for_descriptor(&self.descriptor)
+            .expect("inline atom descriptor must map to an atom kind")
+    }
+
     pub(super) fn fallback_size(
         &self,
         shaped_line: &gpui::ShapedLine,
@@ -94,8 +102,8 @@ impl DisplayInlineAtom {
     ) -> gpui::Size<gpui::Pixels> {
         let content_width = self.fallback_content_width(shaped_line);
         gpui::size(
-            self.kind.width_for_content(content_width),
-            self.kind.height(row_style),
+            self.kind().width_for_content(content_width),
+            self.kind().height(row_style),
         )
     }
 
@@ -112,7 +120,7 @@ impl DisplayInlineAtom {
         window: &mut Window,
         cx: &mut App,
     ) -> DisplayInlineAtomMeasurement {
-        if self.kind == DisplayInlineAtomKind::InlineImage {
+        if self.kind() == DisplayInlineAtomKind::InlineImage {
             return self.measure_inline_image_size(fallback_size, window, cx);
         }
 
@@ -199,7 +207,7 @@ impl DisplayInlineAtom {
         size: Option<gpui::Size<gpui::Pixels>>,
         selected: bool,
     ) -> gpui::AnyElement {
-        match self.kind {
+        match self.kind() {
             DisplayInlineAtomKind::InlineMath => {
                 let palette = editor_palette();
                 let mut style = self.style.clone();
@@ -208,7 +216,7 @@ impl DisplayInlineAtom {
                 }
                 let mut element = div()
                     .min_h(self.height)
-                    .px(self.kind.horizontal_padding())
+                    .px(self.kind().horizontal_padding())
                     .flex()
                     .items_center()
                     .font_family(EDITOR_FONT_FAMILY)
@@ -298,28 +306,33 @@ impl DisplayInlineAtom {
         }
     }
 
-    pub(super) fn from_span(
+    pub(super) fn from_descriptor(
         display_row: &DisplayRow,
-        span: &MarkdownInlineSpan,
-        kind: DisplayInlineAtomKind,
+        descriptor: RenderedElementDescriptor,
         row_style: RowDisplayStyle,
-        style: DisplayTextStyle,
     ) -> Option<Self> {
-        let display_range = display_row.source_to_display(span.source_range.start)
-            ..display_row.source_to_display(span.source_range.end);
+        let kind = DisplayInlineAtomKind::for_descriptor(&descriptor)?;
+        let display_range = display_row.source_to_display(descriptor.source_range.start)
+            ..display_row.source_to_display(descriptor.source_range.end);
         let fallback_text = display_row.text.get(display_range.clone())?.to_string();
         if fallback_text.is_empty() {
             return None;
         }
+        let image_url = match &descriptor.kind {
+            RenderedElementKind::Image { url, .. } => Some(url.clone()),
+            RenderedElementKind::Math { .. } | RenderedElementKind::Custom { .. } => None,
+        };
+        let style = inline_style(match kind {
+            DisplayInlineAtomKind::InlineMath => markdown_wysiwyg::MarkdownInlineKind::InlineMath,
+            DisplayInlineAtomKind::InlineImage => markdown_wysiwyg::MarkdownInlineKind::Image,
+        });
 
         Some(Self {
-            kind,
-            source_range: span.source_range.clone(),
+            source_range: descriptor.source_range.clone(),
+            descriptor,
             display_range,
             fallback_text,
-            image_url: (kind == DisplayInlineAtomKind::InlineImage)
-                .then_some(span.url.clone())
-                .flatten(),
+            image_url,
             style,
             height: kind.height(row_style),
             width: px(0.),

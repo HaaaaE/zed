@@ -9,6 +9,94 @@ use super::{
     ranges_overlap, row_source_range, row_text, selection_byte_range,
 };
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum RenderedElementKind {
+    Image { url: String, alt_text: String },
+    Math { tex: String },
+    #[allow(dead_code)]
+    Custom { key: String },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RenderedElementPlacement {
+    Inline,
+    Block,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct RenderedElementDescriptor {
+    pub(super) kind: RenderedElementKind,
+    pub(super) placement: RenderedElementPlacement,
+    pub(super) source_range: Range<usize>,
+}
+
+pub(super) fn rendered_element_descriptor_for_inline_span_in_row(
+    span: &MarkdownInlineSpan,
+    source_text: &str,
+    row_source_range: &Range<usize>,
+) -> Option<RenderedElementDescriptor> {
+    if span.marker_ranges.is_empty() || !range_contains(row_source_range, &span.source_range) {
+        return None;
+    }
+
+    match span.kind {
+        MarkdownInlineKind::InlineMath => Some(RenderedElementDescriptor {
+            kind: RenderedElementKind::Math {
+                tex: inline_span_content_text(span, source_text, row_source_range),
+            },
+            placement: RenderedElementPlacement::Inline,
+            source_range: span.source_range.clone(),
+        }),
+        MarkdownInlineKind::Image => {
+            let url = span.url.clone()?;
+            let placement = if rendered_remote_image_span_is_block_in_row(
+                span,
+                source_text,
+                row_source_range,
+            ) {
+                RenderedElementPlacement::Block
+            } else {
+                RenderedElementPlacement::Inline
+            };
+            Some(RenderedElementDescriptor {
+                kind: RenderedElementKind::Image {
+                    url,
+                    alt_text: inline_span_content_text(span, source_text, row_source_range),
+                },
+                placement,
+                source_range: span.source_range.clone(),
+            })
+        }
+        MarkdownInlineKind::Emphasis
+        | MarkdownInlineKind::Strong
+        | MarkdownInlineKind::InlineCode
+        | MarkdownInlineKind::Link
+        | MarkdownInlineKind::Strikethrough => None,
+    }
+}
+
+fn inline_span_content_text(
+    span: &MarkdownInlineSpan,
+    source_text: &str,
+    row_source_range: &Range<usize>,
+) -> String {
+    let mut text = String::new();
+    for content_range in &span.content_ranges {
+        let start = content_range.start.max(row_source_range.start);
+        let end = content_range.end.min(row_source_range.end);
+        if start >= end {
+            continue;
+        }
+
+        let local_start = start - row_source_range.start;
+        let local_end = end - row_source_range.start;
+        if let Some(content) = source_text.get(local_start..local_end) {
+            text.push_str(content);
+        }
+    }
+    text
+}
+
 pub(super) fn rendered_element_range_at_cursor(
     snapshot: &BufferSnapshot,
     cursor: Point,
@@ -24,7 +112,7 @@ pub(super) fn rendered_element_range_at_cursor(
             direction,
         )?)
         .find_map(|span| {
-            let source_range = rendered_element_source_range_for_span(snapshot, span)?;
+            let source_range = rendered_element_descriptor_for_span(snapshot, span)?.source_range;
             match direction {
                 HorizontalDirection::Left if source_offset == source_range.end => {
                     Some(source_range)
@@ -108,8 +196,8 @@ fn selection_range_is_whole_rendered_element(
         .syntax_tree()
         .inline_spans_in_source_range(selection_range.clone())
         .any(|span| {
-            rendered_element_source_range_for_span(snapshot, span)
-                .is_some_and(|source_range| &source_range == selection_range)
+            rendered_element_descriptor_for_span(snapshot, span)
+                .is_some_and(|descriptor| &descriptor.source_range == selection_range)
         })
 }
 
@@ -126,7 +214,10 @@ pub(super) fn inactive_rendered_element_source_ranges_for_selection(
     snapshot
         .syntax_tree()
         .inline_spans_in_source_range(selection_range.clone())
-        .filter_map(|span| rendered_element_source_range_for_span(snapshot, span))
+        .filter_map(|span| {
+            rendered_element_descriptor_for_span(snapshot, span)
+                .map(|descriptor| descriptor.source_range)
+        })
         .filter(|source_range| range_contains(&selection_range, source_range))
         .collect()
 }
@@ -162,41 +253,18 @@ pub(super) fn source_offset_is_rendered_element_boundary(
                 .syntax_tree()
                 .inline_spans_in_source_range(source_range)
                 .any(|span| {
-                    rendered_element_source_range_for_span(snapshot, span).is_some_and(
-                        |source_range| {
-                            source_range.start == source_offset || source_range.end == source_offset
-                        },
-                    )
+                    rendered_element_descriptor_for_span(snapshot, span).is_some_and(|descriptor| {
+                        descriptor.source_range.start == source_offset
+                            || descriptor.source_range.end == source_offset
+                    })
                 })
         })
 }
 
-fn rendered_element_source_range_for_span(
+fn rendered_element_descriptor_for_span(
     snapshot: &BufferSnapshot,
     span: &MarkdownInlineSpan,
-) -> Option<Range<usize>> {
-    if span.marker_ranges.is_empty() {
-        return None;
-    }
-
-    match span.kind {
-        MarkdownInlineKind::InlineMath => Some(span.source_range.clone()),
-        MarkdownInlineKind::Image if rendered_remote_image_span_is_block(snapshot, span) => {
-            Some(span.source_range.clone())
-        }
-        MarkdownInlineKind::Image
-        | MarkdownInlineKind::Emphasis
-        | MarkdownInlineKind::Strong
-        | MarkdownInlineKind::InlineCode
-        | MarkdownInlineKind::Link
-        | MarkdownInlineKind::Strikethrough => None,
-    }
-}
-
-fn rendered_remote_image_span_is_block(
-    snapshot: &BufferSnapshot,
-    span: &MarkdownInlineSpan,
-) -> bool {
+) -> Option<RenderedElementDescriptor> {
     let row = snapshot
         .as_text_snapshot()
         .offset_to_point(span.source_range.start)
@@ -204,7 +272,7 @@ fn rendered_remote_image_span_is_block(
     let row_source_range = row_source_range(snapshot, row);
     let source_text = row_text(snapshot, row);
 
-    rendered_remote_image_span_is_block_in_row(span, &source_text, &row_source_range)
+    rendered_element_descriptor_for_inline_span_in_row(span, &source_text, &row_source_range)
 }
 
 pub(super) fn rendered_remote_image_span_is_block_in_row(

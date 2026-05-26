@@ -4,27 +4,26 @@ use gpui::{
     App, Context, ImgResourceLoader, IntoElement, MouseButton, Resource, SharedString, Window, div,
     img, prelude::*, px,
 };
-use markdown_wysiwyg::{MarkdownBlockKind, MarkdownInlineKind};
 use md_buffer::BufferSnapshot;
 use md_text::{Point, Selection, SelectionGoal};
 use md_theme::{editor_palette, gutter_width};
 
+use super::rendered_element::{
+    RenderedElementDescriptor, RenderedElementKind, RenderedElementPlacement,
+};
 use super::{
     DisplayRow, MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, VisualLineBoundary,
-    clip_cursor, range_contains, ranges_overlap, rendered_element_source_range_is_active,
-    rendered_remote_image_span_is_block_in_row, selection_byte_range, visual_horizontal_goal,
+    clip_cursor, range_contains, rendered_element_descriptor_for_inline_span_in_row,
+    rendered_element_source_range_is_active, selection_byte_range, visual_horizontal_goal,
 };
 
 pub(super) const RENDERED_IMAGE_BLOCK_MAX_WIDTH: gpui::Pixels = px(600.);
 pub(super) const RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT: gpui::Pixels = px(120.);
 pub(super) const RENDERED_IMAGE_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(4.);
-pub(super) const RENDERED_GENERIC_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(4.);
-pub(super) const RENDERED_GENERIC_BLOCK_HORIZONTAL_PADDING: gpui::Pixels = px(8.);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum DisplayBlockKind {
     RemoteImage(RenderedImageBlock),
-    Generic(RenderedGenericBlock),
 }
 
 impl DisplayBlockKind {
@@ -34,27 +33,19 @@ impl DisplayBlockKind {
         selection: &Selection<Point>,
         mode: MarkdownEditorMode,
     ) -> Option<Self> {
-        rendered_image_block_for_row(snapshot, display_row, selection, mode)
-            .map(Self::RemoteImage)
-            .or_else(|| {
-                rendered_generic_block_for_row(snapshot, display_row, selection, mode)
-                    .map(Self::Generic)
-            })
+        rendered_image_block_for_row(snapshot, display_row, selection, mode).map(Self::RemoteImage)
     }
 
     fn into_layout(
         self,
         wrap_width: gpui::Pixels,
-        row_style: RowDisplayStyle,
+        _row_style: RowDisplayStyle,
         window: &mut Window,
         cx: &mut App,
     ) -> DisplayBlockLayout {
         match self {
             Self::RemoteImage(image_block) => DisplayBlockLayout::RemoteImage(
                 RenderedImageBlockLayout::new(image_block, wrap_width, window, cx),
-            ),
-            Self::Generic(generic_block) => DisplayBlockLayout::Generic(
-                RenderedGenericBlockLayout::new(generic_block, wrap_width, row_style),
             ),
         }
     }
@@ -63,7 +54,6 @@ impl DisplayBlockKind {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum DisplayBlockLayout {
     RemoteImage(RenderedImageBlockLayout),
-    Generic(RenderedGenericBlockLayout),
 }
 
 impl DisplayBlockLayout {
@@ -84,21 +74,18 @@ impl DisplayBlockLayout {
     pub(super) fn height(&self) -> gpui::Pixels {
         match self {
             Self::RemoteImage(image_layout) => image_layout.height(),
-            Self::Generic(generic_layout) => generic_layout.height(),
         }
     }
 
     pub(super) fn cacheable(&self) -> bool {
         match self {
             Self::RemoteImage(image_layout) => image_layout.cacheable(),
-            Self::Generic(generic_layout) => generic_layout.cacheable(),
         }
     }
 
     pub(super) fn source_range(&self) -> &Range<usize> {
         match self {
             Self::RemoteImage(image_layout) => &image_layout.image_block.source_range,
-            Self::Generic(generic_layout) => &generic_layout.generic_block.source_range,
         }
     }
 
@@ -109,11 +96,6 @@ impl DisplayBlockLayout {
                 image_layout.width,
                 source_offset,
             ),
-            Self::Generic(generic_layout) => image_block_visible_x_for_source_offset(
-                &generic_layout.generic_block.source_range,
-                generic_layout.width,
-                source_offset,
-            ),
         }
     }
 
@@ -122,11 +104,6 @@ impl DisplayBlockLayout {
             Self::RemoteImage(image_layout) => {
                 image_block_source_offset_for_x(&image_layout.image_block, image_layout.width, x)
             }
-            Self::Generic(generic_layout) => block_source_offset_for_x(
-                &generic_layout.generic_block.source_range,
-                generic_layout.width,
-                x,
-            ),
         }
     }
 
@@ -228,30 +205,16 @@ impl DisplayBlockLayout {
                     cx,
                 )]
             }
-            Self::Generic(generic_layout) => {
-                vec![render_generic_block(
-                    generic_layout,
-                    selected,
-                    caret_x,
-                    row_style,
-                    cx,
-                )]
-            }
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct RenderedImageBlock {
+    pub(super) descriptor: RenderedElementDescriptor,
     pub(super) url: String,
     pub(super) alt_text: String,
     pub(super) source_range: Range<usize>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct RenderedGenericBlock {
-    pub(super) source_range: Range<usize>,
-    pub(super) text: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -260,13 +223,6 @@ pub(super) struct RenderedImageBlockLayout {
     pub(super) width: gpui::Pixels,
     pub(super) image_height: gpui::Pixels,
     pub(super) cacheable: bool,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct RenderedGenericBlockLayout {
-    pub(super) generic_block: RenderedGenericBlock,
-    pub(super) width: gpui::Pixels,
-    pub(super) content_height: gpui::Pixels,
 }
 
 impl RenderedImageBlockLayout {
@@ -307,28 +263,6 @@ impl RenderedImageBlockLayout {
 
     pub(super) fn cacheable(&self) -> bool {
         self.cacheable
-    }
-}
-
-impl RenderedGenericBlockLayout {
-    pub(super) fn new(
-        generic_block: RenderedGenericBlock,
-        wrap_width: gpui::Pixels,
-        row_style: RowDisplayStyle,
-    ) -> Self {
-        Self {
-            generic_block,
-            width: wrap_width.max(px(1.)),
-            content_height: row_style.line_height,
-        }
-    }
-
-    pub(super) fn height(&self) -> gpui::Pixels {
-        self.content_height + RENDERED_GENERIC_BLOCK_VERTICAL_PADDING * 2.
-    }
-
-    pub(super) fn cacheable(&self) -> bool {
-        true
     }
 }
 
@@ -462,62 +396,6 @@ fn render_image_block(
         .into_any_element()
 }
 
-fn render_generic_block(
-    generic_layout: RenderedGenericBlockLayout,
-    selected: bool,
-    caret_x: Option<gpui::Pixels>,
-    row_style: RowDisplayStyle,
-    cx: &mut Context<MarkdownEditor>,
-) -> gpui::AnyElement {
-    let palette = editor_palette();
-    let mouse_down_block_layout = DisplayBlockLayout::Generic(generic_layout.clone());
-    let mouse_move_block_layout = mouse_down_block_layout.clone();
-    let generic_block = generic_layout.generic_block;
-    let text = if generic_block.text.is_empty() {
-        " ".to_string()
-    } else {
-        generic_block.text
-    };
-
-    div()
-        .w_full()
-        .py(RENDERED_GENERIC_BLOCK_VERTICAL_PADDING)
-        .relative()
-        .when(selected, |this| {
-            this.bg(palette.selection_background.opacity(0.20))
-        })
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, event, window, cx| {
-                this.mouse_left_down_on_block(&mouse_down_block_layout, event, window, cx)
-            }),
-        )
-        .on_mouse_move(cx.listener(move |this, event, window, cx| {
-            this.mouse_move_on_block(&mouse_move_block_layout, event, window, cx)
-        }))
-        .child(
-            div()
-                .w(generic_layout.width)
-                .h(generic_layout.content_height)
-                .px(RENDERED_GENERIC_BLOCK_HORIZONTAL_PADDING)
-                .rounded_md()
-                .border_1()
-                .border_color(if selected {
-                    palette.selection_background
-                } else {
-                    palette.gutter_text
-                })
-                .bg(palette.fenced_code_background)
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .child(SharedString::from(text)),
-        )
-        .when_some(caret_x, |this, caret_x| {
-            this.child(caret_element(caret_x, row_style))
-        })
-        .into_any_element()
-}
-
 fn caret_element(caret_x: gpui::Pixels, row_style: RowDisplayStyle) -> gpui::AnyElement {
     let palette = editor_palette();
     div()
@@ -547,53 +425,26 @@ pub(super) fn rendered_image_block_for_row(
     let mut matching_spans = snapshot
         .syntax_tree()
         .inline_spans_in_source_range(row_source_range.clone())
-        .filter(|span| {
-            span.kind == MarkdownInlineKind::Image
-                && rendered_remote_image_span_is_block_in_row(span, source_text, row_source_range)
+        .filter_map(|span| {
+            rendered_element_descriptor_for_inline_span_in_row(span, source_text, row_source_range)
+                .filter(|descriptor| descriptor.placement == RenderedElementPlacement::Block)
         });
 
-    let span = matching_spans.next()?;
+    let descriptor = matching_spans.next()?;
     if matching_spans.next().is_some() {
         return None;
     }
-    if rendered_element_source_range_is_active(snapshot, selection, &span.source_range) {
+    if rendered_element_source_range_is_active(snapshot, selection, &descriptor.source_range) {
         return None;
     }
 
+    let RenderedElementKind::Image { url, alt_text } = descriptor.kind.clone() else {
+        return None;
+    };
     Some(RenderedImageBlock {
-        url: span.url.clone()?,
-        alt_text: display_row.text.trim().to_string(),
-        source_range: span.source_range.clone(),
-    })
-}
-
-pub(super) fn rendered_generic_block_for_row(
-    snapshot: &BufferSnapshot,
-    display_row: &DisplayRow,
-    selection: &Selection<Point>,
-    mode: MarkdownEditorMode,
-) -> Option<RenderedGenericBlock> {
-    if mode != MarkdownEditorMode::Rendered {
-        return None;
-    }
-
-    let row = display_row.row as usize;
-    let row_source_range = &display_row.source_range;
-    let code_block = snapshot
-        .syntax_tree()
-        .blocks_in_source_range(row_source_range.clone())
-        .find(|block| {
-            block.kind == MarkdownBlockKind::FencedCodeBlock
-                && block.row_range.contains(&row)
-                && ranges_overlap(&block.content_range, row_source_range)
-        })?;
-
-    if rendered_element_source_range_is_active(snapshot, selection, &code_block.source_range) {
-        return None;
-    }
-
-    Some(RenderedGenericBlock {
-        source_range: row_source_range.clone(),
-        text: display_row.text.trim_end_matches(['\r', '\n']).to_string(),
+        source_range: descriptor.source_range.clone(),
+        descriptor,
+        url,
+        alt_text,
     })
 }
