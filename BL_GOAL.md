@@ -1,83 +1,92 @@
-# Markdown Editor Layout Refactor Progress
+# Markdown Editor 布局重构进度
 
-## Objective
+## 目标
 
-Refactor the current project's `markdown-editor` path so Source and Rendered modes support width-aware automatic wrapping, and so Rendered mode can eventually lay out inline and block GPUI elements as first-class content. The final state must keep text, Markdown styling, images, previews, custom GPUI elements, cursor, selections, hit testing, keyboard movement, scrolling, and mode switching consistent with the visible layout without unnecessary whole-document reflow.
+重构当前项目中的 `markdown-editor` 路径，使 Source 和 Rendered 模式都支持基于宽度的自动换行，并使 Rendered 模式能够把行内 GPUI 元素以及当前纳入目标的块级渲染内容路径作为一等内容来布局：独立远程图片块和块级公式。更广义的通用块级 GPUI 元素暂时保留为未来方向，不属于当前实现目标；真实公式渲染器接入也暂时延后。最终状态必须保证文本、Markdown 样式、图片、预览、自定义 GPUI 元素、光标、选择、高亮命中、键盘移动、滚动和模式切换都与可见布局保持一致，并避免不必要的整篇重排。
 
-## Architecture Constraints
+## 架构约束
 
-- Keep the outer editor/list virtualization unit as a Markdown source row. Do not change the goal into a visual-row or chunk-level virtualizer unless the goal is explicitly reset.
-- Optimize large-document behavior within that source-row model: cache row projection/layout work, narrow invalidation, avoid immediate whole-document remeasure, and keep non-visible rows represented by estimates.
-- Accept that extremely long single source rows remain a row-local worst case. Mitigate those rows with source-row-local caching and measurement improvements rather than redesigning the outer architecture.
-- Improve maintainability while completing the goal: keep new behavior behind explicit row/layout/cache concepts, avoid adding more hidden coupling between Rendered projection, GPUI list measurement, and input handling, and split responsibilities when a local extraction materially reduces risk.
+- 保持编辑器 / 列表外层虚拟化单位仍然是 Markdown source row。除非目标被显式重置，不要把方案改成 visual-row 或 chunk-level virtualizer。
+- 在 source-row 模型内优化大文档表现：缓存 row projection / layout 工作、缩小失效范围、避免立即整篇重测，并让不可见行继续以估算值表示。
+- 接受极长单行 source row 仍然是 row-local 最坏情况。要通过 source-row 级别的缓存和测量改进来缓解，而不是重设计外层架构。
+- 在完成目标的同时改进可维护性：新行为要放在明确的 row / layout / cache 概念之后，避免继续增加 Rendered projection、GPUI list measurement 和输入处理之间的隐藏耦合；当局部抽取能显著降低风险时，要拆清责任边界。
 
-## Current Progress
+## 当前进展
 
-### Layout and Wrapping
+### 布局与换行
 
-- Source and Rendered text rows now use a shared display-row layout path with width-aware GPUI text shaping, soft-wrapped `VisualDisplayRow` ranges, visual-row heights, caret geometry, selection bounds, and mouse hit testing tied to the visible layout.
-- Row rendering distinguishes text rows from block rows through `DisplayRowLayout` / `DisplayBlockLayout`, preserving source-row virtualization while giving block content its own measured height and render path.
-- Wrapped Home/End, vertical movement, mouse hit testing, selection bounds, empty selected rows, mode switching, resize reflow, and undo/redo now account for visual-row-local geometry and clear stale layout-specific selection goals when the visible projection can change.
-- Text rows without inline atoms skip the second wrap-shaping pass when the unwrapped shaped line already fits the current width.
+- Source 和 Rendered 文本行现在共用一条 display-row 布局路径，支持基于宽度的 GPUI 文本 shaping、软换行 `VisualDisplayRow` 范围、visual-row 高度、光标几何、选择框和与可见布局一致的鼠标命中测试。
+- 行渲染现在通过 `DisplayRowLayout` / `DisplayBlockLayout` 区分文本行与块行，在保持 source-row virtualization 的同时，让块内容拥有自己的测量高度和渲染路径。
+- Home / End、垂直移动、鼠标命中、选择框、空选中行、模式切换、窗口尺寸变化后的重排以及 undo / redo 现在都考虑 visual-row 局部几何，并会在可见 projection 变化时清理过期的布局相关 selection goal。
+- 对于没有 inline atom 的文本行，如果未换行的 shaped line 已经能放下当前宽度，会跳过第二次 wrap shaping。
 
-### Inline Atoms and Inline Images
+### Inline Atom 与行内图片
 
-- Rendered text rows now build `DisplayInlineFragment`s and `DisplayInlineAtom`s, with inactive inline math and inline images represented as atomic layout content instead of ordinary editable text.
-- Inline atoms participate in wrapping, row height, explicit width/height measurement, selection styling, cursor snapping, mouse hit testing, horizontal/vertical keyboard movement, Home/End, and boundary Backspace/Delete behavior.
-- Inline atom width can be measured from the rendered GPUI element tree, and inline images now use loaded image dimensions via `ImgResourceLoader` when available, preserving aspect ratio within bounded inline atom geometry.
-- Empty-alt inline images insert an internal object-replacement placeholder so they can use the same atom path and source/display mapping as visible-alt inline images.
-- Rows with still-loading inline image atoms render with fallback sizes but avoid caching those fallback text layouts as final measured layouts.
+- Rendered 文本行现在会构建 `DisplayInlineFragment` 和 `DisplayInlineAtom`，把非激活状态下的行内公式和行内图片表示成原子布局内容，而不是普通可编辑文本。
+- Inline atom 已参与换行、行高、显式宽高测量、选择样式、光标吸附、鼠标命中、水平 / 垂直键盘移动、Home / End，以及边界上的 Backspace / Delete 行为。
+- Inline atom 的宽度可以从渲染后的 GPUI element tree 中测量；行内图片在可用时会通过 `ImgResourceLoader` 使用已加载图片尺寸，并在受限几何内保持宽高比。
+- 空 alt 的行内图片会插入内部 object-replacement placeholder，从而复用与可见 alt 图片相同的 atom 路径和 source / display 映射。
+- 对于仍在加载中的行内图片 atom，行会使用 fallback 尺寸渲染，但不会把这些 fallback 文本布局缓存成最终测量结果。
 
-### Block Layout and Rendered Elements
+### 块布局与渲染元素
 
-- Standalone remote images use the block layout path with loaded asset dimensions, aspect-ratio-preserving sizing, block padding, full-row hit targets, boundary carets, whole-block selection styling, and atomic boundary movement/deletion.
-- Standalone non-text rendered content is being narrowed to descriptor-driven image/math handling first; fenced code and pipe tables remain in the text pipeline for now instead of using a generic block layout path.
-- Rendered element boundaries and whole/contained rendered-element selections stay inactive when appropriate, so inline atoms and standalone image blocks remain rendered while surrounding selected Markdown can still reveal source syntax.
-- Block geometry now routes through the shared block interface for source ranges, visible x positions, mouse targets, line-boundary movement, caret positions, and selection state.
-- Remote image block layouts now expose explicit cacheability: loaded image dimensions can be cached, while placeholder layouts for still-loading or invalid image assets remain uncached.
-- Render-time list remeasure was removed after reproducing a GPUI `ListState` re-entry panic; block rows are measured through the normal list layout pass.
+- 独立远程图片使用块布局路径，支持已加载资源尺寸、保持宽高比的缩放、块级 padding、整行鼠标命中目标、边界 caret、整块选择样式，以及原子化的边界移动 / 删除。
+- 独立的非文本渲染内容目前先收窄到 descriptor 驱动的图片 / 公式处理；fenced code 和 pipe table 暂时继续留在文本管线中，而不是走通用块布局路径。
+- 公式处理正在拆成明确的行内与块级结构路径：`$...$` 代表 inline formula，`$$...$$` 代表 block formula；二者不应再被压成同一种仅行内模型。
+- 在真实公式渲染器接入前，公式继续使用占位或文本式 fallback 渲染；当前目标是先把公式的语义、布局、交互和缓存边界做对，而不是先接入最终渲染器。
+- 当满足条件时，渲染元素边界以及整块 / 包含块的 rendered-element selection 仍会保持 inactive，这样 inline atom 和独立图片块可以继续以渲染形态显示，同时周围被选中的 Markdown 仍可显露 source 语法。
+- 块几何现在统一通过共享的块接口提供 source range、可见 x 位置、鼠标目标、行边界移动、caret 位置和选择状态。
+- 远程图片块布局现在显式区分是否可缓存：已加载图片尺寸可以缓存，仍在加载或图片资源无效时的 placeholder 布局不缓存。
+- 复现 GPUI `ListState` re-entry panic 之后，渲染阶段的 list remeasure 已被移除；块行通过正常的 list layout pass 测量。
 
-### Caching and Large-Document Performance
+### 缓存与大文档性能
 
-- Row layouts are cached by source row, mode, wrap width, and relevant Rendered-mode active source ranges, and are reused by rendering, mouse hit testing, Home/End, and visual-row movement.
-- Display rows are cached across render and interaction paths by buffer version, row, mode, and marker-visibility dependencies, with projection state built once per pass and reused for row layout cache keys.
-- Rendered row inline span queries are range-local and backed by an indexed span-start structure, avoiding full-document inline span scans for each visible row.
-- Source rows use text-snapshot fast paths for display-row lookup/APIs, rendering, row-local text layout, selection/caret drawing, mouse targeting, and plain-fragment projection. These paths avoid Rendered-only style/atom/hidden-range work and avoid refreshing Markdown syntax when Source callers only need text.
-- Display rows carry their original source text/range so row layout paths can avoid re-reading the buffer for row-local Markdown checks.
-- Rendered render frames snapshot the buffer and clip the selection once per frame, and buffer snapshots share the cached Markdown syntax tree through `Arc`.
-- Text-only editor paths such as row counts, row text reads, cursor clipping, Source-mode horizontal and visual movement/selection, wrapped Home/End, ordinary replace/backspace/delete edits, cursor reveal, auto-indent, and Source edit cache invalidation now use the buffer's text snapshot directly instead of refreshing the Markdown syntax tree through a full buffer snapshot.
-- Source-mode interaction paths now cache cacheable plain-text row layouts even when they do not need inline atom measurement, improving reuse for wrapped keyboard movement and wrapped Home/End.
-- Rendered interaction paths now also cache row layouts whenever the computed layout is intrinsically cacheable, so plain-text Rendered rows can reuse layouts across non-render interaction calls while rows with unmeasured inline atom fallbacks stay uncached.
-- Loaded remote image block layouts can participate in row-layout cache reuse, but loading placeholder block layouts stay uncached so final image dimensions can replace them.
-- `ListState::with_default_size_hint` gives long variable-height lists a default unmeasured-row height, reducing scrollbar collapse and scroll-position churn before rows are measured.
-- Width changes clear editor row layout state and stale selection goals without forcing an additional full-list remeasure beyond GPUI list width invalidation.
-- Ordinary Source-mode single-row edits now clear and remeasure only the edited row's cached layout, and rekey reusable Source display-row cache entries to the new buffer version. Length-changing edits retain only rows before the edit because later source ranges can shift; length-preserving edits also retain later rows. Undo/redo can use the same local invalidation when editor selection history proves the transaction stayed on one Source row; Rendered edits, cross-row edits, row-count changes, and transactions without selection history remain conservative.
+- 行布局现在按 source row、mode、wrap width 以及 Rendered 模式下相关 active source range 进行缓存，并被渲染、鼠标命中、Home / End 和 visual-row 移动复用。
+- Display row 现在按 buffer version、row、mode 和 marker visibility 依赖跨渲染与交互路径缓存；projection state 在一次 pass 中只构建一次，并被复用来生成 row layout cache key。
+- Rendered 行的 inline span 查询现在是 range-local，并带有按 span start 建立的索引结构，避免对每个可见行都做全文件 inline span 扫描。
+- Source 行现在使用 text-snapshot 快路径来完成 display-row 查询 / API、渲染、row-local 文本布局、选择 / caret 绘制、鼠标目标和纯文本 fragment projection。这些路径避免了 Rendered 专用的 style / atom / hidden-range 工作，也避免了当 Source 调用者只需要文本时刷新 Markdown 语法树。
+- Display row 现在携带原始 source text / source range，row layout 路径因此不需要再次回读 buffer 来做 row-local Markdown 检查。
+- Rendered 渲染帧现在每帧只快照一次 buffer 并裁剪一次 selection，同时 buffer snapshot 通过 `Arc` 共享缓存后的 Markdown 语法树。
+- 文本优先的编辑器路径，例如 row count、row text 读取、cursor clipping、Source 模式下的水平与垂直移动 / 选择、换行感知的 Home / End、普通 replace / backspace / delete 编辑、cursor reveal、auto-indent 和 Source 编辑缓存失效，现在都直接使用 buffer 的 text snapshot，而不是为了刷新 Markdown 语法而走完整 buffer snapshot。
+- Source 模式交互路径即使不需要测量 inline atom，也会缓存可缓存的纯文本 row layout，从而提升换行键盘移动和换行感知 Home / End 的复用率。
+- Rendered 模式交互路径现在也会在布局本身可缓存时缓存 row layout，因此纯文本 Rendered 行可以在非渲染交互调用之间复用布局；只有带未测量 inline atom fallback 的行保持不缓存。
+- 已加载的远程图片块布局可以参与 row-layout cache 复用；但 loading placeholder 布局保持不缓存，以便最终图片尺寸能替换它。
+- 对需要异步资源或后续重测的 rendered element，fallback 布局不能被当成最终可缓存布局；真实尺寸或最终测量结果就绪后，应只让受影响的 row 做局部失效与重测。
+- `ListState::with_default_size_hint` 为长的可变高度列表提供了默认的未测量行高，减少在行尚未测量前的滚动条塌陷和滚动位置抖动。
+- 宽度变化会清理编辑器行布局状态和过期的 selection goal，但不会触发额外的整列表重测，除 GPUI list 自身的宽度失效之外不增加额外 remeasure。
+- Source 模式下普通的单行编辑现在只会清理并重测被编辑那一行的缓存布局，并将可复用的 Source display-row cache entry 重新挂到新的 buffer version。长度变化的编辑只保留编辑之前的行，因为之后的 source range 可能整体偏移；长度不变的编辑则也会保留之后的行。Undo / redo 在 editor selection history 能证明该事务只发生在一个 Source row 上时，也会复用同样的局部失效逻辑；Rendered 编辑、跨行编辑、row-count 变化，以及没有 selection history 的事务仍然走保守路径。
 
-### Module Shape and Tests
+### 模块形状与测试
 
-- Inline atom layout, atom hit geometry, block rendering, and block layout construction have been moved onto their respective atom/block interfaces to reduce ad hoc branching in the row pipeline.
-- Inline atom constants, sizing, measurement, fragment atom typing, and atom rendering helpers now live behind an internal `inline_atom` module, leaving the main editor file to focus on row layout and interaction flow.
-- Inline span-to-atom dispatch and atom construction now route through shared `DisplayInlineAtomKind::for_inline_span` and `DisplayInlineAtom::from_span` entry points, reducing per-kind branching in `lib.rs` and creating a single extension seam for future inline atom kinds.
-- Remote image block layout, measurement, hit geometry, rendering, and inactive-image detection now live behind an internal `block` module, leaving the main editor file to route block rows through the shared display-row layout path.
-- Block row selection now routes through a shared rendered-element discovery phase before materializing `DisplayBlockLayout`, keeping standalone image handling isolated while future non-text block descriptors can plug into the same row-local discovery path.
-- Rendered-element boundary and active-range helpers now live behind an internal `rendered_element` module, reducing non-layout coupling in `lib.rs` while keeping movement, selection reveal/hide, and inactive rendered-element behavior unchanged.
-- `md_editor` still needs more internal module boundary cleanup; `lib.rs` now carries projection, row layout/cache, selection/movement, hit-testing, rendering, and extensive tests.
-- Coverage now includes focused unit and GPUI-path tests for wrapped movement, action-level Source wrapped keyboard movement, Source display-row and render paths without Markdown syntax refresh, Source wrapped mouse hit testing and shift-selection across visual rows, keybinding-level Rendered marker reveal/hide transitions, resize reflow, mode switching at wrapped positions, visual-row bounds, rendered inline math, inline images, empty-alt inline images, remote image blocks, Rendered image block mouse hit testing and shift-selection, cache dependency keys, range-local span queries, source-row fast paths, source undo/redo local cache invalidation, Rendered interaction layout caching, remote image block cacheability, snapshot sharing, default list size hints, and the rendered image block crash path.
+- Inline atom 布局、atom 命中几何、块渲染和块布局构造已经分别移动到各自的 atom / block 接口后面，以减少 row pipeline 中的临时分支。
+- Inline atom 的常量、尺寸、测量、fragment atom typing 和 atom 渲染 helper 现在都放在内部 `inline_atom` 模块里，使主编辑器文件更聚焦于 row layout 和交互流。
+- Inline span 到 atom 的分发，以及 atom 构造，现在都通过共享入口来路由，减少 `lib.rs` 中按具体 kind 分支的逻辑，并为后续 inline atom 类型提供统一扩展点。
+- 远程图片块的布局、测量、命中几何、渲染以及 inactive-image 检测现在都放在内部 `block` 模块里，使主编辑器文件只负责把 block row 接入共享 display-row layout 路径。
+- Block row selection 现在会先经过共享的 rendered-element discovery 阶段，再 materialize `DisplayBlockLayout`，从而把独立图片处理隔离开，同时为未来非文本 block descriptor 留出接口，而不把它们纳入当前工作范围。
+- Rendered-element 边界与 active-range helper 现在都放在内部 `rendered_element` 模块里，降低了 `lib.rs` 中与非布局逻辑的耦合，同时保持 movement、selection reveal / hide 和 inactive rendered-element 行为不变。
+- `md_editor` 仍然需要继续做更多内部模块边界清理；`lib.rs` 现在仍承载 projection、row layout / cache、selection / movement、hit-testing、rendering 和大量测试。
+- 目前测试覆盖已经包括：wrapped movement、action-level Source wrapped keyboard movement、Source display-row 与 render 快路径、Source wrapped mouse hit testing 与跨 visual row 的 shift-selection、Rendered marker reveal / hide 过渡、resize reflow、模式切换时 wrapped position 处理、visual-row bounds、rendered inline math、inline image、空 alt inline image、remote image block、Rendered image block 的鼠标命中和 shift-selection、cache dependency key、range-local span query、source-row fast path、Source undo / redo 局部缓存失效、Rendered interaction layout caching、remote image block cacheability、snapshot sharing、default list size hint，以及 rendered image block 的 crash 路径。
 
-## Verification
+## 验证
 
-- Recent touched-crate checks have passed, including `cargo fmt -p md_buffer -p md_editor`, `cargo check -p md_buffer`, `cargo check -p md_editor`, `cargo test -p md_buffer`, and `cargo test -p md_editor` (currently 127 tests). The latest module-boundary step was verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, `cargo test -p md_editor`, and `git diff --check`.
-- Focused coverage now exercises wrapped movement, inline atoms/images, source display-row/cache/render fast paths, source edit and undo/redo cache invalidation, Rendered interaction layout caching, remote image block cacheability, default list size hints, Rendered image block drawing, and mouse interaction.
-- `git diff --check` passes with only LF/CRLF warnings on touched files; short markdown-editor smoke runs after the Rendered image block fix did not reproduce the previous panic.
+- 最近相关 crate 的检查已经通过，包括 `cargo fmt -p md_buffer -p md_editor`、`cargo check -p md_buffer`、`cargo check -p md_editor`、`cargo test -p md_buffer` 和 `cargo test -p md_editor`（当前为 127 个测试）。最近一次模块边界调整还额外通过了 `cargo fmt -p md_editor`、`cargo check -p md_editor`、`cargo test -p md_editor` 和 `git diff --check`。
+- 当前的聚焦测试覆盖已验证 wrapped movement、inline atom / image、source display-row / cache / render 快路径、Source edit 与 undo / redo 缓存失效、Rendered interaction layout caching、remote image block cacheability、default list size hint、Rendered image block 绘制与鼠标交互。
+- `git diff --check` 当前只剩 LF / CRLF 警告；在修复 Rendered image block 问题后做过简短的 markdown-editor smoke run，没有复现之前的 panic。
 
-## Known Remaining Work
+## 已知剩余工作
 
-The bullets below are categories, not priority order or execution order.
+下面这些条目是类别，不代表优先级或执行顺序。
 
-- Profile 300KB-class Markdown files in Source and Rendered modes to identify the remaining source-row-local hot paths before making further performance changes.
-- Continue optimizing within the source-row architecture: cheaper row layout, less string/fragment churn, stronger row-layout cache reuse, narrower remeasure and cache invalidation, and better behavior for large but non-extreme documents.
-- Generalize inline atom measurement beyond the current inactive inline math atom path, and add invalidation if future atom content can resize after the row is cached.
-- Implement broader general block-level GPUI elements as measured list items or subitems. Remote image blocks exist today, and richer descriptor-driven block kinds can be added later, but arbitrary GPUI block measurement and table-specific structured layout are not solved yet.
-- Continue code architecture cleanup within the existing source-row virtualization constraint. `crates/md_editor/src/lib.rs` is now large enough that display-row projection, row layout/cache, inline atoms, selection/movement, mouse hit testing, rendering, and tests should be split into clearer internal module boundaries before more general GPUI inline/block content is added. This does not imply switching away from source-row virtualization or immediately splitting `md_editor` into more crates.
-- Add stronger runtime or visual tests for any remaining visual-row keyboard movement gaps found during profiling or manual use.
-- Add stronger runtime or visual tests for general Rendered image/block behavior and any remaining wrapped-layout interaction gaps found during profiling or manual use.
+- 用 300KB 级 Markdown 文件在 Source 和 Rendered 模式下做 profiling，定位剩余的 source-row-local 热点，再决定后续性能修改。
+- 继续在 source-row 架构内做优化：降低 row layout 成本、减少 string / fragment churn、增强 row-layout cache 复用、缩小 remeasure 和缓存失效范围，并改善大但不过分极端文档的表现。
+- 将 inline atom 的 measurement 继续泛化，超出当前 inactive inline math atom 路径的假设范围；同时补上当未来 atom 内容可能在缓存后继续变尺寸时的失效机制。
+- 实现块级公式作为 descriptor 驱动的 block rendered element，包括正确区分 `$...$` 与 `$$...$$`、块布局与交互行为，以及在不引入真实公式渲染器前提下的缓存语义。
+- 在保持 source-row virtualization 约束不变的前提下继续做代码架构清理。`crates/md_editor/src/lib.rs` 现在已经足够大，display-row projection、row layout / cache、inline atom、selection / movement、mouse hit testing、rendering 和 tests 都应继续拆到更清晰的内部模块边界中。这不意味着切换 away from source-row virtualization，也不意味着现在就要把 `md_editor` 拆成更多 crate。
+- 为 profiling 或手工使用中发现的剩余 visual-row 键盘移动缺口补更强的 runtime 或 visual tests。
+- 为 Rendered image / block 行为以及剩余 wrapped-layout 交互缺口补更强的 runtime 或 visual tests。
+
+## 未来方向
+
+- 更广义的通用块级 GPUI 元素不属于当前实现目标。当前块级 rendered-element 目标只包括独立远程图片块和块级公式。
+- table 未来如果要从文本管线升级为真正的渲染块，不应落到 generic block 文本包裹路径里，而应走跨 source row 的 structured layout；这属于后续独立课题，不属于当前范围。
+- 任意 GPUI block measurement、自定义 block widget、table-specific structured layout，以及真实公式渲染器接入，都可以在 inline atom 泛化、profiling 和 `lib.rs` 边界清理完成后再重新评估。
