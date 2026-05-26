@@ -22,8 +22,9 @@ use block::DisplayBlockLayout;
 #[cfg(test)]
 use block::{
     RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT, RENDERED_IMAGE_BLOCK_VERTICAL_PADDING,
-    RenderedImageBlock, RenderedImageBlockLayout, image_block_height_for_size,
-    image_block_source_offset_for_x, rendered_image_block_for_row,
+    RenderedFormulaBlock, RenderedImageBlock, RenderedImageBlockLayout,
+    image_block_height_for_size, image_block_source_offset_for_x, rendered_formula_block_for_row,
+    rendered_image_block_for_row,
 };
 use inline_atom::{
     DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, INLINE_IMAGE_PLACEHOLDER,
@@ -31,9 +32,9 @@ use inline_atom::{
 };
 #[cfg(test)]
 use inline_atom::{
-    DisplayInlineAtomKind,
-    INLINE_IMAGE_ATOM_MAX_WIDTH, INLINE_IMAGE_ATOM_SIZE, INLINE_MATH_ATOM_EXTRA_HEIGHT,
-    INLINE_MATH_ATOM_HORIZONTAL_PADDING, inline_image_atom_size_for_size,
+    DisplayInlineAtomKind, INLINE_IMAGE_ATOM_MAX_WIDTH, INLINE_IMAGE_ATOM_SIZE,
+    INLINE_MATH_ATOM_EXTRA_HEIGHT, INLINE_MATH_ATOM_HORIZONTAL_PADDING,
+    inline_image_atom_size_for_size,
 };
 #[cfg(test)]
 use rendered_element::source_offset_is_rendered_element_boundary;
@@ -4690,6 +4691,22 @@ mod tests {
         }
     }
 
+    fn rendered_formula_block(
+        source_range: Range<usize>,
+        tex: impl Into<String>,
+    ) -> RenderedFormulaBlock {
+        let tex = tex.into();
+        RenderedFormulaBlock {
+            descriptor: RenderedElementDescriptor {
+                kind: RenderedElementKind::Math { tex: tex.clone() },
+                placement: RenderedElementPlacement::Block,
+                source_range: source_range.clone(),
+            },
+            tex,
+            source_range,
+        }
+    }
+
     fn image_block_layout(source_range: Range<usize>, width: gpui::Pixels) -> DisplayBlockLayout {
         DisplayBlockLayout::RemoteImage(RenderedImageBlockLayout {
             image_block: rendered_image_block(source_range, "alt"),
@@ -6304,6 +6321,62 @@ mod tests {
         assert_eq!(
             rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
             Some(rendered_image_block(0..35, "alt"))
+        );
+    }
+
+    #[test]
+    fn rendered_formula_block_detects_inactive_formula_row() {
+        let formula_source = "$$x + y$$";
+        let mut buffer = Buffer::local(&format!("{formula_source}\nnext\n"));
+        let snapshot = buffer.snapshot();
+        let selection = collapsed_selection(Point::new(1, 0));
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        assert_eq!(row.text, "x + y");
+        assert_eq!(
+            rendered_formula_block_for_row(
+                &snapshot,
+                &row,
+                &selection,
+                MarkdownEditorMode::Rendered
+            ),
+            Some(rendered_formula_block(0..formula_source.len(), "x + y"))
+        );
+        assert!(
+            rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn rendered_formula_block_reveals_active_formula_source() {
+        let formula_source = "$$x + y$$";
+        let mut buffer = Buffer::local(&format!("{formula_source}\n"));
+        let snapshot = buffer.snapshot();
+        let selection = collapsed_selection(Point::new(0, 2));
+        let row = display_rows_in_mode(
+            &snapshot,
+            0..1,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        )
+        .remove(0);
+
+        assert_eq!(row.text, formula_source);
+        assert_eq!(
+            rendered_formula_block_for_row(
+                &snapshot,
+                &row,
+                &selection,
+                MarkdownEditorMode::Rendered
+            ),
+            None
         );
     }
 

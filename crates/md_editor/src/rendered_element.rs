@@ -11,10 +11,17 @@ use super::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum RenderedElementKind {
-    Image { url: String, alt_text: String },
-    Math { tex: String },
+    Image {
+        url: String,
+        alt_text: String,
+    },
+    Math {
+        tex: String,
+    },
     #[allow(dead_code)]
-    Custom { key: String },
+    Custom {
+        key: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,7 +51,11 @@ pub(super) fn rendered_element_descriptor_for_inline_span_in_row(
             kind: RenderedElementKind::Math {
                 tex: inline_span_content_text(span, source_text, row_source_range),
             },
-            placement: RenderedElementPlacement::Inline,
+            placement: if rendered_math_span_is_block_in_row(span, source_text, row_source_range) {
+                RenderedElementPlacement::Block
+            } else {
+                RenderedElementPlacement::Inline
+            },
             source_range: span.source_range.clone(),
         }),
         MarkdownInlineKind::Image => {
@@ -285,6 +296,43 @@ pub(super) fn rendered_remote_image_span_is_block_in_row(
         .as_ref()
         .is_some_and(|url| is_remote_image_url(url))
         || !range_contains(row_source_range, &span.source_range)
+    {
+        return false;
+    }
+
+    let local_start = span.source_range.start - row_source_range.start;
+    let local_end = span.source_range.end - row_source_range.start;
+    let Some(before) = source_text.get(..local_start) else {
+        return false;
+    };
+    let Some(after) = source_text.get(local_end..) else {
+        return false;
+    };
+
+    before.trim().is_empty() && after.trim().is_empty()
+}
+
+fn rendered_math_span_is_block_in_row(
+    span: &MarkdownInlineSpan,
+    source_text: &str,
+    row_source_range: &Range<usize>,
+) -> bool {
+    if !range_contains(row_source_range, &span.source_range) {
+        return false;
+    }
+
+    if span.marker_ranges.len() != 2 {
+        return false;
+    }
+
+    let Some(start_marker) = span.marker_ranges.first() else {
+        return false;
+    };
+    let Some(end_marker) = span.marker_ranges.last() else {
+        return false;
+    };
+    if start_marker.end.saturating_sub(start_marker.start) != 2
+        || end_marker.end.saturating_sub(end_marker.start) != 2
     {
         return false;
     }

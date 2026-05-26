@@ -556,7 +556,7 @@ fn inline_span_from_node(source: &str, node: Node<'_>) -> Option<MarkdownInlineS
     };
 
     let source_range = node.byte_range();
-    let marker_ranges = inline_marker_ranges(node);
+    let marker_ranges = inline_marker_ranges(source, node);
     let content_ranges = inline_content_ranges(source_range.clone(), &marker_ranges);
     let url = match kind {
         MarkdownInlineKind::Image | MarkdownInlineKind::Link => extract_link_url(source, &node),
@@ -572,13 +572,16 @@ fn inline_span_from_node(source: &str, node: Node<'_>) -> Option<MarkdownInlineS
     })
 }
 
-fn inline_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
+fn inline_marker_ranges(source: &str, node: Node<'_>) -> Vec<Range<usize>> {
+    if node.kind() == "latex_block" {
+        return latex_block_marker_ranges(source, node);
+    }
+
     let mut marker_ranges = Vec::new();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
             "latex_span_delimiter" => marker_ranges.push(child.byte_range()),
-            _ if node.kind() == "latex_block" => {}
             "emphasis_delimiter"
             | "code_span_delimiter"
             | "link_destination"
@@ -589,6 +592,32 @@ fn inline_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
         }
     }
     marker_ranges.sort_by_key(|range| (range.start, range.end));
+    marker_ranges
+}
+
+fn latex_block_marker_ranges(source: &str, node: Node<'_>) -> Vec<Range<usize>> {
+    let source_range = node.byte_range();
+    let delimiter_len = if source
+        .get(source_range.clone())
+        .is_some_and(|text| text.starts_with("$$") && text.ends_with("$$"))
+    {
+        2
+    } else {
+        1
+    };
+
+    let start = source_range.start;
+    let end = source_range.end;
+    let content_start = start.saturating_add(delimiter_len).min(end);
+    let content_end = end.saturating_sub(delimiter_len).max(content_start);
+
+    let mut marker_ranges = Vec::new();
+    if start < content_start {
+        marker_ranges.push(start..content_start);
+    }
+    if content_end < end {
+        marker_ranges.push(content_end..end);
+    }
     marker_ranges
 }
 
@@ -1070,11 +1099,35 @@ mod tests {
     }
 
     #[test]
+    fn parses_block_math_markers_and_content_ranges() {
+        let source = "$$x + y$$\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let span = tree
+            .inline_spans()
+            .iter()
+            .find(|span| span.kind == MarkdownInlineKind::InlineMath)
+            .expect("expected block math span");
+
+        assert_eq!(span.source_range, 0.."$$x + y$$".len());
+        assert_eq!(span.marker_ranges, vec![0..2, 7..9]);
+        assert_eq!(span.content_ranges, vec![2..7]);
+    }
+
+    #[test]
     fn inline_math_projection_keeps_operator_content() {
         let tree = MarkdownSyntaxTree::parse("Before $x + y$ after\n");
         let projection = tree.projection_for_visible_rows(0..1, None);
 
         assert_eq!(projection.hidden_ranges(), &[7..8, 13..14]);
         assert_eq!(projection.display_len(), "Before x + y after\n".len());
+    }
+
+    #[test]
+    fn block_math_projection_hides_double_dollar_markers() {
+        let tree = MarkdownSyntaxTree::parse("$$x + y$$\n");
+        let projection = tree.projection_for_visible_rows(0..1, None);
+
+        assert_eq!(projection.hidden_ranges(), &[0..2, 7..9]);
+        assert_eq!(projection.display_len(), "x + y\n".len());
     }
 }

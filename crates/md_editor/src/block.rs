@@ -4,6 +4,7 @@ use gpui::{
     App, Context, ImgResourceLoader, IntoElement, MouseButton, Resource, SharedString, Window, div,
     img, prelude::*, px,
 };
+use md_assets::EDITOR_FONT_FAMILY;
 use md_buffer::BufferSnapshot;
 use md_text::{Point, Selection, SelectionGoal};
 use md_theme::{editor_palette, gutter_width};
@@ -20,10 +21,13 @@ use super::{
 pub(super) const RENDERED_IMAGE_BLOCK_MAX_WIDTH: gpui::Pixels = px(600.);
 pub(super) const RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT: gpui::Pixels = px(120.);
 pub(super) const RENDERED_IMAGE_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(4.);
+pub(super) const RENDERED_FORMULA_BLOCK_HORIZONTAL_PADDING: gpui::Pixels = px(12.);
+pub(super) const RENDERED_FORMULA_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(8.);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum DisplayBlockKind {
     RemoteImage(RenderedImageBlock),
+    Formula(RenderedFormulaBlock),
 }
 
 impl DisplayBlockKind {
@@ -33,19 +37,22 @@ impl DisplayBlockKind {
         selection: &Selection<Point>,
         mode: MarkdownEditorMode,
     ) -> Option<Self> {
-        rendered_image_block_for_row(snapshot, display_row, selection, mode).map(Self::RemoteImage)
+        rendered_block_for_row(snapshot, display_row, selection, mode)
     }
 
     fn into_layout(
         self,
         wrap_width: gpui::Pixels,
-        _row_style: RowDisplayStyle,
+        row_style: RowDisplayStyle,
         window: &mut Window,
         cx: &mut App,
     ) -> DisplayBlockLayout {
         match self {
             Self::RemoteImage(image_block) => DisplayBlockLayout::RemoteImage(
                 RenderedImageBlockLayout::new(image_block, wrap_width, window, cx),
+            ),
+            Self::Formula(formula_block) => DisplayBlockLayout::Formula(
+                RenderedFormulaBlockLayout::new(formula_block, wrap_width, row_style, window, cx),
             ),
         }
     }
@@ -54,6 +61,7 @@ impl DisplayBlockKind {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum DisplayBlockLayout {
     RemoteImage(RenderedImageBlockLayout),
+    Formula(RenderedFormulaBlockLayout),
 }
 
 impl DisplayBlockLayout {
@@ -74,18 +82,21 @@ impl DisplayBlockLayout {
     pub(super) fn height(&self) -> gpui::Pixels {
         match self {
             Self::RemoteImage(image_layout) => image_layout.height(),
+            Self::Formula(formula_layout) => formula_layout.height(),
         }
     }
 
     pub(super) fn cacheable(&self) -> bool {
         match self {
             Self::RemoteImage(image_layout) => image_layout.cacheable(),
+            Self::Formula(formula_layout) => formula_layout.cacheable(),
         }
     }
 
     pub(super) fn source_range(&self) -> &Range<usize> {
         match self {
             Self::RemoteImage(image_layout) => &image_layout.image_block.source_range,
+            Self::Formula(formula_layout) => &formula_layout.formula_block.source_range,
         }
     }
 
@@ -96,6 +107,11 @@ impl DisplayBlockLayout {
                 image_layout.width,
                 source_offset,
             ),
+            Self::Formula(formula_layout) => block_visible_x_for_source_offset(
+                &formula_layout.formula_block.source_range,
+                formula_layout.width,
+                source_offset,
+            ),
         }
     }
 
@@ -104,6 +120,11 @@ impl DisplayBlockLayout {
             Self::RemoteImage(image_layout) => {
                 image_block_source_offset_for_x(&image_layout.image_block, image_layout.width, x)
             }
+            Self::Formula(formula_layout) => block_source_offset_for_x(
+                &formula_layout.formula_block.source_range,
+                formula_layout.width,
+                x,
+            ),
         }
     }
 
@@ -205,6 +226,15 @@ impl DisplayBlockLayout {
                     cx,
                 )]
             }
+            Self::Formula(formula_layout) => {
+                vec![render_formula_block(
+                    formula_layout,
+                    selected,
+                    caret_x,
+                    row_style,
+                    cx,
+                )]
+            }
         }
     }
 }
@@ -263,6 +293,53 @@ impl RenderedImageBlockLayout {
 
     pub(super) fn cacheable(&self) -> bool {
         self.cacheable
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct RenderedFormulaBlock {
+    pub(super) descriptor: RenderedElementDescriptor,
+    pub(super) tex: String,
+    pub(super) source_range: Range<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct RenderedFormulaBlockLayout {
+    pub(super) formula_block: RenderedFormulaBlock,
+    pub(super) width: gpui::Pixels,
+    pub(super) height: gpui::Pixels,
+}
+
+impl RenderedFormulaBlockLayout {
+    pub(super) fn new(
+        formula_block: RenderedFormulaBlock,
+        wrap_width: gpui::Pixels,
+        row_style: RowDisplayStyle,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self {
+        let width = wrap_width.max(px(1.));
+        let mut element = formula_block_measurement_element(&formula_block.tex, width, row_style)
+            .into_any_element();
+        let size = element.layout_as_root(
+            gpui::size(width.into(), gpui::AvailableSpace::MaxContent),
+            window,
+            cx,
+        );
+
+        Self {
+            formula_block,
+            width,
+            height: size.height.max(row_style.line_height),
+        }
+    }
+
+    pub(super) fn height(&self) -> gpui::Pixels {
+        self.height
+    }
+
+    pub(super) fn cacheable(&self) -> bool {
+        true
     }
 }
 
@@ -396,6 +473,85 @@ fn render_image_block(
         .into_any_element()
 }
 
+fn render_formula_block(
+    formula_layout: RenderedFormulaBlockLayout,
+    selected: bool,
+    caret_x: Option<gpui::Pixels>,
+    row_style: RowDisplayStyle,
+    cx: &mut Context<MarkdownEditor>,
+) -> gpui::AnyElement {
+    let mouse_down_block_layout = DisplayBlockLayout::Formula(formula_layout.clone());
+    let mouse_move_block_layout = mouse_down_block_layout.clone();
+
+    div()
+        .w_full()
+        .relative()
+        .when(selected, |this| {
+            this.bg(editor_palette().selection_background.opacity(0.20))
+        })
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event, window, cx| {
+                this.mouse_left_down_on_block(&mouse_down_block_layout, event, window, cx)
+            }),
+        )
+        .on_mouse_move(cx.listener(move |this, event, window, cx| {
+            this.mouse_move_on_block(&mouse_move_block_layout, event, window, cx)
+        }))
+        .child(render_formula_block_inner(
+            &formula_layout.formula_block.tex,
+            formula_layout.width,
+            row_style,
+            selected,
+        ))
+        .when_some(caret_x, |this, caret_x| {
+            this.child(caret_element(caret_x, row_style))
+        })
+        .into_any_element()
+}
+
+fn render_formula_block_inner(
+    tex: &str,
+    width: gpui::Pixels,
+    row_style: RowDisplayStyle,
+    selected: bool,
+) -> gpui::AnyElement {
+    let palette = editor_palette();
+    let mut element = formula_block_measurement_element(tex, width, row_style)
+        .border_1()
+        .border_color(if selected {
+            palette.selection_background
+        } else {
+            palette.inline_math_text.opacity(0.35)
+        });
+
+    if selected {
+        element = element.bg(palette.selection_background.opacity(0.12));
+    }
+
+    element.into_any_element()
+}
+
+fn formula_block_measurement_element(
+    tex: &str,
+    width: gpui::Pixels,
+    row_style: RowDisplayStyle,
+) -> gpui::Div {
+    let palette = editor_palette();
+    div()
+        .w(width)
+        .px(RENDERED_FORMULA_BLOCK_HORIZONTAL_PADDING)
+        .py(RENDERED_FORMULA_BLOCK_VERTICAL_PADDING)
+        .rounded_md()
+        .bg(palette.inline_math_text.opacity(0.08))
+        .font_family(EDITOR_FONT_FAMILY)
+        .text_size(row_style.text_size)
+        .line_height(row_style.line_height)
+        .text_color(palette.inline_math_text)
+        .text_center()
+        .child(SharedString::from(tex.to_string()))
+}
+
 fn caret_element(caret_x: gpui::Pixels, row_style: RowDisplayStyle) -> gpui::AnyElement {
     let palette = editor_palette();
     div()
@@ -410,12 +566,79 @@ fn caret_element(caret_x: gpui::Pixels, row_style: RowDisplayStyle) -> gpui::Any
         .into_any_element()
 }
 
+#[cfg(test)]
 pub(super) fn rendered_image_block_for_row(
     snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
 ) -> Option<RenderedImageBlock> {
+    let descriptor = rendered_block_descriptor_for_row(snapshot, display_row, selection, mode)?;
+
+    let RenderedElementKind::Image { url, alt_text } = descriptor.kind.clone() else {
+        return None;
+    };
+    Some(RenderedImageBlock {
+        source_range: descriptor.source_range.clone(),
+        descriptor,
+        url,
+        alt_text,
+    })
+}
+
+#[cfg(test)]
+pub(super) fn rendered_formula_block_for_row(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+) -> Option<RenderedFormulaBlock> {
+    let descriptor = rendered_block_descriptor_for_row(snapshot, display_row, selection, mode)?;
+
+    let RenderedElementKind::Math { tex } = descriptor.kind.clone() else {
+        return None;
+    };
+    Some(RenderedFormulaBlock {
+        source_range: descriptor.source_range.clone(),
+        descriptor,
+        tex,
+    })
+}
+
+fn rendered_block_for_row(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+) -> Option<DisplayBlockKind> {
+    let descriptor = rendered_block_descriptor_for_row(snapshot, display_row, selection, mode)?;
+
+    match descriptor.kind.clone() {
+        RenderedElementKind::Image { url, alt_text } => {
+            Some(DisplayBlockKind::RemoteImage(RenderedImageBlock {
+                source_range: descriptor.source_range.clone(),
+                descriptor,
+                url,
+                alt_text,
+            }))
+        }
+        RenderedElementKind::Math { tex } => {
+            Some(DisplayBlockKind::Formula(RenderedFormulaBlock {
+                source_range: descriptor.source_range.clone(),
+                descriptor,
+                tex,
+            }))
+        }
+        RenderedElementKind::Custom { .. } => None,
+    }
+}
+
+fn rendered_block_descriptor_for_row(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+) -> Option<RenderedElementDescriptor> {
     if mode != MarkdownEditorMode::Rendered {
         return None;
     }
@@ -438,13 +661,5 @@ pub(super) fn rendered_image_block_for_row(
         return None;
     }
 
-    let RenderedElementKind::Image { url, alt_text } = descriptor.kind.clone() else {
-        return None;
-    };
-    Some(RenderedImageBlock {
-        source_range: descriptor.source_range.clone(),
-        descriptor,
-        url,
-        alt_text,
-    })
+    Some(descriptor)
 }
