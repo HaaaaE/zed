@@ -1,8 +1,8 @@
-use std::ops::Range;
+use std::{ops::Range, path::Path};
 
 use gpui::{
-    App, Context, ImgResourceLoader, IntoElement, MouseButton, Resource, SharedString, Window, div,
-    img, prelude::*, px,
+    App, Context, ImgResourceLoader, IntoElement, MouseButton, SharedString, Window, div, img,
+    prelude::*, px,
 };
 use md_assets::EDITOR_FONT_FAMILY;
 use md_buffer::BufferSnapshot;
@@ -14,8 +14,9 @@ use super::rendered_element::{
 };
 use super::{
     MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, VisualLineBoundary, clip_cursor,
-    display_model::DisplayRow, range_contains, rendered_element_descriptor_for_inline_span_in_row,
-    rendered_element_source_range_is_active, selection_byte_range, visual_horizontal_goal,
+    display_model::DisplayRow, markdown_image::MarkdownImageSource, range_contains,
+    rendered_element_descriptor_for_inline_span_in_row, rendered_element_source_range_is_active,
+    selection_byte_range, visual_horizontal_goal,
 };
 
 pub(super) const RENDERED_IMAGE_BLOCK_MAX_WIDTH: gpui::Pixels = px(600.);
@@ -36,8 +37,9 @@ impl DisplayBlockKind {
         display_row: &DisplayRow,
         selection: &Selection<Point>,
         mode: MarkdownEditorMode,
+        document_path: Option<&Path>,
     ) -> Option<Self> {
-        rendered_block_for_row(snapshot, display_row, selection, mode)
+        rendered_block_for_row(snapshot, display_row, selection, mode, document_path)
     }
 
     fn into_layout(
@@ -78,13 +80,14 @@ impl DisplayBlockLayout {
         display_row: &DisplayRow,
         selection: &Selection<Point>,
         mode: MarkdownEditorMode,
+        document_path: Option<&Path>,
         wrap_width: gpui::Pixels,
         row_style: RowDisplayStyle,
         measure_layout: bool,
         window: &mut Window,
         cx: &mut App,
     ) -> Option<Self> {
-        DisplayBlockKind::for_display_row(snapshot, display_row, selection, mode)
+        DisplayBlockKind::for_display_row(snapshot, display_row, selection, mode, document_path)
             .map(|kind| kind.into_layout(wrap_width, row_style, measure_layout, window, cx))
     }
 
@@ -251,8 +254,7 @@ impl DisplayBlockLayout {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct RenderedImageBlock {
     pub(super) descriptor: RenderedElementDescriptor,
-    pub(super) url: String,
-    pub(super) alt_text: String,
+    pub(super) image_source: MarkdownImageSource,
     pub(super) source_range: Range<usize>,
 }
 
@@ -282,9 +284,10 @@ impl RenderedImageBlockLayout {
             };
         }
 
-        let resource = Resource::Uri(image_block.url.clone().into());
-        let loaded_height = window
-            .use_asset::<ImgResourceLoader>(&resource, cx)
+        let loaded_height = image_block
+            .image_source
+            .resource()
+            .and_then(|resource| window.use_asset::<ImgResourceLoader>(&resource, cx))
             .and_then(|image| {
                 let image = image.ok()?;
                 let size = image.size(0);
@@ -441,16 +444,9 @@ fn render_image_block(
     let mouse_down_block_layout = DisplayBlockLayout::RemoteImage(image_layout.clone());
     let mouse_move_block_layout = mouse_down_block_layout.clone();
     let image_block = image_layout.image_block;
-    let fallback_label = if image_block.alt_text.trim().is_empty() {
-        image_block
-            .url
-            .split('?')
-            .next()
-            .unwrap_or(&image_block.url)
-            .to_string()
-    } else {
-        image_block.alt_text
-    };
+    let fallback_label = image_block.image_source.fallback_label();
+    let invalid_fallback_label = fallback_label.clone();
+    let image_source = image_block.image_source.image_source();
 
     div()
         .w_full()
@@ -481,22 +477,36 @@ fn render_image_block(
                 })
                 .bg(palette.fenced_code_background)
                 .overflow_hidden()
-                .child(
-                    img(image_block.url)
-                        .size_full()
-                        .object_fit(gpui::ObjectFit::Contain)
-                        .with_fallback(move || {
-                            div()
-                                .size_full()
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .px_3()
-                                .text_color(palette.muted_text)
-                                .child(SharedString::from(fallback_label.clone()))
-                                .into_any_element()
-                        }),
-                ),
+                .when_some(image_source, |this, image_source| {
+                    this.child(
+                        img(image_source)
+                            .size_full()
+                            .object_fit(gpui::ObjectFit::Contain)
+                            .with_fallback(move || {
+                                div()
+                                    .size_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .px_3()
+                                    .text_color(palette.muted_text)
+                                    .child(SharedString::from(fallback_label.clone()))
+                                    .into_any_element()
+                            }),
+                    )
+                })
+                .when(!image_block.image_source.is_renderable(), |this| {
+                    this.child(
+                        div()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .px_3()
+                            .text_color(palette.muted_text)
+                            .child(SharedString::from(invalid_fallback_label.clone())),
+                    )
+                }),
         )
         .when_some(caret_x, |this, caret_x| {
             this.child(caret_element(caret_x, row_style))
@@ -603,17 +613,18 @@ pub(super) fn rendered_image_block_for_row(
     display_row: &DisplayRow,
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
+    document_path: Option<&Path>,
 ) -> Option<RenderedImageBlock> {
-    let descriptor = rendered_block_descriptor_for_row(snapshot, display_row, selection, mode)?;
+    let descriptor =
+        rendered_block_descriptor_for_row(snapshot, display_row, selection, mode, document_path)?;
 
-    let RenderedElementKind::Image { url, alt_text } = descriptor.kind.clone() else {
+    let RenderedElementKind::Image { image_source } = descriptor.kind.clone() else {
         return None;
     };
     Some(RenderedImageBlock {
         source_range: descriptor.source_range.clone(),
         descriptor,
-        url,
-        alt_text,
+        image_source,
     })
 }
 
@@ -624,7 +635,8 @@ pub(super) fn rendered_formula_block_for_row(
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
 ) -> Option<RenderedFormulaBlock> {
-    let descriptor = rendered_block_descriptor_for_row(snapshot, display_row, selection, mode)?;
+    let descriptor =
+        rendered_block_descriptor_for_row(snapshot, display_row, selection, mode, None)?;
 
     let RenderedElementKind::Math { tex } = descriptor.kind.clone() else {
         return None;
@@ -641,16 +653,17 @@ fn rendered_block_for_row(
     display_row: &DisplayRow,
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
+    document_path: Option<&Path>,
 ) -> Option<DisplayBlockKind> {
-    let descriptor = rendered_block_descriptor_for_row(snapshot, display_row, selection, mode)?;
+    let descriptor =
+        rendered_block_descriptor_for_row(snapshot, display_row, selection, mode, document_path)?;
 
     match descriptor.kind.clone() {
-        RenderedElementKind::Image { url, alt_text } => {
+        RenderedElementKind::Image { image_source } => {
             Some(DisplayBlockKind::RemoteImage(RenderedImageBlock {
                 source_range: descriptor.source_range.clone(),
                 descriptor,
-                url,
-                alt_text,
+                image_source,
             }))
         }
         RenderedElementKind::Math { tex } => {
@@ -669,6 +682,7 @@ fn rendered_block_descriptor_for_row(
     display_row: &DisplayRow,
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
+    document_path: Option<&Path>,
 ) -> Option<RenderedElementDescriptor> {
     if mode != MarkdownEditorMode::Rendered {
         return None;
@@ -680,8 +694,13 @@ fn rendered_block_descriptor_for_row(
         .syntax_tree()
         .inline_spans_in_source_range(row_source_range.clone())
         .filter_map(|span| {
-            rendered_element_descriptor_for_inline_span_in_row(span, source_text, row_source_range)
-                .filter(|descriptor| descriptor.placement == RenderedElementPlacement::Block)
+            rendered_element_descriptor_for_inline_span_in_row(
+                span,
+                source_text,
+                row_source_range,
+                document_path,
+            )
+            .filter(|descriptor| descriptor.placement == RenderedElementPlacement::Block)
         });
 
     let descriptor = matching_spans.next()?;

@@ -1,19 +1,19 @@
-use std::ops::Range;
+use std::{ops::Range, path::Path};
 
 use markdown_wysiwyg::{MarkdownInlineKind, MarkdownInlineSpan};
 use md_buffer::BufferSnapshot;
 use md_text::{Point, Selection};
 
 use super::{
-    clip_cursor, clip_selection, is_remote_image_url, range_contains, ranges_overlap,
-    row_source_range, row_text, selection::HorizontalDirection, selection_byte_range,
+    clip_cursor, clip_selection, markdown_image::MarkdownImageSource, range_contains,
+    ranges_overlap, row_source_range, row_text, selection::HorizontalDirection,
+    selection_byte_range,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) enum RenderedElementKind {
     Image {
-        url: String,
-        alt_text: String,
+        image_source: MarkdownImageSource,
     },
     Math {
         tex: String,
@@ -41,6 +41,7 @@ pub(super) fn rendered_element_descriptor_for_inline_span_in_row(
     span: &MarkdownInlineSpan,
     source_text: &str,
     row_source_range: &Range<usize>,
+    document_path: Option<&Path>,
 ) -> Option<RenderedElementDescriptor> {
     if span.marker_ranges.is_empty() || !range_contains(row_source_range, &span.source_range) {
         return None;
@@ -59,21 +60,23 @@ pub(super) fn rendered_element_descriptor_for_inline_span_in_row(
             source_range: span.source_range.clone(),
         }),
         MarkdownInlineKind::Image => {
-            let url = span.url.clone()?;
-            let placement = if rendered_remote_image_span_is_block_in_row(
+            let image_source = MarkdownImageSource::resolve(
+                span.url.clone()?,
+                inline_span_content_text(span, source_text, row_source_range),
+                document_path,
+            );
+            let placement = if rendered_image_span_is_block_in_row(
                 span,
                 source_text,
                 row_source_range,
+                &image_source,
             ) {
                 RenderedElementPlacement::Block
             } else {
                 RenderedElementPlacement::Inline
             };
             Some(RenderedElementDescriptor {
-                kind: RenderedElementKind::Image {
-                    url,
-                    alt_text: inline_span_content_text(span, source_text, row_source_range),
-                },
+                kind: RenderedElementKind::Image { image_source },
                 placement,
                 source_range: span.source_range.clone(),
             })
@@ -283,20 +286,16 @@ fn rendered_element_descriptor_for_span(
     let row_source_range = row_source_range(snapshot, row);
     let source_text = row_text(snapshot, row);
 
-    rendered_element_descriptor_for_inline_span_in_row(span, &source_text, &row_source_range)
+    rendered_element_descriptor_for_inline_span_in_row(span, &source_text, &row_source_range, None)
 }
 
-pub(super) fn rendered_remote_image_span_is_block_in_row(
+pub(super) fn rendered_image_span_is_block_in_row(
     span: &MarkdownInlineSpan,
     source_text: &str,
     row_source_range: &Range<usize>,
+    image_source: &MarkdownImageSource,
 ) -> bool {
-    if !span
-        .url
-        .as_ref()
-        .is_some_and(|url| is_remote_image_url(url))
-        || !range_contains(row_source_range, &span.source_range)
-    {
+    if !image_source.is_renderable() || !range_contains(row_source_range, &span.source_range) {
         return false;
     }
 

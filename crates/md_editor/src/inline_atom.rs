@@ -1,8 +1,8 @@
 use std::ops::Range;
 
 use gpui::{
-    App, ImgResourceLoader, IntoElement, LineFragment, Resource, SharedString, Window, div, img,
-    prelude::*, px,
+    App, ImgResourceLoader, IntoElement, LineFragment, SharedString, Window, div, img, prelude::*,
+    px,
 };
 use md_assets::EDITOR_FONT_FAMILY;
 use md_theme::editor_palette;
@@ -10,6 +10,7 @@ use md_theme::editor_palette;
 use super::{
     DisplayRow, DisplayTextStyle, RowDisplayStyle, StyledDisplaySegment,
     layout::inline_style,
+    markdown_image::{MarkdownImageSource, MarkdownImageSourceKey},
     rendered_element::{RenderedElementDescriptor, RenderedElementKind, RenderedElementPlacement},
 };
 
@@ -37,7 +38,7 @@ pub(super) struct DisplayInlineAtom {
     pub(super) source_range: Range<usize>,
     pub(super) display_range: Range<usize>,
     pub(super) fallback_text: String,
-    pub(super) image_url: Option<String>,
+    pub(super) image_source: Option<MarkdownImageSource>,
     pub(super) style: DisplayTextStyle,
     pub(super) height: gpui::Pixels,
     pub(super) width: gpui::Pixels,
@@ -56,7 +57,7 @@ pub(super) struct InlineAtomMeasurementKey {
     pub(super) descriptor: RenderedElementDescriptor,
     pub(super) fallback_text: String,
     pub(super) row_style: RowDisplayStyle,
-    pub(super) resource_id: Option<String>,
+    pub(super) resource_id: Option<MarkdownImageSourceKey>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -126,7 +127,10 @@ impl DisplayInlineAtom {
             descriptor: self.descriptor.clone(),
             fallback_text: self.fallback_text.clone(),
             row_style,
-            resource_id: self.image_url.clone(),
+            resource_id: self
+                .image_source
+                .as_ref()
+                .map(MarkdownImageSource::cache_key),
         }
     }
 
@@ -181,11 +185,13 @@ impl DisplayInlineAtom {
         window: &mut Window,
         cx: &mut App,
     ) -> InlineAtomMeasurementState {
-        let Some(image_url) = self.image_url.as_ref() else {
+        let Some(image_source) = self.image_source.as_ref() else {
+            return InlineAtomMeasurementState::Invalid(fallback_size);
+        };
+        let Some(resource) = image_source.resource() else {
             return InlineAtomMeasurementState::Invalid(fallback_size);
         };
 
-        let resource = Resource::Uri(image_url.clone().into());
         let Some(image) = window.use_asset::<ImgResourceLoader>(&resource, cx) else {
             return InlineAtomMeasurementState::Pending(fallback_size);
         };
@@ -261,7 +267,10 @@ impl DisplayInlineAtom {
             }
             DisplayInlineAtomKind::InlineImage => {
                 let palette = editor_palette();
-                let image_url = self.image_url.clone().unwrap_or(text);
+                let image_source = self
+                    .image_source
+                    .as_ref()
+                    .and_then(|source| source.image_source());
                 let size = size.unwrap_or_else(|| gpui::size(self.width, self.height));
                 let mut element = div()
                     .w(size.width)
@@ -275,16 +284,29 @@ impl DisplayInlineAtom {
                     } else {
                         palette.gutter_text.opacity(0.45)
                     })
-                    .child(img(image_url).size_full().with_fallback(|| {
-                        div()
-                            .size_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_color(editor_palette().muted_text)
-                            .child("img")
-                            .into_any_element()
-                    }));
+                    .when_some(image_source, |this, image_source| {
+                        this.child(img(image_source).size_full().with_fallback(|| {
+                            div()
+                                .size_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_color(editor_palette().muted_text)
+                                .child("img")
+                                .into_any_element()
+                        }))
+                    })
+                    .when(self.image_source.is_none(), |this| {
+                        this.child(
+                            div()
+                                .size_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_color(editor_palette().muted_text)
+                                .child(SharedString::from(text)),
+                        )
+                    });
                 if selected {
                     element = element.bg(palette.selection_background.opacity(0.32));
                 }
@@ -342,8 +364,8 @@ impl DisplayInlineAtom {
         if fallback_text.is_empty() {
             return None;
         }
-        let image_url = match &descriptor.kind {
-            RenderedElementKind::Image { url, .. } => Some(url.clone()),
+        let image_source = match &descriptor.kind {
+            RenderedElementKind::Image { image_source } => Some(image_source.clone()),
             RenderedElementKind::Math { .. } | RenderedElementKind::Custom { .. } => None,
         };
         let style = inline_style(match kind {
@@ -356,7 +378,7 @@ impl DisplayInlineAtom {
             descriptor,
             display_range,
             fallback_text,
-            image_url,
+            image_source,
             style,
             height: kind.height(row_style),
             width: px(0.),

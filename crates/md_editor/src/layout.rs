@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{ops::Range, path::Path};
 
 use gpui::{
     App, FontStyle, FontWeight, LineFragment, SharedString, StrikethroughStyle, TextRun,
@@ -163,9 +163,11 @@ pub(super) fn display_row_layout_inputs(
     display_row: &DisplayRow,
     mode: MarkdownEditorMode,
     row_style: RowDisplayStyle,
+    document_path: Option<&Path>,
     window: &mut Window,
 ) -> DisplayRowLayoutInputs {
-    let fragments = display_fragments_for_text_layout(snapshot, display_row, mode, row_style);
+    let fragments =
+        display_fragments_for_text_layout(snapshot, display_row, mode, row_style, document_path);
     display_row_layout_inputs_for_fragments(display_row, fragments, row_style, window)
 }
 
@@ -286,12 +288,13 @@ pub(super) fn display_fragments_for_text_layout(
     display_row: &DisplayRow,
     mode: MarkdownEditorMode,
     row_style: RowDisplayStyle,
+    document_path: Option<&Path>,
 ) -> Vec<DisplayInlineFragment> {
     if mode == MarkdownEditorMode::Source {
         return source_display_fragments(display_row);
     }
 
-    display_inline_fragments(snapshot, display_row, mode, row_style)
+    display_inline_fragments(snapshot, display_row, mode, row_style, document_path)
 }
 
 pub(super) fn apply_inline_atom_measurements(
@@ -513,6 +516,7 @@ pub(super) fn display_inline_fragments(
     display_row: &DisplayRow,
     mode: MarkdownEditorMode,
     row_style: RowDisplayStyle,
+    document_path: Option<&Path>,
 ) -> Vec<DisplayInlineFragment> {
     if mode != MarkdownEditorMode::Rendered {
         return source_display_fragments(display_row);
@@ -528,7 +532,7 @@ pub(super) fn display_inline_fragments(
         })];
     }
 
-    let row_inputs = display_inline_row_inputs(snapshot, display_row, row_style);
+    let row_inputs = display_inline_row_inputs(snapshot, display_row, row_style, document_path);
     let hidden_ranges = display_row.projection.hidden_ranges();
     let mut breakpoints = vec![source_range.start, source_range.end];
     for hidden_range in hidden_ranges {
@@ -645,6 +649,7 @@ pub(super) fn display_inline_row_inputs(
     snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
     row_style: RowDisplayStyle,
+    document_path: Option<&Path>,
 ) -> DisplayInlineRowInputs {
     let row_source_range = &display_row.source_range;
     let mut inputs = DisplayInlineRowInputs::default();
@@ -684,6 +689,7 @@ pub(super) fn display_inline_row_inputs(
             span,
             &display_row.source_text,
             row_source_range,
+            document_path,
         )
         .and_then(|descriptor| {
             DisplayInlineAtom::from_descriptor(display_row, descriptor, row_style)

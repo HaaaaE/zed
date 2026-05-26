@@ -164,6 +164,7 @@ impl MarkdownEditor {
             display_row_state,
             source_range,
             active_projection_source_ranges,
+            self.document_path(),
         ));
         self.display_row_cache
             .insert(cache_key, display_row.clone());
@@ -227,6 +228,7 @@ impl MarkdownEditor {
             display_row,
             selection,
             mode,
+            self.document_path(),
             wrap_width,
             row_style,
             measure_inline_atoms,
@@ -327,7 +329,14 @@ impl MarkdownEditor {
             return inputs.clone();
         }
 
-        let inputs = display_row_layout_inputs(snapshot, display_row, mode, row_style, window);
+        let inputs = display_row_layout_inputs(
+            snapshot,
+            display_row,
+            mode,
+            row_style,
+            self.document_path(),
+            window,
+        );
         self.row_layout_input_cache
             .insert(cache_key, inputs.clone());
         inputs

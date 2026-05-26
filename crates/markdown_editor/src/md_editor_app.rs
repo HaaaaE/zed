@@ -34,7 +34,7 @@ impl MarkdownEditorShell {
                 }),
             None => (None, String::new(), None),
         };
-        let (editor, editor_subscription) = Self::build_editor(contents, mode, cx);
+        let (editor, editor_subscription) = Self::build_editor(contents, path.clone(), mode, cx);
         window.focus(&editor.focus_handle(cx), cx);
 
         Self {
@@ -48,11 +48,12 @@ impl MarkdownEditorShell {
 
     fn build_editor(
         contents: String,
+        path: Option<PathBuf>,
         mode: MarkdownEditorMode,
         cx: &mut Context<Self>,
     ) -> (Entity<MarkdownEditor>, Subscription) {
         let editor = cx.new(|cx| {
-            let mut editor = MarkdownEditor::for_text(contents, cx);
+            let mut editor = MarkdownEditor::for_text_with_document_path(contents, path, cx);
             editor.set_mode(mode, cx);
             editor
         });
@@ -77,7 +78,7 @@ impl MarkdownEditorShell {
         cx: &mut Context<Self>,
     ) {
         let mode = self.mode(cx);
-        let (editor, editor_subscription) = Self::build_editor(contents, mode, cx);
+        let (editor, editor_subscription) = Self::build_editor(contents, path.clone(), mode, cx);
         self.editor = editor;
         self._editor_subscription = editor_subscription;
         self.path = path;
@@ -204,7 +205,10 @@ impl MarkdownEditorShell {
                     return;
                 }
 
-                this.path = Some(path);
+                this.path = Some(path.clone());
+                this.editor.update(cx, |editor, cx| {
+                    editor.set_document_path(Some(path.clone()), cx)
+                });
                 this.save_to_current_path(cx);
             })
             .ok();
@@ -226,7 +230,10 @@ impl MarkdownEditorShell {
             return;
         }
 
-        self.editor.update(cx, |editor, cx| editor.mark_saved(cx));
+        self.editor.update(cx, |editor, cx| {
+            editor.set_document_path(Some(path.clone()), cx);
+            editor.mark_saved(cx);
+        });
         self.error_message = None;
         self.is_dirty = false;
         cx.notify();

@@ -8,6 +8,16 @@ virtualization model:
 - render Markdown formulas through RaTeX instead of text-only placeholders
 - render local Markdown images through GPUI path-backed image loading
 
+## Progress
+
+- 2026-05-27: Completed the local-image foundation and rendering path.
+  - Added `markdown_image` with conservative remote/local/invalid resolution and tests for `http`, `https`, absolute paths, `file://`, relative paths with/without document paths, unsupported schemes, and Windows drive-letter paths.
+  - Added `MarkdownEditor` document path state and passed opened/saved paths from `markdown_editor`.
+  - Threaded `MarkdownImageSource` through rendered descriptors, inline atoms, block images, measurement keys, measurement, and paint.
+  - Local relative image rows with a document path now become rendered image blocks; unresolved relative images remain fallback inline atoms.
+  - Verified with `cargo fmt -p md_editor -p markdown_editor`, `cargo test -p md_editor`, `cargo test -p markdown_wysiwyg`, and `cargo check -p md_editor -p markdown_editor`.
+- Remaining: RaTeX formula asset rendering and its cache/style/scale/interaction tests are not implemented yet.
+
 The implementation must keep measurement and rendering in agreement. The same
 resolved image or formula source should drive layout, cache keys, and paint.
 

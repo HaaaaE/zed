@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     ops::Range,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -27,6 +28,7 @@ mod edit;
 mod inline_atom;
 mod interaction;
 mod layout;
+mod markdown_image;
 mod render;
 mod rendered_element;
 mod selection;
@@ -69,16 +71,19 @@ use layout::{
     unwrapped_visual_rows_if_fits, visual_row_height_for_range,
 };
 #[cfg(test)]
+use markdown_image::MarkdownImageSource;
+#[cfg(test)]
 use render::{fragment_text_for_visual_row, selection_bounds_for_visual_row};
 use render::{render_display_row_layout, render_row_text};
+use rendered_element::RenderedElementPlacement;
 #[cfg(test)]
 use rendered_element::source_offset_is_rendered_element_boundary;
 #[cfg(test)]
-use rendered_element::{RenderedElementDescriptor, RenderedElementKind, RenderedElementPlacement};
+use rendered_element::{RenderedElementDescriptor, RenderedElementKind};
 use rendered_element::{
     active_source_range_for_selection, inactive_rendered_element_source_ranges_for_selection,
     rendered_element_descriptor_for_inline_span_in_row, rendered_element_range_at_cursor,
-    rendered_element_source_range_is_active, rendered_remote_image_span_is_block_in_row,
+    rendered_element_source_range_is_active,
 };
 #[cfg(test)]
 use selection::{HorizontalDirection, move_horizontal_in_mode, move_selection_left, move_vertical};
@@ -187,6 +192,7 @@ pub fn init_standalone(cx: &mut App) {
 
 pub struct MarkdownEditor {
     buffer: Buffer,
+    document_path: Option<PathBuf>,
     focus_handle: FocusHandle,
     display_list_state: ListState,
     mode: MarkdownEditorMode,
@@ -276,6 +282,7 @@ impl MarkdownEditor {
         let row_size_hint = gpui::size(px(0.), default_row_metrics().min_height);
         Self {
             buffer,
+            document_path: None,
             focus_handle: cx.focus_handle(),
             display_list_state: ListState::new(row_count, ListAlignment::Top, px(1000.))
                 .with_default_size_hint(row_size_hint),
@@ -297,6 +304,35 @@ impl MarkdownEditor {
 
     pub fn for_text(text: impl Into<String>, cx: &mut Context<Self>) -> Self {
         Self::new(Buffer::local(text), cx)
+    }
+
+    pub fn for_text_with_document_path(
+        text: impl Into<String>,
+        path: Option<PathBuf>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut editor = Self::for_text(text, cx);
+        editor.document_path = path;
+        editor
+    }
+
+    pub fn document_path(&self) -> Option<&Path> {
+        self.document_path.as_deref()
+    }
+
+    pub fn set_document_path(&mut self, path: Option<PathBuf>, cx: &mut Context<Self>) {
+        if self.document_path == path {
+            return;
+        }
+
+        self.document_path = path;
+        self.clear_display_row_cache();
+        self.clear_row_layout_cache();
+        self.inline_atom_measurement_cache.clear();
+        self.pending_inline_atom_rows.clear();
+        self.pending_inline_atom_remeasure_rows.clear();
+        self.display_list_state.remeasure();
+        cx.notify();
     }
 
     pub fn buffer(&self) -> &Buffer {
@@ -1807,6 +1843,7 @@ fn display_rows_in_mode(
                 &display_row_state,
                 source_range,
                 active_projection_source_ranges,
+                None,
             )
         })
         .collect()
@@ -1819,6 +1856,7 @@ fn display_row_in_mode(
     display_row_state: &DisplayRowProjectionState,
     source_range: Range<usize>,
     active_projection_source_ranges: Vec<Range<usize>>,
+    document_path: Option<&Path>,
 ) -> DisplayRow {
     let source_text: String = snapshot
         .as_text_snapshot()
@@ -1839,8 +1877,14 @@ fn display_row_in_mode(
             ),
     };
 
-    let (text, insertions) =
-        project_display_row_text(snapshot, &source_text, &source_range, &projection, mode);
+    let (text, insertions) = project_display_row_text(
+        snapshot,
+        &source_text,
+        &source_range,
+        &projection,
+        mode,
+        document_path,
+    );
     DisplayRow {
         row,
         text,
@@ -1902,6 +1946,7 @@ fn project_display_row_text(
     row_source_range: &Range<usize>,
     projection: &MarkdownProjectionMap,
     mode: MarkdownEditorMode,
+    document_path: Option<&Path>,
 ) -> (String, Vec<DisplayInsertion>) {
     let mut display_text = project_row_text(source_text, projection);
     if mode != MarkdownEditorMode::Rendered {
@@ -1913,8 +1958,15 @@ fn project_display_row_text(
         .syntax_tree()
         .inline_spans_in_source_range(row_source_range.clone())
     {
+        let descriptor = rendered_element_descriptor_for_inline_span_in_row(
+            span,
+            source_text,
+            row_source_range,
+            document_path,
+        );
         if span.kind != MarkdownInlineKind::Image
-            || rendered_remote_image_span_is_block_in_row(span, source_text, row_source_range)
+            || descriptor
+                .is_some_and(|descriptor| descriptor.placement == RenderedElementPlacement::Block)
             || !range_contains(&row_source_range, &span.source_range)
             || !span.marker_ranges.iter().any(|marker_range| {
                 projection
@@ -2016,10 +2068,6 @@ fn local_source_edit_invalidation_rows(
 
 fn range_contains(container: &Range<usize>, candidate: &Range<usize>) -> bool {
     container.start <= candidate.start && container.end >= candidate.end
-}
-
-fn is_remote_image_url(url: &str) -> bool {
-    url.starts_with("http://") || url.starts_with("https://")
 }
 
 fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool {
@@ -2172,12 +2220,18 @@ mod test_support {
     ) -> RenderedElementDescriptor {
         RenderedElementDescriptor {
             kind: RenderedElementKind::Image {
-                url: url.into(),
-                alt_text: alt_text.into(),
+                image_source: MarkdownImageSource::resolve(url, alt_text, None),
             },
             placement,
             source_range,
         }
+    }
+
+    pub(super) fn markdown_image_source(
+        url: impl Into<String>,
+        alt_text: impl Into<String>,
+    ) -> MarkdownImageSource {
+        MarkdownImageSource::resolve(url, alt_text, None)
     }
 
     pub(super) fn math_descriptor(
@@ -2243,8 +2297,11 @@ mod test_support {
                 alt_text.clone(),
                 RenderedElementPlacement::Block,
             ),
-            url: "https://example.com/cat.png".to_string(),
-            alt_text,
+            image_source: MarkdownImageSource::resolve(
+                "https://example.com/cat.png",
+                alt_text,
+                None,
+            ),
             source_range,
         }
     }

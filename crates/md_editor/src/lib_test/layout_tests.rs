@@ -206,8 +206,13 @@ fn rendered_display_rows_keep_contained_inline_atom_inactive_when_selected() {
 
     let row_style =
         row_display_style_for_display_row(&snapshot, &rows[0], MarkdownEditorMode::Rendered);
-    let fragments =
-        display_inline_fragments(&snapshot, &rows[0], MarkdownEditorMode::Rendered, row_style);
+    let fragments = display_inline_fragments(
+        &snapshot,
+        &rows[0],
+        MarkdownEditorMode::Rendered,
+        row_style,
+        None,
+    );
     let atom = fragments.iter().find_map(|fragment| match fragment {
         DisplayInlineFragment::Atom(atom) => Some(atom),
         DisplayInlineFragment::Text(_) => None,
@@ -257,7 +262,7 @@ fn rendered_inline_row_inputs_collect_styles_and_atoms_together() {
 
     let row_style =
         row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
-    let inputs = display_inline_row_inputs(&snapshot, &row, row_style);
+    let inputs = display_inline_row_inputs(&snapshot, &row, row_style, None);
     let bold_start = source.find("bold").expect("expected bold content");
     let bold_range = bold_start..bold_start + "bold".len();
     let math_start = source.find("$x$").expect("expected inline math");
@@ -286,8 +291,13 @@ fn source_fragments_use_plain_text_fast_path() {
     .remove(0);
 
     let row_style = row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Source);
-    let fragments =
-        display_fragments_for_text_layout(&snapshot, &row, MarkdownEditorMode::Source, row_style);
+    let fragments = display_fragments_for_text_layout(
+        &snapshot,
+        &row,
+        MarkdownEditorMode::Source,
+        row_style,
+        None,
+    );
 
     assert_eq!(
         fragments,
@@ -315,8 +325,13 @@ fn rendered_inline_fragments_create_inline_math_atom() {
 
     let row_style =
         row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
-    let fragments =
-        display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
+    let fragments = display_inline_fragments(
+        &snapshot,
+        &row,
+        MarkdownEditorMode::Rendered,
+        row_style,
+        None,
+    );
     let atom = fragments
         .iter()
         .find_map(|fragment| match fragment {
@@ -357,8 +372,13 @@ fn rendered_inline_fragments_create_inline_image_atom() {
 
     let row_style =
         row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
-    let fragments =
-        display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
+    let fragments = display_inline_fragments(
+        &snapshot,
+        &row,
+        MarkdownEditorMode::Rendered,
+        row_style,
+        None,
+    );
     let atom = fragments
         .iter()
         .find_map(|fragment| match fragment {
@@ -370,7 +390,9 @@ fn rendered_inline_fragments_create_inline_image_atom() {
     assert_eq!(atom.kind(), DisplayInlineAtomKind::InlineImage);
     assert_eq!(atom.fallback_text, "alt");
     assert_eq!(
-        atom.image_url.as_deref(),
+        atom.image_source
+            .as_ref()
+            .map(|source| source.raw_destination()),
         Some("https://example.com/cat.png")
     );
     assert_eq!(atom.display_range, 7..10);
@@ -401,8 +423,13 @@ fn rendered_inline_fragments_create_empty_alt_inline_image_atom() {
 
     let row_style =
         row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
-    let fragments =
-        display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
+    let fragments = display_inline_fragments(
+        &snapshot,
+        &row,
+        MarkdownEditorMode::Rendered,
+        row_style,
+        None,
+    );
     let atom = fragments
         .iter()
         .find_map(|fragment| match fragment {
@@ -414,7 +441,9 @@ fn rendered_inline_fragments_create_empty_alt_inline_image_atom() {
     assert_eq!(atom.kind(), DisplayInlineAtomKind::InlineImage);
     assert_eq!(atom.fallback_text, INLINE_IMAGE_PLACEHOLDER);
     assert_eq!(
-        atom.image_url.as_deref(),
+        atom.image_source
+            .as_ref()
+            .map(|source| source.raw_destination()),
         Some("https://example.com/cat.png")
     );
     assert_eq!(atom.display_range, 7..7 + INLINE_IMAGE_PLACEHOLDER.len());
@@ -446,7 +475,7 @@ fn inline_atom_measurement_key_tracks_descriptor_content_and_row_style() {
         source_range: 0..30,
         display_range: 0..3,
         fallback_text: "cat".to_string(),
-        image_url: Some("https://example.com/cat.png".to_string()),
+        image_source: Some(markdown_image_source("https://example.com/cat.png", "")),
         style: inline_style(MarkdownInlineKind::Image),
         height: INLINE_IMAGE_ATOM_SIZE,
         width: px(0.),
@@ -459,7 +488,7 @@ fn inline_atom_measurement_key_tracks_descriptor_content_and_row_style() {
             "cat",
             RenderedElementPlacement::Inline,
         ),
-        image_url: Some("https://example.com/dog.png".to_string()),
+        image_source: Some(markdown_image_source("https://example.com/dog.png", "")),
         ..image.clone()
     }
     .measurement_key(row_style);
@@ -469,7 +498,7 @@ fn inline_atom_measurement_key_tracks_descriptor_content_and_row_style() {
         source_range: 0..3,
         display_range: 0..1,
         fallback_text: "x".to_string(),
-        image_url: None,
+        image_source: None,
         style: inline_style(MarkdownInlineKind::InlineMath),
         height: row_style.line_height + INLINE_MATH_ATOM_EXTRA_HEIGHT,
         width: px(0.),
@@ -501,8 +530,13 @@ fn inline_atom_display_boundaries_map_to_source_boundaries() {
 
     let row_style =
         row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
-    let fragments =
-        display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
+    let fragments = display_inline_fragments(
+        &snapshot,
+        &row,
+        MarkdownEditorMode::Rendered,
+        row_style,
+        None,
+    );
 
     assert_eq!(source_offset_for_display_offset(&row, &fragments, 7), 7);
     assert_eq!(source_offset_for_display_offset(&row, &fragments, 12), 14);
@@ -523,8 +557,13 @@ fn empty_alt_inline_image_display_boundaries_map_to_source_boundaries() {
 
     let row_style =
         row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
-    let fragments =
-        display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
+    let fragments = display_inline_fragments(
+        &snapshot,
+        &row,
+        MarkdownEditorMode::Rendered,
+        row_style,
+        None,
+    );
     let display_start = "Before ".len();
     let display_end = display_start + INLINE_IMAGE_PLACEHOLDER.len();
     let source_start = "Before ".len();
@@ -555,7 +594,7 @@ fn inline_atom_height_expands_visual_row_height() {
             source_range: 8..15,
             display_range: 7..12,
             fallback_text: "x + y".to_string(),
-            image_url: None,
+            image_source: None,
             style: inline_style(MarkdownInlineKind::InlineMath),
             height: atom_height,
             width: px(50.),
@@ -589,7 +628,7 @@ fn inline_atom_selected_state_requires_full_display_range() {
         source_range: 8..15,
         display_range: 7..12,
         fallback_text: "x + y".to_string(),
-        image_url: None,
+        image_source: None,
         style: inline_style(MarkdownInlineKind::InlineMath),
         height: row_style.line_height + INLINE_MATH_ATOM_EXTRA_HEIGHT,
         width: px(50.),
@@ -650,7 +689,7 @@ fn line_fragments_for_wrapping_uses_inline_atom_element_width() {
             source_range: 8..15,
             display_range: 7..12,
             fallback_text: "x + y".to_string(),
-            image_url: None,
+            image_source: None,
             style: inline_style(MarkdownInlineKind::InlineMath),
             height: px(24.),
             width: px(42.),
@@ -699,7 +738,7 @@ fn line_fragments_for_wrapping_uses_inline_image_atom_size() {
             source_range: 7..42,
             display_range: 7..10,
             fallback_text: "alt".to_string(),
-            image_url: Some("https://example.com/cat.png".to_string()),
+            image_source: Some(markdown_image_source("https://example.com/cat.png", "")),
             style: inline_style(MarkdownInlineKind::Image),
             height: INLINE_IMAGE_ATOM_SIZE,
             width: INLINE_IMAGE_ATOM_SIZE,
@@ -746,7 +785,7 @@ fn line_fragments_for_wrapping_uses_empty_alt_inline_image_atom_size() {
             source_range: 7..39,
             display_range: 7..placeholder_end,
             fallback_text: INLINE_IMAGE_PLACEHOLDER.to_string(),
-            image_url: Some("https://example.com/cat.png".to_string()),
+            image_source: Some(markdown_image_source("https://example.com/cat.png", "")),
             style: inline_style(MarkdownInlineKind::Image),
             height: INLINE_IMAGE_ATOM_SIZE,
             width: INLINE_IMAGE_ATOM_SIZE,
@@ -812,7 +851,7 @@ fn atomic_wrap_boundary_keeps_inline_atom_on_one_visual_row() {
         source_range: 8..15,
         display_range: 7..12,
         fallback_text: "x + y".to_string(),
-        image_url: None,
+        image_source: None,
         style: inline_style(MarkdownInlineKind::InlineMath),
         height: px(24.),
         width: px(50.),
@@ -836,7 +875,7 @@ fn inline_atom_x_position_snaps_to_nearest_boundary() {
         source_range: 8..15,
         display_range: 7..12,
         fallback_text: "x + y".to_string(),
-        image_url: None,
+        image_source: None,
         style: inline_style(MarkdownInlineKind::InlineMath),
         height: px(24.),
         width: px(50.),
@@ -861,9 +900,73 @@ fn rendered_image_block_detects_inactive_remote_image_row() {
 
     assert_eq!(row.text, "alt");
     assert_eq!(
-        rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+        rendered_image_block_for_row(
+            &snapshot,
+            &row,
+            &selection,
+            MarkdownEditorMode::Rendered,
+            None
+        ),
         Some(rendered_image_block(0..35, "alt"))
     );
+}
+
+#[test]
+fn rendered_image_block_detects_inactive_relative_local_image_row_with_document_path() {
+    let document_path = std::env::current_dir().unwrap().join("docs/readme.md");
+    let mut buffer = Buffer::local("![alt](./cat.png)\nnext\n");
+    let snapshot = buffer.snapshot();
+    let selection = collapsed_selection(Point::new(1, 0));
+    let row = display_rows_in_mode(
+        &snapshot,
+        0..1,
+        Some(&selection),
+        MarkdownEditorMode::Rendered,
+    )
+    .remove(0);
+
+    let image_block = rendered_image_block_for_row(
+        &snapshot,
+        &row,
+        &selection,
+        MarkdownEditorMode::Rendered,
+        Some(&document_path),
+    )
+    .expect("relative local image should become a block with a document path");
+
+    assert_eq!(row.text, "alt");
+    assert!(image_block.image_source.is_renderable());
+}
+
+#[test]
+fn rendered_relative_local_image_stays_inline_fallback_without_document_path() {
+    let mut buffer = Buffer::local("Before ![alt](./cat.png) after\n");
+    let snapshot = buffer.snapshot();
+    let row = display_rows_in_mode(
+        &snapshot,
+        0..1,
+        Some(&collapsed_selection(Point::new(0, 0))),
+        MarkdownEditorMode::Rendered,
+    )
+    .remove(0);
+    let row_style =
+        row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
+    let fragments = display_inline_fragments(
+        &snapshot,
+        &row,
+        MarkdownEditorMode::Rendered,
+        row_style,
+        None,
+    );
+    let atom = fragments
+        .iter()
+        .find_map(|fragment| match fragment {
+            DisplayInlineFragment::Atom(atom) => Some(atom),
+            DisplayInlineFragment::Text(_) => None,
+        })
+        .expect("expected inline local image atom");
+
+    assert!(!atom.image_source.as_ref().unwrap().is_renderable());
 }
 
 #[test]
@@ -886,8 +989,14 @@ fn rendered_formula_block_detects_inactive_formula_row() {
         Some(rendered_formula_block(0..formula_source.len(), "x + y"))
     );
     assert!(
-        rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered)
-            .is_none()
+        rendered_image_block_for_row(
+            &snapshot,
+            &row,
+            &selection,
+            MarkdownEditorMode::Rendered,
+            None
+        )
+        .is_none()
     );
 }
 
@@ -930,7 +1039,13 @@ fn rendered_image_block_keeps_source_boundaries_inactive() {
 
         assert_eq!(row.text, "alt");
         assert_eq!(
-            rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+            rendered_image_block_for_row(
+                &snapshot,
+                &row,
+                &selection,
+                MarkdownEditorMode::Rendered,
+                None
+            ),
             Some(rendered_image_block(0..image_source_end, "alt"))
         );
     }
@@ -958,7 +1073,13 @@ fn rendered_image_block_keeps_whole_selection_inactive() {
 
     assert_eq!(row.text, "alt");
     assert_eq!(
-        rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+        rendered_image_block_for_row(
+            &snapshot,
+            &row,
+            &selection,
+            MarkdownEditorMode::Rendered,
+            None
+        ),
         Some(rendered_image_block(0..image_source_end, "alt"))
     );
 }
@@ -986,7 +1107,13 @@ fn rendered_image_block_keeps_contained_selection_inactive() {
     let image_source_start = "intro\n".len();
     assert_eq!(row.text, "alt");
     assert_eq!(
-        rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+        rendered_image_block_for_row(
+            &snapshot,
+            &row,
+            &selection,
+            MarkdownEditorMode::Rendered,
+            None
+        ),
         Some(rendered_image_block(
             image_source_start..image_source_start + image_source.len(),
             "alt",
@@ -1010,14 +1137,25 @@ fn fenced_code_stays_text_layout_in_rendered_mode() {
 
     assert_eq!(row.text, "let x = 1;");
     assert!(
-        rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered)
-            .is_none()
+        rendered_image_block_for_row(
+            &snapshot,
+            &row,
+            &selection,
+            MarkdownEditorMode::Rendered,
+            None
+        )
+        .is_none()
     );
 
     let row_style =
         row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
-    let fragments =
-        display_fragments_for_text_layout(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
+    let fragments = display_fragments_for_text_layout(
+        &snapshot,
+        &row,
+        MarkdownEditorMode::Rendered,
+        row_style,
+        None,
+    );
     assert!(
         fragments
             .iter()
@@ -1041,14 +1179,25 @@ fn pipe_table_stays_text_layout_in_rendered_mode() {
 
     assert_eq!(row.text, "| 1 | 2 |");
     assert!(
-        rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered)
-            .is_none()
+        rendered_image_block_for_row(
+            &snapshot,
+            &row,
+            &selection,
+            MarkdownEditorMode::Rendered,
+            None
+        )
+        .is_none()
     );
 
     let row_style =
         row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
-    let fragments =
-        display_fragments_for_text_layout(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
+    let fragments = display_fragments_for_text_layout(
+        &snapshot,
+        &row,
+        MarkdownEditorMode::Rendered,
+        row_style,
+        None,
+    );
     assert!(
         fragments
             .iter()
@@ -1434,7 +1583,13 @@ fn rendered_image_block_reveals_active_image_source() {
 
     assert_eq!(row.text, "![alt](https://example.com/cat.png)");
     assert_eq!(
-        rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+        rendered_image_block_for_row(
+            &snapshot,
+            &row,
+            &selection,
+            MarkdownEditorMode::Rendered,
+            None
+        ),
         None
     );
 }
@@ -1453,7 +1608,13 @@ fn rendered_image_block_skips_inline_images_with_surrounding_text() {
     .remove(0);
 
     assert_eq!(
-        rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+        rendered_image_block_for_row(
+            &snapshot,
+            &row,
+            &selection,
+            MarkdownEditorMode::Rendered,
+            None
+        ),
         None
     );
 }
@@ -1474,7 +1635,13 @@ fn rendered_inline_image_boundary_stays_inactive() {
 
     assert_eq!(row.text, "before alt after");
     assert_eq!(
-        rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+        rendered_image_block_for_row(
+            &snapshot,
+            &row,
+            &selection,
+            MarkdownEditorMode::Rendered,
+            None
+        ),
         None
     );
 }
@@ -1502,7 +1669,13 @@ fn rendered_inline_image_whole_selection_stays_inactive() {
 
     assert_eq!(row.text, "before alt after");
     assert_eq!(
-        rendered_image_block_for_row(&snapshot, &row, &selection, MarkdownEditorMode::Rendered),
+        rendered_image_block_for_row(
+            &snapshot,
+            &row,
+            &selection,
+            MarkdownEditorMode::Rendered,
+            None
+        ),
         None
     );
 }

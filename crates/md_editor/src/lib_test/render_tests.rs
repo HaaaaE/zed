@@ -14,8 +14,13 @@ fn rendered_styled_segments_apply_heading_semantics() {
 
     let row_style =
         row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
-    let fragments =
-        display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
+    let fragments = display_inline_fragments(
+        &snapshot,
+        &row,
+        MarkdownEditorMode::Rendered,
+        row_style,
+        None,
+    );
     let segments = text_segments_for_fragments(&fragments);
 
     assert_eq!(segments.len(), 1);
@@ -41,8 +46,13 @@ fn rendered_styled_segments_apply_inline_semantics() {
 
     let row_style =
         row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
-    let fragments =
-        display_inline_fragments(&snapshot, &row, MarkdownEditorMode::Rendered, row_style);
+    let fragments = display_inline_fragments(
+        &snapshot,
+        &row,
+        MarkdownEditorMode::Rendered,
+        row_style,
+        None,
+    );
     let segments = text_segments_for_fragments(&fragments);
 
     assert_eq!(
