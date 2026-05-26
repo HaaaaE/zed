@@ -2254,6 +2254,9 @@ mod interaction_tests;
 #[cfg(test)]
 #[path = "lib_test/layout_tests.rs"]
 mod layout_tests;
+#[cfg(perf_enabled)]
+#[path = "lib_test/perf_tests.rs"]
+mod perf_tests;
 #[cfg(test)]
 #[path = "lib_test/render_tests.rs"]
 mod render_tests;

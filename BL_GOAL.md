@@ -73,6 +73,7 @@
 ## 验证
 
 - 最近相关 crate 的检查已经通过，包括 `cargo fmt -p markdown_wysiwyg -p md_editor`、`cargo check -p markdown_wysiwyg -p md_editor`、`cargo test -p markdown_wysiwyg -p md_editor`；当前 `markdown_wysiwyg` 为 17 个测试，`md_editor` 为 145 个测试。
+- `md_editor` 的最小 profiling 入口现在也已经跑通：`release-fast + perf_enabled` 构建可编译，perf harness 能识别新增的 300KB 级 Markdown Source / Rendered 用例，并且在安装 `hyperfine` 后，`cargo perf-test -p md_editor -- --quiet` 已能产出首轮基线结果；当前一次迭代下，Rendered draw large markdown 约为 908.50ms，Source draw large markdown 约为 947.10ms。
 - 当前的聚焦测试覆盖已验证 wrapped movement、inline atom / image、source display-row / cache / render 快路径、Source edit 与 undo / redo 缓存失效、Rendered interaction layout caching、remote image block cacheability、default list size hint、Rendered image block 绘制与鼠标交互，以及 block formula 的 projection、边界移动、Shift-selection、Backspace / Delete 与鼠标命中。
 - 新补的回归确认了一个此前未覆盖的 Rendered wrapped-layout 缺口：当同一 source row 内的 inline image 让 visual row 从 atom 边界开始或结束时，`MoveDown` / `End` / `Home` 会继续保持当前 visual-row 语义，不会因为 rendered active-range 同步而意外退化到整条 source row 的行首/行尾语义。
 - 在补上对应的 selection 回归后，同一类 wrapped inline-image 场景下的 `SelectDown` / `SelectUp` / `SelectToBeginningOfLine` / `SelectToEndOfLine` 现在也会保持 visual-row 语义，而不会在同一 source row 内因为 selection 同步而退回到整条 source row 的边界。
@@ -84,11 +85,12 @@
 
 下面这些条目是类别，不代表优先级或执行顺序。
 
-- 用 300KB 级 Markdown 文件在 Source 和 Rendered 模式下做 profiling，定位剩余的 source-row-local 热点，再决定后续性能修改。
-- 继续在 source-row 架构内做优化：降低 row layout 成本、减少 string / fragment churn、增强 row-layout cache 复用、缩小 remeasure 和缓存失效范围，并改善大但不过分极端文档的表现。
-- 将 inline atom 的 measurement 继续泛化，超出当前 inactive inline math atom 路径的假设范围；同时补上当未来 atom 内容可能在缓存后继续变尺寸时的失效机制。
-- 为 profiling 或手工使用中发现的剩余 visual-row 键盘移动缺口补更强的 runtime 或 visual tests。
-- 为 Rendered image / block 行为以及剩余 wrapped-layout 交互缺口补更强的 runtime 或 visual tests。
+- [暂不做 / Paused / 非当前优先] 用 300KB 级 Markdown 文件在 Source 和 Rendered 模式下做 profiling，定位剩余的 source-row-local 热点，再决定后续性能修改。
+  说明：这一项当前仍先不推进，不作为当前工作重点。现在已经完成为 `md_editor` 接现有 `cargo perf-test` / `#[perf]` 流程的最小入口、perf harness 识别和首轮基线运行，但这条 profiling 工作仍不切回主线；在下面两个 `[P1]` 项完成前，不继续围绕 profiling 结果展开后续优化。
+- [P1] 继续在 source-row 架构内做优化：降低 row layout 成本、减少 string / fragment churn、增强 row-layout cache 复用、缩小 remeasure 和缓存失效范围，并改善大但不过分极端文档的表现。
+- [P1] 将 inline atom 的 measurement 继续泛化，超出当前 inactive inline math atom 路径的假设范围；同时补上当未来 atom 内容可能在缓存后继续变尺寸时的失效机制。
+- [P2] 为 profiling 或手工使用中发现的剩余 visual-row 键盘移动缺口补更强的 runtime 或 visual tests。
+- [P2] 为 Rendered image / block 行为以及剩余 wrapped-layout 交互缺口补更强的 runtime 或 visual tests。
 
 ## 未来方向
 

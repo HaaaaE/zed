@@ -24,3 +24,4 @@ md_settings.workspace = true
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
 md_buffer = { workspace = true, features = ["test-support"] }
+util_macros.workspace = true
