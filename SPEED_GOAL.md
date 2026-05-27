@@ -57,6 +57,11 @@
   - The prewarm pass reuses the Source row priority queue and 64-row / 2ms caps to populate rendered display rows, layout inputs, cacheable current-width layouts, and list height hints.
   - Added a Rendered prewarm regression test mirroring Source prewarm cache coverage.
   - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, `cargo test -p md_editor rendered_render_prewarms_display_rows_and_layout_inputs`, and `cargo test -p md_editor`.
+- 2026-05-27: Reduced md_editor list overdraw after cache prewarming.
+  - Replaced the inline `px(1000.)` list overdraw with a named `DISPLAY_LIST_OVERDRAW` constant set to `px(500.)`.
+  - This keeps offscreen measuring for fast scrolling, while reducing the extra rows laid out on each list pass now that display rows, layouts, and height hints are prewarmed.
+  - Stage 7 cache caps remain deferred because this pass does not have memory data showing the expanded row/layout caches need eviction yet.
+  - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
 
 ## 背景
 

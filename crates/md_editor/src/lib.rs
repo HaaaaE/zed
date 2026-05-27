@@ -146,6 +146,8 @@ gpui::actions!(
     ]
 );
 
+const DISPLAY_LIST_OVERDRAW: gpui::Pixels = px(500.);
+
 /// Construct editor keybindings from the single-source-of-truth in `md_settings`.
 ///
 /// This reads `md_settings::DEFAULT_EDITOR_KEYBINDINGS` and dispatches on
@@ -317,8 +319,12 @@ impl MarkdownEditor {
             buffer,
             document_path: None,
             focus_handle: cx.focus_handle(),
-            display_list_state: ListState::new(row_count, ListAlignment::Top, px(1000.))
-                .with_default_size_hint(row_size_hint),
+            display_list_state: ListState::new(
+                row_count,
+                ListAlignment::Top,
+                DISPLAY_LIST_OVERDRAW,
+            )
+            .with_default_size_hint(row_size_hint),
             mode: MarkdownEditorMode::Source,
             selection: collapsed_selection(Point::zero()),
             is_selecting_with_mouse: false,
