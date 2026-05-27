@@ -472,9 +472,6 @@ impl TextStyle {
         if let Some(style) = style.font_style {
             self.font_style = style;
         }
-        if let Some(font_size) = style.font_size {
-            self.font_size = font_size;
-        }
 
         if let Some(color) = style.color {
             self.color = self.color.blend(color);
@@ -547,12 +544,6 @@ pub struct HighlightStyle {
     /// The font style, e.g. italic
     pub font_style: Option<FontStyle>,
 
-    /// The font size of the text
-    pub font_size: Option<AbsoluteLength>,
-
-    /// Whether the highlighted source text should be replaced by an empty visual string.
-    pub hide_text: bool,
-
     /// The background color of the text
     pub background_color: Option<Hsla>,
 
@@ -573,21 +564,6 @@ impl Hash for HighlightStyle {
         self.color.hash(state);
         self.font_weight.hash(state);
         self.font_style.hash(state);
-        if let Some(font_size) = self.font_size {
-            match font_size {
-                AbsoluteLength::Pixels(px) => {
-                    state.write_u8(1);
-                    state.write_u32(px.0.to_bits());
-                }
-                AbsoluteLength::Rems(rems) => {
-                    state.write_u8(2);
-                    state.write_u32(rems.0.to_bits());
-                }
-            }
-        } else {
-            state.write_u8(0);
-        }
-        self.hide_text.hash(state);
         self.background_color.hash(state);
         self.underline.hash(state);
         self.strikethrough.hash(state);
@@ -881,8 +857,6 @@ impl From<&TextStyle> for HighlightStyle {
             color: Some(other.color),
             font_weight: Some(other.font_weight),
             font_style: Some(other.font_style),
-            font_size: Some(other.font_size),
-            hide_text: false,
             background_color: other.background_color,
             underline: other.underline,
             strikethrough: other.strikethrough,
@@ -916,8 +890,6 @@ impl HighlightStyle {
                 .or(self.color),
             font_weight: other.font_weight.or(self.font_weight),
             font_style: other.font_style.or(self.font_style),
-            font_size: other.font_size.or(self.font_size),
-            hide_text: self.hide_text || other.hide_text,
             background_color: other.background_color.or(self.background_color),
             underline: other.underline.or(self.underline),
             strikethrough: other.strikethrough.or(self.strikethrough),
@@ -1345,7 +1317,6 @@ mod tests {
                 color: Some(red()),
                 wavy: true,
             }),
-            ..Default::default()
         };
         let expected_style = style_b;
 
@@ -1378,7 +1349,6 @@ mod tests {
                 color: None,
                 wavy: false,
             }),
-            ..Default::default()
         };
 
         let expected_style = HighlightStyle {
@@ -1397,7 +1367,6 @@ mod tests {
                 color: None,
                 wavy: false,
             }),
-            ..Default::default()
         };
 
         let style_c = style_c.highlight(style_d);

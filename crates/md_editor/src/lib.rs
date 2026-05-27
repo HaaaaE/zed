@@ -9,9 +9,8 @@ use std::{
 use gpui::FontWeight;
 use gpui::{
     App, ClipboardItem, Context, EventEmitter, FocusHandle, Focusable, IntoElement, KeyBinding,
-    KeyDownEvent, ListAlignment, ListSizingBehavior, ListState, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Render, SharedString, TextAlign, Window, div, list, prelude::*,
-    px,
+    KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, SharedString,
+    TextAlign, Window, div, prelude::*, px,
 };
 use markdown_wysiwyg::{
     MarkdownBlock, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownProjectionMap,
@@ -34,6 +33,7 @@ mod markdown_image;
 mod render;
 mod rendered_element;
 mod selection;
+mod virtual_list;
 mod visual_row;
 
 use block::DisplayBlockLayout;
@@ -117,6 +117,9 @@ use visual_row::{
     point_for_visual_row_x_in_text_snapshot, visual_horizontal_goal,
     visual_line_boundary_for_caret, visual_row_index_for_caret,
 };
+use virtual_list::{ListAlignment, ListSizingBehavior, MdListState, md_list};
+#[cfg(test)]
+use virtual_list::ListOffset;
 #[cfg(test)]
 use visual_row::{
     source_offset_for_display_offset, visual_row_contains_caret, visual_row_index_containing_caret,
@@ -205,7 +208,7 @@ pub struct MarkdownEditor {
     buffer: Buffer,
     document_path: Option<PathBuf>,
     focus_handle: FocusHandle,
-    display_list_state: ListState,
+    display_list_state: MdListState,
     mode: MarkdownEditorMode,
     selection: Selection<Point>,
     is_selecting_with_mouse: bool,
@@ -328,7 +331,7 @@ impl MarkdownEditor {
             buffer,
             document_path: None,
             focus_handle: cx.focus_handle(),
-            display_list_state: ListState::new(
+            display_list_state: MdListState::new(
                 row_count,
                 ListAlignment::Top,
                 DISPLAY_LIST_OVERDRAW,
@@ -1679,7 +1682,7 @@ impl Render for MarkdownEditor {
                 let cursor = selection.head();
                 self.schedule_source_cache_prewarm(wrap_width, default_metrics.into(), window, cx);
 
-                list(
+                md_list(
                     self.display_list_state.clone(),
                     cx.processor(move |this, row, window, _cx| {
                         let Some(display_row) = this.cached_source_display_row(&snapshot, row)
@@ -1731,7 +1734,7 @@ impl Render for MarkdownEditor {
                 let cursor = selection.head();
                 self.schedule_rendered_cache_prewarm(wrap_width, selection.clone(), window, cx);
 
-                list(
+                md_list(
                     self.display_list_state.clone(),
                     cx.processor(move |this, row, window, _cx| {
                         let Some(display_row) =

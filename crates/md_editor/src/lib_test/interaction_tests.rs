@@ -238,7 +238,7 @@ fn source_prewarm_reanchors_after_large_scroll_jump(cx: &mut gpui::TestAppContex
     );
 
     editor.update_in(cx, |editor, window, cx| {
-        editor.display_list_state.scroll_to(gpui::ListOffset {
+        editor.display_list_state.scroll_to(ListOffset {
             item_ix: 200,
             offset_in_item: px(0.),
         });
@@ -314,7 +314,7 @@ fn rendered_prewarm_reanchors_after_large_scroll_jump(cx: &mut gpui::TestAppCont
     );
 
     editor.update_in(cx, |editor, window, cx| {
-        editor.display_list_state.scroll_to(gpui::ListOffset {
+        editor.display_list_state.scroll_to(ListOffset {
             item_ix: 200,
             offset_in_item: px(0.),
         });
@@ -1390,8 +1390,8 @@ fn transaction_selection_history_drops_layout_goals() {
 #[test]
 fn reveal_selection_head_row_scrolls_to_clipped_cursor_row() {
     let buffer = Buffer::local("zero\none\ntwo\n");
-    let list_state = ListState::new(2, ListAlignment::Top, px(1000.));
-    list_state.scroll_to(gpui::ListOffset {
+    let list_state = MdListState::new(2, ListAlignment::Top, px(1000.));
+    list_state.scroll_to(ListOffset {
         item_ix: 1,
         offset_in_item: px(5.),
     });

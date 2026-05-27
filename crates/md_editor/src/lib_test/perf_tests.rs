@@ -1,5 +1,5 @@
 use super::test_support::*;
-use gpui::{ListOffset, TestApp, px, size};
+use gpui::{TestApp, px, size};
 use util_macros::perf;
 
 const LARGE_MARKDOWN_TARGET_BYTES: usize = 300 * 1024;

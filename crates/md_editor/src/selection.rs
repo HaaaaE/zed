@@ -1,11 +1,11 @@
 use std::ops::Range;
 
-use gpui::{ListState, Pixels};
+use gpui::Pixels;
 use md_buffer::BufferSnapshot;
 use md_text::{Bias, BufferSnapshot as TextBufferSnapshot, Point, Selection, SelectionGoal};
 
 use super::{
-    MarkdownEditorMode, TransactionSelectionState, merge_overlapping_row_ranges,
+    MarkdownEditorMode, MdListState, TransactionSelectionState, merge_overlapping_row_ranges,
     rendered_element_range_at_cursor, source_range_to_row_range,
 };
 
@@ -74,7 +74,7 @@ pub(crate) fn transaction_selection_state_without_goals(
 }
 
 pub(crate) fn reveal_selection_head_row_in_text_snapshot(
-    display_list_state: &ListState,
+    display_list_state: &MdListState,
     snapshot: &TextBufferSnapshot,
     selection: &Selection<Point>,
 ) {
