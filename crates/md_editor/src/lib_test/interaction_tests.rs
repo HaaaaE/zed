@@ -139,15 +139,15 @@ fn source_render_prewarms_display_rows_and_layout_inputs(cx: &mut gpui::TestAppC
     editor.read_with(cx, |editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Source);
         assert!(
-            editor.display_row_cache.len() >= 64,
+            editor.display_row_cache.len() >= 32,
             "source prewarm should populate display row cache beyond visible rows"
         );
         assert!(
-            editor.row_layout_input_cache.len() >= 64,
+            editor.row_layout_input_cache.len() >= 32,
             "source prewarm should populate layout input cache beyond visible rows"
         );
         assert!(
-            editor.row_layout_cache.len() >= 64,
+            editor.row_layout_cache.len() >= 32,
             "source prewarm should populate current-width row layout cache beyond visible rows"
         );
     });
@@ -178,17 +178,156 @@ fn rendered_render_prewarms_display_rows_and_layout_inputs(cx: &mut gpui::TestAp
     editor.read_with(cx, |editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
         assert!(
-            editor.display_row_cache.len() >= 64,
+            editor.display_row_cache.len() >= 16,
             "rendered prewarm should populate display row cache beyond visible rows"
         );
         assert!(
-            editor.row_layout_input_cache.len() >= 64,
+            editor.row_layout_input_cache.len() >= 16,
             "rendered prewarm should populate layout input cache beyond visible rows"
         );
         assert!(
-            editor.row_layout_cache.len() >= 64,
+            editor.row_layout_cache.len() >= 16,
             "rendered prewarm should populate current-width row layout cache beyond visible rows"
         );
+    });
+}
+
+#[gpui::test]
+fn source_prewarm_large_file_stays_near_scroll_anchor(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let text = (0..20_000)
+        .map(|row| format!("large source prewarm row {row}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.len() > 300 * 1024);
+    let editor = cx.new(|cx| MarkdownEditor::for_text(text, cx));
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(240.), px(160.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    editor.read_with(cx, |editor, _| {
+        let row_count = editor.buffer.as_text_snapshot().row_count() as usize;
+        let state = editor
+            .source_prewarm
+            .as_ref()
+            .expect("source prewarm should be scheduled");
+        assert_eq!(state.anchor_row, 0);
+        assert!(
+            state.rows.len() < row_count / 10,
+            "large files should not queue whole-document prewarm"
+        );
+    });
+}
+
+#[gpui::test]
+fn source_prewarm_reanchors_after_large_scroll_jump(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let text = (0..2_000)
+        .map(|row| format!("source prewarm jump row {row}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let editor = cx.new(|cx| MarkdownEditor::for_text(text, cx));
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(240.), px(160.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.display_list_state.scroll_to(gpui::ListOffset {
+            item_ix: 200,
+            offset_in_item: px(0.),
+        });
+        editor.schedule_source_cache_prewarm(
+            default_row_metrics().min_height,
+            default_row_metrics().into(),
+            window,
+            cx,
+        );
+    });
+
+    editor.read_with(cx, |editor, _| {
+        let state = editor
+            .source_prewarm
+            .as_ref()
+            .expect("source prewarm should be scheduled");
+        assert_eq!(state.anchor_row, 200);
+        assert_eq!(state.rows.front().copied(), Some(200));
+    });
+}
+
+#[gpui::test]
+fn rendered_prewarm_large_file_stays_near_scroll_anchor(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let text = (0..20_000)
+        .map(|row| format!("large rendered prewarm row {row}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.len() > 300 * 1024);
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(text, cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(240.), px(160.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    editor.read_with(cx, |editor, _| {
+        let row_count = editor.buffer.as_text_snapshot().row_count() as usize;
+        let state = editor
+            .rendered_prewarm
+            .as_ref()
+            .expect("rendered prewarm should be scheduled");
+        assert_eq!(state.anchor_row, 0);
+        assert!(
+            state.rows.len() < row_count / 10,
+            "large files should not queue whole-document prewarm"
+        );
+    });
+}
+
+#[gpui::test]
+fn rendered_prewarm_reanchors_after_large_scroll_jump(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let text = (0..2_000)
+        .map(|row| format!("rendered prewarm jump row {row}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(text, cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(240.), px(160.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.display_list_state.scroll_to(gpui::ListOffset {
+            item_ix: 200,
+            offset_in_item: px(0.),
+        });
+        editor.schedule_rendered_cache_prewarm(px(240.), editor.selection.clone(), window, cx);
+    });
+
+    editor.read_with(cx, |editor, _| {
+        let state = editor
+            .rendered_prewarm
+            .as_ref()
+            .expect("rendered prewarm should be scheduled");
+        assert_eq!(state.anchor_row, 200);
+        assert_eq!(state.rows.front().copied(), Some(200));
     });
 }
 
@@ -240,6 +379,38 @@ fn rendered_interaction_layouts_cache_plain_text_rows(cx: &mut gpui::TestAppCont
             cx,
         );
         assert_eq!(editor.row_layout_cache.len(), 1);
+    });
+}
+
+#[cfg(perf_enabled)]
+#[gpui::test]
+fn rendered_display_row_cache_hit_skips_syntax_queries(cx: &mut gpui::TestAppContext) {
+    let editor = cx.update(|cx| {
+        cx.new(|cx| {
+            let mut editor = MarkdownEditor::for_text("# Heading\nBefore **bold** after\n", cx);
+            editor.set_mode(MarkdownEditorMode::Rendered, cx);
+            editor
+        })
+    });
+
+    editor.update(cx, |editor, _| {
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let row = editor
+            .cached_display_row(&snapshot, 1, editor.mode, &display_row_state)
+            .expect("row should exist");
+
+        editor.reset_layout_computation_counts();
+        let cached_row = editor
+            .cached_display_row(&snapshot, 1, editor.mode, &display_row_state)
+            .expect("row should still exist");
+        let counts = editor.layout_computation_counts();
+
+        assert!(Arc::ptr_eq(&row, &cached_row));
+        assert_eq!(counts.display_rows_created, 0);
+        assert_eq!(counts.rendered_block_queries, 0);
+        assert_eq!(counts.rendered_inline_span_queries, 0);
     });
 }
 

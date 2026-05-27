@@ -10,6 +10,8 @@ pub struct MarkdownSyntaxTree {
     blocks: Vec<MarkdownBlock>,
     inline_spans: Vec<MarkdownInlineSpan>,
     inline_span_prefix_maximum_ends: Vec<usize>,
+    projection_marker_dependencies: Vec<ProjectionMarkerDependency>,
+    projection_marker_prefix_maximum_ends: Vec<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -95,6 +97,12 @@ pub struct MarkdownInlineSpan {
     pub content_ranges: Vec<Range<usize>>,
     pub marker_ranges: Vec<Range<usize>>,
     pub url: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ProjectionMarkerDependency {
+    marker_range: Range<usize>,
+    owner_source_range: Range<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -274,12 +282,46 @@ impl MarkdownSyntaxTree {
         MarkdownProjectionMap::new(self.source_len, visible_source_range, hidden_ranges)
     }
 
+    pub fn active_projection_source_ranges_for_source_range(
+        &self,
+        visible_source_range: Range<usize>,
+        active_source_range: Option<Range<usize>>,
+        inactive_source_ranges: &[Range<usize>],
+    ) -> Vec<Range<usize>> {
+        let Some(active_source_range) = active_source_range.as_ref() else {
+            return Vec::new();
+        };
+
+        let start_index =
+            self.partition_projection_marker_dependencies_by_prefix_end(visible_source_range.start);
+        let mut source_ranges = self.projection_marker_dependencies[start_index..]
+            .iter()
+            .take_while(|dependency| dependency.marker_range.start < visible_source_range.end)
+            .filter(|dependency| ranges_overlap(&dependency.marker_range, &visible_source_range))
+            .filter(|dependency| {
+                source_range_is_active(
+                    &dependency.owner_source_range,
+                    Some(active_source_range),
+                    inactive_source_ranges,
+                )
+            })
+            .map(|dependency| dependency.owner_source_range.clone())
+            .collect::<Vec<_>>();
+
+        source_ranges.sort_by_key(|source_range| (source_range.start, source_range.end));
+        source_ranges.dedup();
+        source_ranges
+    }
+
     fn parse_with_previous_tree(source: &str, old_tree: Option<&MarkdownParseTree>) -> Self {
         let tree = parse_markdown(source, old_tree);
         let line_starts = line_starts(source);
         let blocks = collect_blocks(source, &line_starts, tree.block_tree());
         let inline_spans = collect_inline_spans(source, &tree);
         let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
+        let projection_marker_dependencies = projection_marker_dependencies(&blocks, &inline_spans);
+        let projection_marker_prefix_maximum_ends =
+            projection_marker_prefix_maximum_ends(&projection_marker_dependencies);
 
         Self {
             tree,
@@ -288,6 +330,8 @@ impl MarkdownSyntaxTree {
             blocks,
             inline_spans,
             inline_span_prefix_maximum_ends,
+            projection_marker_dependencies,
+            projection_marker_prefix_maximum_ends,
         }
     }
 
@@ -298,6 +342,11 @@ impl MarkdownSyntaxTree {
 
     fn partition_inline_spans_by_prefix_end(&self, offset: usize) -> usize {
         self.inline_span_prefix_maximum_ends
+            .partition_point(|end| *end <= offset)
+    }
+
+    fn partition_projection_marker_dependencies_by_prefix_end(&self, offset: usize) -> usize {
+        self.projection_marker_prefix_maximum_ends
             .partition_point(|end| *end <= offset)
     }
 }
@@ -522,6 +571,51 @@ fn inline_span_prefix_maximum_ends(inline_spans: &[MarkdownInlineSpan]) -> Vec<u
         .iter()
         .map(|span| {
             maximum_end = maximum_end.max(span.source_range.end);
+            maximum_end
+        })
+        .collect()
+}
+
+fn projection_marker_dependencies(
+    blocks: &[MarkdownBlock],
+    inline_spans: &[MarkdownInlineSpan],
+) -> Vec<ProjectionMarkerDependency> {
+    let mut dependencies = Vec::new();
+    for block in blocks {
+        dependencies.extend(block.marker_ranges.iter().cloned().map(|marker_range| {
+            ProjectionMarkerDependency {
+                marker_range,
+                owner_source_range: block.source_range.clone(),
+            }
+        }));
+    }
+    for span in inline_spans {
+        dependencies.extend(span.marker_ranges.iter().cloned().map(|marker_range| {
+            ProjectionMarkerDependency {
+                marker_range,
+                owner_source_range: span.source_range.clone(),
+            }
+        }));
+    }
+    dependencies.sort_by_key(|dependency| {
+        (
+            dependency.marker_range.start,
+            dependency.marker_range.end,
+            dependency.owner_source_range.start,
+            dependency.owner_source_range.end,
+        )
+    });
+    dependencies
+}
+
+fn projection_marker_prefix_maximum_ends(
+    dependencies: &[ProjectionMarkerDependency],
+) -> Vec<usize> {
+    let mut maximum_end = 0;
+    dependencies
+        .iter()
+        .map(|dependency| {
+            maximum_end = maximum_end.max(dependency.marker_range.end);
             maximum_end
         })
         .collect()
@@ -1037,6 +1131,23 @@ mod tests {
 
         assert_eq!(projection.hidden_ranges(), &[20..21, 22..23]);
         assert_eq!(projection.display_len(), 28);
+    }
+
+    #[test]
+    fn active_projection_source_ranges_uses_marker_dependencies() {
+        let tree = MarkdownSyntaxTree::parse("```rust\nlet x = 1;\n```\n");
+        let content_start = "```rust\n".len();
+        let content_end = content_start + "let x = 1;".len();
+        let closing_marker_start = content_end + "\n".len();
+
+        assert_eq!(
+            tree.active_projection_source_ranges_for_source_range(
+                closing_marker_start..closing_marker_start + "```".len(),
+                Some(content_start..content_end),
+                &[],
+            ),
+            vec![tree.blocks()[0].source_range.clone()]
+        );
     }
 
     #[test]

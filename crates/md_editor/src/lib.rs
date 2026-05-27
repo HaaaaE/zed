@@ -280,6 +280,7 @@ struct SourcePrewarmState {
     version: md_text::Global,
     wrap_width: gpui::Pixels,
     row_style: RowDisplayStyle,
+    anchor_row: usize,
     rows: VecDeque<usize>,
     scheduled: bool,
 }
@@ -288,6 +289,7 @@ struct RenderedPrewarmState {
     version: md_text::Global,
     wrap_width: gpui::Pixels,
     selection: Selection<Point>,
+    anchor_row: usize,
     rows: VecDeque<usize>,
     scheduled: bool,
 }

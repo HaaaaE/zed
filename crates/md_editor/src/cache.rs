@@ -14,9 +14,8 @@ use super::{
     DisplayRowLayoutInputs, DisplayRowProjectionState, DisplayRowTextLayout,
     InlineAtomMeasurementKey, InlineAtomMeasurementState, LocalSourceEditInvalidation,
     MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, RowLayoutCacheKey, RowLayoutInputCacheKey,
-    active_projection_source_ranges, clip_selection, display_row_in_mode,
-    inline_spans_for_display_row, layout::DisplayRowCacheKey, markdown_blocks_for_display_row,
-    row_source_range, source_display_row_in_text_snapshot,
+    clip_selection, display_row_in_mode, inline_spans_for_display_row, layout::DisplayRowCacheKey,
+    markdown_blocks_for_display_row, row_source_range, source_display_row_in_text_snapshot,
 };
 use crate::layout::{
     display_row_layout_inputs, source_display_row_layout_inputs, text_layout_for_display_row_inputs,
@@ -152,20 +151,13 @@ impl MarkdownEditor {
 
         let row = row as u32;
         let source_range = row_source_range(snapshot, row);
-        #[cfg(perf_enabled)]
-        if mode == MarkdownEditorMode::Rendered {
-            self.layout_computation_counts.rendered_block_queries += 1;
-            self.layout_computation_counts.rendered_inline_span_queries += 1;
-        }
-        let markdown_blocks = markdown_blocks_for_display_row(snapshot, source_range.clone(), mode);
-        let inline_spans = inline_spans_for_display_row(snapshot, source_range.clone(), mode);
-        let active_projection_source_ranges = active_projection_source_ranges(
-            &source_range,
-            display_row_state,
-            mode,
-            &markdown_blocks,
-            &inline_spans,
-        );
+        let active_projection_source_ranges = snapshot
+            .syntax_tree()
+            .active_projection_source_ranges_for_source_range(
+                source_range.clone(),
+                display_row_state.active_source_range.clone(),
+                &display_row_state.inactive_source_ranges,
+            );
         let cache_key = DisplayRowCacheKey {
             version: snapshot.version().clone(),
             row,
@@ -180,7 +172,11 @@ impl MarkdownEditor {
         #[cfg(perf_enabled)]
         {
             self.layout_computation_counts.display_rows_created += 1;
+            self.layout_computation_counts.rendered_block_queries += 1;
+            self.layout_computation_counts.rendered_inline_span_queries += 1;
         }
+        let markdown_blocks = markdown_blocks_for_display_row(snapshot, source_range.clone(), mode);
+        let inline_spans = inline_spans_for_display_row(snapshot, source_range.clone(), mode);
         let display_row = Arc::new(display_row_in_mode(
             snapshot,
             row,
@@ -377,18 +373,20 @@ impl MarkdownEditor {
             return;
         }
 
+        let start_row = self.display_list_state.logical_scroll_top().item_ix;
         let reset_queue = self.source_prewarm.as_ref().is_none_or(|state| {
             state.version != version
                 || state.wrap_width != wrap_width
                 || state.row_style != row_style
+                || start_row.abs_diff(state.anchor_row) > PREWARM_ANCHOR_RESET_ROWS
         });
         if reset_queue {
-            let start_row = self.display_list_state.logical_scroll_top().item_ix;
             let byte_len = self.buffer.len();
             self.source_prewarm = Some(super::SourcePrewarmState {
                 version,
                 wrap_width,
                 row_style,
+                anchor_row: start_row,
                 rows: cache_prewarm_rows(row_count, byte_len, start_row),
                 scheduled: false,
             });
@@ -426,9 +424,9 @@ impl MarkdownEditor {
             return;
         }
 
-        let deadline = Instant::now() + Duration::from_millis(2);
+        let deadline = Instant::now() + PREWARM_FRAME_BUDGET;
         let mut rows = Vec::new();
-        while rows.len() < 64 && Instant::now() < deadline {
+        while rows.len() < SOURCE_PREWARM_ROWS_PER_FRAME && Instant::now() < deadline {
             let Some(row) = state.rows.pop_front() else {
                 break;
             };
@@ -484,18 +482,20 @@ impl MarkdownEditor {
             return;
         }
 
+        let start_row = self.display_list_state.logical_scroll_top().item_ix;
         let reset_queue = self.rendered_prewarm.as_ref().is_none_or(|state| {
             state.version != version
                 || state.wrap_width != wrap_width
                 || state.selection != selection
+                || start_row.abs_diff(state.anchor_row) > PREWARM_ANCHOR_RESET_ROWS
         });
         if reset_queue {
-            let start_row = self.display_list_state.logical_scroll_top().item_ix;
             let byte_len = self.buffer.len();
             self.rendered_prewarm = Some(super::RenderedPrewarmState {
                 version,
                 wrap_width,
                 selection,
+                anchor_row: start_row,
                 rows: cache_prewarm_rows(row_count, byte_len, start_row),
                 scheduled: false,
             });
@@ -537,9 +537,9 @@ impl MarkdownEditor {
             return;
         }
 
-        let deadline = Instant::now() + Duration::from_millis(2);
+        let deadline = Instant::now() + PREWARM_FRAME_BUDGET;
         let mut rows = Vec::new();
-        while rows.len() < 64 && Instant::now() < deadline {
+        while rows.len() < RENDERED_PREWARM_ROWS_PER_FRAME && Instant::now() < deadline {
             let Some(row) = state.rows.pop_front() else {
                 break;
             };
@@ -795,14 +795,16 @@ impl MarkdownEditor {
     }
 }
 
-fn cache_prewarm_rows(row_count: usize, byte_len: usize, start_row: usize) -> VecDeque<usize> {
-    const SMALL_FILE_MAX_BYTES: usize = 1024 * 1024;
-    const SMALL_FILE_MAX_ROWS: usize = 20_000;
-    const MEDIUM_FILE_MAX_BYTES: usize = 5 * 1024 * 1024;
-    const MEDIUM_FILE_MAX_ROWS: usize = 100_000;
-    const NEARBY_FORWARD_ROWS: usize = 512;
-    const NEARBY_BACKWARD_ROWS: usize = 128;
+const SMALL_FILE_MAX_BYTES: usize = 64 * 1024;
+const SMALL_FILE_MAX_ROWS: usize = 1_000;
+const NEARBY_FORWARD_ROWS: usize = 256;
+const NEARBY_BACKWARD_ROWS: usize = 64;
+const PREWARM_ANCHOR_RESET_ROWS: usize = 128;
+const SOURCE_PREWARM_ROWS_PER_FRAME: usize = 32;
+const RENDERED_PREWARM_ROWS_PER_FRAME: usize = 16;
+const PREWARM_FRAME_BUDGET: Duration = Duration::from_millis(1);
 
+fn cache_prewarm_rows(row_count: usize, byte_len: usize, start_row: usize) -> VecDeque<usize> {
     let mut rows = VecDeque::new();
     let mut queued = HashSet::new();
     let mut push_row = |row: usize, rows: &mut VecDeque<usize>| {
@@ -822,10 +824,6 @@ fn cache_prewarm_rows(row_count: usize, byte_len: usize, start_row: usize) -> Ve
 
     if byte_len <= SMALL_FILE_MAX_BYTES && row_count <= SMALL_FILE_MAX_ROWS {
         for row in 0..row_count {
-            push_row(row, &mut rows);
-        }
-    } else if byte_len <= MEDIUM_FILE_MAX_BYTES && row_count <= MEDIUM_FILE_MAX_ROWS {
-        for row in start_row.saturating_add(NEARBY_FORWARD_ROWS)..row_count {
             push_row(row, &mut rows);
         }
     }
