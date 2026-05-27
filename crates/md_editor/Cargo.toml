@@ -22,7 +22,6 @@ md_theme.workspace = true
 md_assets.workspace = true
 md_settings.workspace = true
 md_sum_tree.workspace = true
-refineable.workspace = true
 ratex-layout.workspace = true
 ratex-parser.workspace = true
 ratex-render.workspace = true
