@@ -29,6 +29,12 @@
 //! Similarly, to skip outputting progress to the command line, pass `-- --quiet`.
 //! These flags can be combined.
 //!
+//! For a large crate such as `md_editor`, it can be useful to prebuild the perf
+//! test binary before invoking the profiler:
+//! ```sh
+//! cargo test -p md_editor --profile release-fast --lib --no-run --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]'
+//! ```
+//!
 //! ## Comparing runs
 //! Perf runs save per-crate run files in `.perf-runs` by default. If no explicit
 //! name is provided, the run name is based on a timestamp and git SHA. Passing
