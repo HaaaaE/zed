@@ -698,15 +698,28 @@ pub(super) fn display_inline_row_inputs(
             continue;
         }
 
-        let atom = rendered_element_descriptor_for_inline_span_in_row(
-            span,
-            &display_row.source_text,
-            row_source_range,
-            document_path,
-        )
-        .and_then(|descriptor| {
-            DisplayInlineAtom::from_descriptor(display_row, descriptor, row_style)
-        });
+        let atom = display_row
+            .rendered_element_descriptors
+            .iter()
+            .find(|descriptor| descriptor.source_range == span.source_range)
+            .cloned()
+            .or_else(|| {
+                if document_path.is_none()
+                    || display_row.rendered_element_descriptors_have_document_path
+                {
+                    return None;
+                }
+
+                rendered_element_descriptor_for_inline_span_in_row(
+                    span,
+                    &display_row.source_text,
+                    row_source_range,
+                    document_path,
+                )
+            })
+            .and_then(|descriptor| {
+                DisplayInlineAtom::from_descriptor(display_row, descriptor, row_style)
+            });
         if let Some(atom) = atom {
             inputs.atom_ranges.push(atom);
         }

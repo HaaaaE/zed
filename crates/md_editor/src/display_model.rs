@@ -3,6 +3,8 @@ use std::ops::Range;
 use gpui::FontWeight;
 use markdown_wysiwyg::{MarkdownBlock, MarkdownInlineSpan, MarkdownProjectionMap};
 
+use crate::rendered_element::RenderedElementDescriptor;
+
 #[derive(Clone, Debug)]
 pub struct DisplayRow {
     pub row: u32,
@@ -13,6 +15,8 @@ pub struct DisplayRow {
     pub(crate) markdown_blocks: Vec<MarkdownBlock>,
     pub(crate) heading_level: Option<u8>,
     pub(crate) inline_spans: Vec<MarkdownInlineSpan>,
+    pub(crate) rendered_element_descriptors: Vec<RenderedElementDescriptor>,
+    pub(crate) rendered_element_descriptors_have_document_path: bool,
     pub(crate) projection: MarkdownProjectionMap,
     pub(crate) insertions: Vec<DisplayInsertion>,
 }

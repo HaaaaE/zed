@@ -710,20 +710,37 @@ fn rendered_block_descriptor_for_row(
         return None;
     }
 
-    let row_source_range = &display_row.source_range;
-    let source_text = &display_row.source_text;
-    let mut matching_spans = display_row.inline_spans.iter().filter_map(|span| {
-        rendered_element_descriptor_for_inline_span_in_row(
-            span,
-            source_text,
-            row_source_range,
-            document_path,
-        )
+    let matching_descriptors = display_row
+        .rendered_element_descriptors
+        .iter()
         .filter(|descriptor| descriptor.placement == RenderedElementPlacement::Block)
-    });
+        .cloned()
+        .collect::<Vec<_>>();
+    let should_retry_with_document_path = matching_descriptors.is_empty()
+        && document_path.is_some()
+        && !display_row.rendered_element_descriptors_have_document_path;
+    let matching_descriptors = if should_retry_with_document_path {
+        let row_source_range = &display_row.source_range;
+        display_row
+            .inline_spans
+            .iter()
+            .filter_map(|span| {
+                rendered_element_descriptor_for_inline_span_in_row(
+                    span,
+                    &display_row.source_text,
+                    row_source_range,
+                    document_path,
+                )
+                .filter(|descriptor| descriptor.placement == RenderedElementPlacement::Block)
+            })
+            .collect::<Vec<_>>()
+    } else {
+        matching_descriptors
+    };
+    let mut matching_descriptors = matching_descriptors.into_iter();
 
-    let descriptor = matching_spans.next()?;
-    if matching_spans.next().is_some() {
+    let descriptor = matching_descriptors.next()?;
+    if matching_descriptors.next().is_some() {
         return None;
     }
     if rendered_element_source_range_is_active(snapshot, selection, &descriptor.source_range) {

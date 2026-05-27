@@ -48,6 +48,10 @@
   - Scroll perf cases now reset and print the counters for first-scroll and second-scroll regions, with draw/redraw/resize cases also reporting their computation counts.
   - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, `cargo test -p md_editor`, and `RUSTFLAGS='--cfg perf_enabled' cargo test -p md_editor --no-run`.
   - `RUSTFLAGS='--cfg perf_enabled' cargo check -p md_editor` is not a valid standalone gate for this crate because the existing perf module depends on the test harness; it fails before running tests on `TestApp`, `test_support`, and `util_macros` imports.
+- 2026-05-27: Cached Rendered element descriptors on display rows.
+  - Rendered `DisplayRow` creation now resolves inline/block image and math descriptors once from the row's cached inline spans.
+  - Inline image placeholder insertion, inline atom layout input creation, and block image/formula detection now reuse those descriptors instead of reparsing descriptor data in each path.
+  - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
 
 ## 背景
 

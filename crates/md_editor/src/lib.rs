@@ -76,13 +76,14 @@ use markdown_image::MarkdownImageSource;
 #[cfg(test)]
 use render::{fragment_text_for_visual_row, selection_bounds_for_visual_row};
 use render::{render_display_row_layout, render_row_text};
+#[cfg(test)]
+use rendered_element::RenderedElementKind;
 use rendered_element::RenderedElementPlacement;
 #[cfg(test)]
 use rendered_element::source_offset_is_rendered_element_boundary;
-#[cfg(test)]
-use rendered_element::{RenderedElementDescriptor, RenderedElementKind};
 use rendered_element::{
-    active_source_range_for_selection, inactive_rendered_element_source_ranges_for_selection,
+    RenderedElementDescriptor, active_source_range_for_selection,
+    inactive_rendered_element_source_ranges_for_selection,
     rendered_element_descriptor_for_inline_span_in_row, rendered_element_range_at_cursor,
     rendered_element_source_range_is_active,
 };
@@ -1926,13 +1927,20 @@ fn display_row_in_mode(
             ),
     };
 
+    let rendered_element_descriptors = rendered_element_descriptors_for_display_row(
+        &inline_spans,
+        &source_text,
+        &source_range,
+        mode,
+        document_path,
+    );
     let (text, insertions) = project_display_row_text(
         &source_text,
         &source_range,
         &projection,
         &inline_spans,
+        &rendered_element_descriptors,
         mode,
-        document_path,
     );
     let heading_level = heading_level_for_display_row(&markdown_blocks, row);
     DisplayRow {
@@ -1944,6 +1952,8 @@ fn display_row_in_mode(
         markdown_blocks,
         heading_level,
         inline_spans,
+        rendered_element_descriptors,
+        rendered_element_descriptors_have_document_path: document_path.is_some(),
         projection,
         insertions,
     }
@@ -1976,6 +1986,8 @@ fn source_display_row_in_text_snapshot(snapshot: &TextBufferSnapshot, row: u32) 
         markdown_blocks: Vec::new(),
         heading_level: None,
         inline_spans: Vec::new(),
+        rendered_element_descriptors: Vec::new(),
+        rendered_element_descriptors_have_document_path: false,
         projection,
         insertions: Vec::new(),
     }
@@ -2022,6 +2034,30 @@ fn inline_spans_for_display_row(
         .collect()
 }
 
+fn rendered_element_descriptors_for_display_row(
+    inline_spans: &[MarkdownInlineSpan],
+    source_text: &str,
+    row_source_range: &Range<usize>,
+    mode: MarkdownEditorMode,
+    document_path: Option<&Path>,
+) -> Vec<RenderedElementDescriptor> {
+    if mode != MarkdownEditorMode::Rendered {
+        return Vec::new();
+    }
+
+    inline_spans
+        .iter()
+        .filter_map(|span| {
+            rendered_element_descriptor_for_inline_span_in_row(
+                span,
+                source_text,
+                row_source_range,
+                document_path,
+            )
+        })
+        .collect()
+}
+
 fn row_source_range(snapshot: &BufferSnapshot, row: u32) -> Range<usize> {
     row_source_range_in_text_snapshot(snapshot.as_text_snapshot(), row)
 }
@@ -2042,8 +2078,8 @@ fn project_display_row_text(
     row_source_range: &Range<usize>,
     projection: &MarkdownProjectionMap,
     inline_spans: &[MarkdownInlineSpan],
+    rendered_element_descriptors: &[RenderedElementDescriptor],
     mode: MarkdownEditorMode,
-    document_path: Option<&Path>,
 ) -> (String, Vec<DisplayInsertion>) {
     let mut display_text = project_row_text(source_text, projection);
     if mode != MarkdownEditorMode::Rendered {
@@ -2052,12 +2088,9 @@ fn project_display_row_text(
 
     let mut insertions = Vec::new();
     for span in inline_spans {
-        let descriptor = rendered_element_descriptor_for_inline_span_in_row(
-            span,
-            source_text,
-            row_source_range,
-            document_path,
-        );
+        let descriptor = rendered_element_descriptors
+            .iter()
+            .find(|descriptor| descriptor.source_range == span.source_range);
         if span.kind != MarkdownInlineKind::Image
             || descriptor
                 .is_some_and(|descriptor| descriptor.placement == RenderedElementPlacement::Block)
