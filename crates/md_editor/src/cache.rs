@@ -14,8 +14,9 @@ use super::{
     DisplayRowLayoutInputs, DisplayRowProjectionState, DisplayRowTextLayout,
     InlineAtomMeasurementKey, InlineAtomMeasurementState, LocalSourceEditInvalidation,
     MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, RowLayoutCacheKey, RowLayoutInputCacheKey,
-    active_projection_source_ranges, display_row_in_mode, layout::DisplayRowCacheKey,
-    row_source_range, source_display_row_in_text_snapshot,
+    active_projection_source_ranges, display_row_in_mode, inline_spans_for_display_row,
+    layout::DisplayRowCacheKey, markdown_blocks_for_display_row, row_source_range,
+    source_display_row_in_text_snapshot,
 };
 use crate::layout::{
     display_row_layout_inputs, source_display_row_layout_inputs, text_layout_for_display_row_inputs,
@@ -150,8 +151,15 @@ impl MarkdownEditor {
 
         let row = row as u32;
         let source_range = row_source_range(snapshot, row);
-        let active_projection_source_ranges =
-            active_projection_source_ranges(snapshot, &source_range, display_row_state, mode);
+        let markdown_blocks = markdown_blocks_for_display_row(snapshot, source_range.clone(), mode);
+        let inline_spans = inline_spans_for_display_row(snapshot, source_range.clone(), mode);
+        let active_projection_source_ranges = active_projection_source_ranges(
+            &source_range,
+            display_row_state,
+            mode,
+            &markdown_blocks,
+            &inline_spans,
+        );
         let cache_key = DisplayRowCacheKey {
             version: snapshot.version().clone(),
             row,
@@ -170,6 +178,8 @@ impl MarkdownEditor {
             display_row_state,
             source_range,
             active_projection_source_ranges,
+            markdown_blocks,
+            inline_spans,
             self.document_path(),
         ));
         self.display_row_cache

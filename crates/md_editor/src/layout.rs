@@ -666,7 +666,7 @@ pub(super) fn segment_text(display_text: &str, segment: &StyledDisplaySegment) -
 }
 
 pub(super) fn display_inline_row_inputs(
-    snapshot: &BufferSnapshot,
+    _snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
     row_style: RowDisplayStyle,
     document_path: Option<&Path>,
@@ -674,11 +674,7 @@ pub(super) fn display_inline_row_inputs(
     let row_source_range = &display_row.source_range;
     let mut inputs = DisplayInlineRowInputs::default();
 
-    collect_block_style_ranges_for_row(
-        snapshot,
-        row_source_range.clone(),
-        &mut inputs.style_ranges,
-    );
+    collect_block_style_ranges_for_row(display_row, &mut inputs.style_ranges);
 
     let hidden_ranges = display_row.projection.hidden_ranges();
     for span in &display_row.inline_spans {
@@ -826,14 +822,11 @@ pub(super) fn source_display_fragments(display_row: &DisplayRow) -> Vec<DisplayI
 }
 
 fn collect_block_style_ranges_for_row(
-    snapshot: &BufferSnapshot,
-    row_source_range: Range<usize>,
+    display_row: &DisplayRow,
     style_ranges: &mut Vec<(Range<usize>, DisplayTextStyle)>,
 ) {
-    for block in snapshot
-        .syntax_tree()
-        .blocks_in_source_range(row_source_range.clone())
-    {
+    let row_source_range = &display_row.source_range;
+    for block in &display_row.markdown_blocks {
         match block.kind {
             MarkdownBlockKind::AtxHeading { level } => {
                 push_style_range(

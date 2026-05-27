@@ -1755,59 +1755,42 @@ fn active_projection_source_ranges_tracks_marker_visibility_dependencies() {
         Some(&collapsed_selection(Point::new(5, 3))),
         MarkdownEditorMode::Rendered,
     );
+    let active_ranges_for_row = |row, state: &DisplayRowProjectionState, mode| {
+        let row_source_range = row_source_range(&snapshot, row);
+        let markdown_blocks =
+            markdown_blocks_for_display_row(&snapshot, row_source_range.clone(), mode);
+        let inline_spans = inline_spans_for_display_row(&snapshot, row_source_range.clone(), mode);
+        active_projection_source_ranges(
+            &row_source_range,
+            state,
+            mode,
+            &markdown_blocks,
+            &inline_spans,
+        )
+    };
 
     assert_eq!(
-        active_projection_source_ranges(
-            &snapshot,
-            &row_source_range(&snapshot, 0),
-            &heading_state,
-            MarkdownEditorMode::Rendered
-        ),
+        active_ranges_for_row(0, &heading_state, MarkdownEditorMode::Rendered),
         vec![heading_range]
     );
     assert_eq!(
-        active_projection_source_ranges(
-            &snapshot,
-            &row_source_range(&snapshot, 1),
-            &heading_state,
-            MarkdownEditorMode::Rendered
-        ),
+        active_ranges_for_row(1, &heading_state, MarkdownEditorMode::Rendered),
         Vec::<Range<usize>>::new()
     );
     assert_eq!(
-        active_projection_source_ranges(
-            &snapshot,
-            &row_source_range(&snapshot, 2),
-            &fenced_state,
-            MarkdownEditorMode::Rendered
-        ),
+        active_ranges_for_row(2, &fenced_state, MarkdownEditorMode::Rendered),
         vec![fenced_range]
     );
     assert_eq!(
-        active_projection_source_ranges(
-            &snapshot,
-            &row_source_range(&snapshot, 3),
-            &fenced_state,
-            MarkdownEditorMode::Rendered
-        ),
+        active_ranges_for_row(3, &fenced_state, MarkdownEditorMode::Rendered),
         Vec::<Range<usize>>::new()
     );
     assert_eq!(
-        active_projection_source_ranges(
-            &snapshot,
-            &row_source_range(&snapshot, 5),
-            &strong_state,
-            MarkdownEditorMode::Rendered
-        ),
+        active_ranges_for_row(5, &strong_state, MarkdownEditorMode::Rendered),
         vec![strong_range]
     );
     assert_eq!(
-        active_projection_source_ranges(
-            &snapshot,
-            &row_source_range(&snapshot, 0),
-            &heading_state,
-            MarkdownEditorMode::Source
-        ),
+        active_ranges_for_row(0, &heading_state, MarkdownEditorMode::Source),
         Vec::<Range<usize>>::new()
     );
 }

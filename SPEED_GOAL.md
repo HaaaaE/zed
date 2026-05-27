@@ -39,6 +39,10 @@
   - Rendered `DisplayRow` creation now captures the row's inline spans once.
   - Inline image placeholder insertion, inline style/atom input collection, and block image/formula detection now reuse those cached spans instead of repeating row inline-span queries.
   - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
+- 2026-05-27: Reused Rendered Markdown blocks from display rows.
+  - Rendered `DisplayRow` creation now captures the row's Markdown blocks once.
+  - Heading detection, block text style collection, and active projection marker range detection now reuse those cached blocks instead of repeating row block queries.
+  - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
 
 ## 背景
 
