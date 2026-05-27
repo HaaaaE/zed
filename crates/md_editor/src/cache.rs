@@ -151,6 +151,11 @@ impl MarkdownEditor {
 
         let row = row as u32;
         let source_range = row_source_range(snapshot, row);
+        #[cfg(perf_enabled)]
+        if mode == MarkdownEditorMode::Rendered {
+            self.layout_computation_counts.rendered_block_queries += 1;
+            self.layout_computation_counts.rendered_inline_span_queries += 1;
+        }
         let markdown_blocks = markdown_blocks_for_display_row(snapshot, source_range.clone(), mode);
         let inline_spans = inline_spans_for_display_row(snapshot, source_range.clone(), mode);
         let active_projection_source_ranges = active_projection_source_ranges(
@@ -171,6 +176,10 @@ impl MarkdownEditor {
             return Some(display_row.clone());
         }
 
+        #[cfg(perf_enabled)]
+        {
+            self.layout_computation_counts.display_rows_created += 1;
+        }
         let display_row = Arc::new(display_row_in_mode(
             snapshot,
             row,
@@ -209,6 +218,10 @@ impl MarkdownEditor {
             return Some(display_row.clone());
         }
 
+        #[cfg(perf_enabled)]
+        {
+            self.layout_computation_counts.display_rows_created += 1;
+        }
         let display_row = Arc::new(source_display_row_in_text_snapshot(snapshot, row));
         self.display_row_cache
             .insert(cache_key, display_row.clone());
@@ -239,6 +252,10 @@ impl MarkdownEditor {
             return cached_layout.clone();
         }
 
+        #[cfg(perf_enabled)]
+        {
+            self.layout_computation_counts.row_layouts_created += 1;
+        }
         let layout = if let Some(block_layout) = DisplayBlockLayout::for_display_row(
             snapshot,
             display_row,
@@ -263,6 +280,10 @@ impl MarkdownEditor {
                 window,
                 cx,
             );
+            #[cfg(perf_enabled)]
+            {
+                self.layout_computation_counts.text_shaping_calls += 1;
+            }
             DisplayRowLayout::Text(Arc::new(text_layout_for_display_row_inputs(
                 &display_row.text,
                 &inputs,
@@ -300,6 +321,10 @@ impl MarkdownEditor {
             return cached_layout.clone();
         }
 
+        #[cfg(perf_enabled)]
+        {
+            self.layout_computation_counts.row_layouts_created += 1;
+        }
         let inputs = self.cached_source_row_layout_inputs(display_row, row_style, window);
         let atom_measurements = self.inline_atom_measurement_states_for_layout(
             display_row.row as usize,
@@ -309,6 +334,10 @@ impl MarkdownEditor {
             window,
             cx,
         );
+        #[cfg(perf_enabled)]
+        {
+            self.layout_computation_counts.text_shaping_calls += 1;
+        }
         let layout = Arc::new(text_layout_for_display_row_inputs(
             &display_row.text,
             &inputs,
@@ -452,6 +481,10 @@ impl MarkdownEditor {
             return inputs.clone();
         }
 
+        #[cfg(perf_enabled)]
+        {
+            self.layout_computation_counts.row_layout_inputs_created += 1;
+        }
         let inputs = display_row_layout_inputs(
             snapshot,
             display_row,
@@ -483,6 +516,10 @@ impl MarkdownEditor {
             return inputs.clone();
         }
 
+        #[cfg(perf_enabled)]
+        {
+            self.layout_computation_counts.row_layout_inputs_created += 1;
+        }
         let inputs = source_display_row_layout_inputs(display_row, row_style, window);
         self.row_layout_input_cache
             .insert(cache_key, inputs.clone());

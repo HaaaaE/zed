@@ -43,6 +43,11 @@
   - Rendered `DisplayRow` creation now captures the row's Markdown blocks once.
   - Heading detection, block text style collection, and active projection marker range detection now reuse those cached blocks instead of repeating row block queries.
   - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
+- 2026-05-27: Added perf-only layout computation counters.
+  - Added `perf_enabled` counters for display rows created, row layout inputs created, row layouts created, text shaping calls, and Rendered Markdown block / inline span row queries.
+  - Scroll perf cases now reset and print the counters for first-scroll and second-scroll regions, with draw/redraw/resize cases also reporting their computation counts.
+  - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, `cargo test -p md_editor`, and `RUSTFLAGS='--cfg perf_enabled' cargo test -p md_editor --no-run`.
+  - `RUSTFLAGS='--cfg perf_enabled' cargo check -p md_editor` is not a valid standalone gate for this crate because the existing perf module depends on the test harness; it fails before running tests on `TestApp`, `test_support`, and `util_macros` imports.
 
 ## 背景
 

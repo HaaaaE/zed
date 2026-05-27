@@ -83,6 +83,15 @@ fn warm_draw(window: &mut gpui::TestAppWindow<MarkdownEditor>, app: &mut TestApp
     app.run_until_parked();
 }
 
+fn reset_layout_computation_counts(window: &mut gpui::TestAppWindow<MarkdownEditor>) {
+    window.update(|editor, _, _| editor.reset_layout_computation_counts());
+}
+
+fn report_layout_computation_counts(label: &str, window: &mut gpui::TestAppWindow<MarkdownEditor>) {
+    let counts = window.read(|editor, _| editor.layout_computation_counts());
+    eprintln!("{label}: {counts:?}");
+}
+
 fn scroll_and_draw(
     window: &mut gpui::TestAppWindow<MarkdownEditor>,
     app: &mut TestApp,
@@ -105,12 +114,16 @@ fn scroll_and_draw(
 fn scroll_same_region_twice(window: &mut gpui::TestAppWindow<MarkdownEditor>, app: &mut TestApp) {
     let initial_offset =
         window.update(|editor, _, _| editor.display_list_state.logical_scroll_top());
+    reset_layout_computation_counts(window);
     scroll_and_draw(window, app, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+    report_layout_computation_counts("first scroll", window);
     window.update(|editor, _, _| {
         editor.display_list_state.scroll_to(initial_offset);
     });
     warm_draw(window, app);
+    reset_layout_computation_counts(window);
     scroll_and_draw(window, app, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+    report_layout_computation_counts("second scroll", window);
 }
 
 fn replace_middle_row_word(
@@ -169,7 +182,9 @@ fn source_mode_draw_large_markdown() {
     let text = large_plain_markdown_fixture();
     let mut window = open_source_perf_window(&mut app, &text);
 
+    reset_layout_computation_counts(&mut window);
     warm_draw(&mut window, &mut app);
+    report_layout_computation_counts("source large draw", &mut window);
 
     window.read(|editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Source);
@@ -182,7 +197,9 @@ fn rendered_mode_draw_large_markdown() {
     let text = large_plain_markdown_fixture();
     let mut window = open_rendered_perf_window(&mut app, &text);
 
+    reset_layout_computation_counts(&mut window);
     warm_draw(&mut window, &mut app);
+    report_layout_computation_counts("rendered large draw", &mut window);
 
     window.read(|editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
@@ -196,7 +213,9 @@ fn source_mode_redraw_large_markdown_cached() {
     let mut window = open_source_perf_window(&mut app, &text);
 
     warm_draw(&mut window, &mut app);
+    reset_layout_computation_counts(&mut window);
     warm_draw(&mut window, &mut app);
+    report_layout_computation_counts("source large cached redraw", &mut window);
 
     window.read(|editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Source);
@@ -210,7 +229,9 @@ fn rendered_mode_redraw_large_markdown_cached() {
     let mut window = open_rendered_perf_window(&mut app, &text);
 
     warm_draw(&mut window, &mut app);
+    reset_layout_computation_counts(&mut window);
     warm_draw(&mut window, &mut app);
+    report_layout_computation_counts("rendered large cached redraw", &mut window);
 
     window.read(|editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
@@ -224,7 +245,9 @@ fn source_mode_scroll_short_markdown() {
     let mut window = open_source_perf_window(&mut app, &text);
 
     warm_draw(&mut window, &mut app);
+    reset_layout_computation_counts(&mut window);
     scroll_and_draw(&mut window, &mut app, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+    report_layout_computation_counts("source short first scroll", &mut window);
 
     window.read(|editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Source);
@@ -238,7 +261,9 @@ fn source_mode_scroll_large_markdown() {
     let mut window = open_source_perf_window(&mut app, &text);
 
     warm_draw(&mut window, &mut app);
+    reset_layout_computation_counts(&mut window);
     scroll_and_draw(&mut window, &mut app, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+    report_layout_computation_counts("source large first scroll", &mut window);
 
     window.read(|editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Source);
@@ -280,7 +305,9 @@ fn rendered_mode_scroll_short_markdown() {
     let mut window = open_rendered_perf_window(&mut app, &text);
 
     warm_draw(&mut window, &mut app);
+    reset_layout_computation_counts(&mut window);
     scroll_and_draw(&mut window, &mut app, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+    report_layout_computation_counts("rendered short first scroll", &mut window);
 
     window.read(|editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
@@ -294,7 +321,9 @@ fn rendered_mode_scroll_large_markdown() {
     let mut window = open_rendered_perf_window(&mut app, &text);
 
     warm_draw(&mut window, &mut app);
+    reset_layout_computation_counts(&mut window);
     scroll_and_draw(&mut window, &mut app, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+    report_layout_computation_counts("rendered large first scroll", &mut window);
 
     window.read(|editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
@@ -370,8 +399,10 @@ fn rendered_mode_resize_large_markdown() {
     let mut window = open_rendered_perf_window(&mut app, &text);
 
     warm_draw(&mut window, &mut app);
+    reset_layout_computation_counts(&mut window);
     window.simulate_resize(size(px(PERF_NARROW_WINDOW_WIDTH), px(PERF_WINDOW_HEIGHT)));
     warm_draw(&mut window, &mut app);
+    report_layout_computation_counts("rendered large resize", &mut window);
 
     window.read(|editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);

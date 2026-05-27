@@ -210,6 +210,19 @@ pub struct MarkdownEditor {
     pending_inline_atom_remeasure_rows: HashSet<usize>,
     inline_atom_remeasure_scheduled: bool,
     source_prewarm: Option<SourcePrewarmState>,
+    #[cfg(perf_enabled)]
+    layout_computation_counts: LayoutComputationCounts,
+}
+
+#[cfg(perf_enabled)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LayoutComputationCounts {
+    pub(crate) display_rows_created: usize,
+    pub(crate) row_layout_inputs_created: usize,
+    pub(crate) row_layouts_created: usize,
+    pub(crate) text_shaping_calls: usize,
+    pub(crate) rendered_block_queries: usize,
+    pub(crate) rendered_inline_span_queries: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -310,11 +323,23 @@ impl MarkdownEditor {
             pending_inline_atom_remeasure_rows: HashSet::default(),
             inline_atom_remeasure_scheduled: false,
             source_prewarm: None,
+            #[cfg(perf_enabled)]
+            layout_computation_counts: LayoutComputationCounts::default(),
         }
     }
 
     pub fn for_text(text: impl Into<String>, cx: &mut Context<Self>) -> Self {
         Self::new(Buffer::local(text), cx)
+    }
+
+    #[cfg(perf_enabled)]
+    pub(crate) fn reset_layout_computation_counts(&mut self) {
+        self.layout_computation_counts = LayoutComputationCounts::default();
+    }
+
+    #[cfg(perf_enabled)]
+    pub(crate) fn layout_computation_counts(&self) -> LayoutComputationCounts {
+        self.layout_computation_counts
     }
 
     pub fn for_text_with_document_path(
