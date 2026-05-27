@@ -72,18 +72,15 @@ pub(super) fn render_formula(
         return state;
     }
 
-    match render_formula_image(key) {
-        Ok(asset) => {
-            let state = FormulaRenderState::Ready(asset);
-            formula_render_cache().insert(key.clone(), state.clone());
-            state
-        }
-        Err(_) => {
-            let state = FormulaRenderState::Invalid(fallback_size);
-            formula_render_cache().insert(key.clone(), state.clone());
-            state
-        }
-    }
+    let state = match render_formula_image(key) {
+        Ok(asset) => FormulaRenderState::Ready(asset),
+        Err(_) => FormulaRenderState::Invalid(fallback_size),
+    };
+
+    formula_render_cache()
+        .entry(key.clone())
+        .or_insert(state)
+        .clone()
 }
 
 fn formula_render_cache() -> MutexGuard<'static, HashMap<FormulaRenderKey, FormulaRenderState>> {
