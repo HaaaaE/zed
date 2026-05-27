@@ -455,14 +455,16 @@ fn hyp_binary() -> Option<Command> {
 /// Profiles a given test with hyperfine, returning the mean and standard deviation
 /// for its runtime. If the test errors, returns `None` instead.
 fn hyp_profile(t_bin: &str, t_name: &str, iterations: NonZero<usize>) -> Option<Timings> {
+    const HYPERFINE_WARMUPS: &str = "1";
+
     let mut perf_cmd = hyp_binary().expect("Couldn't find the Hyperfine binary on the system");
 
-    // Warm up the cache and print markdown output to stdout, which we parse.
+    // Run one unrecorded warmup, then print markdown output to stdout, which we parse.
     perf_cmd.args([
         "--style",
         "none",
         "--warmup",
-        "1",
+        HYPERFINE_WARMUPS,
         "--export-markdown",
         "-",
         // Parse json instead...

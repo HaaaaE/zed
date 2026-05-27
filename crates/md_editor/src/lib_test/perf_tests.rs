@@ -9,6 +9,7 @@ const PERF_WINDOW_HEIGHT: f32 = 700.;
 const PERF_NARROW_WINDOW_WIDTH: f32 = 560.;
 const SCROLL_STEP_PIXELS: f32 = 168.;
 const SCROLL_STEPS: usize = 12;
+const PERF_ITERATIONS: usize = 5;
 
 fn plain_markdown_fixture(target_bytes: usize) -> String {
     let mut text = String::with_capacity(target_bytes + 1024);
@@ -176,7 +177,7 @@ fn replace_middle_row_word(
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn source_mode_draw_large_markdown() {
     let mut app = TestApp::new();
     let text = large_plain_markdown_fixture();
@@ -191,7 +192,7 @@ fn source_mode_draw_large_markdown() {
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn rendered_mode_draw_large_markdown() {
     let mut app = TestApp::new();
     let text = large_plain_markdown_fixture();
@@ -206,7 +207,7 @@ fn rendered_mode_draw_large_markdown() {
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn source_mode_redraw_large_markdown_cached() {
     let mut app = TestApp::new();
     let text = large_plain_markdown_fixture();
@@ -222,7 +223,7 @@ fn source_mode_redraw_large_markdown_cached() {
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn rendered_mode_redraw_large_markdown_cached() {
     let mut app = TestApp::new();
     let text = large_plain_markdown_fixture();
@@ -238,7 +239,7 @@ fn rendered_mode_redraw_large_markdown_cached() {
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn source_mode_scroll_short_markdown() {
     let mut app = TestApp::new();
     let text = short_plain_markdown_fixture();
@@ -254,7 +255,7 @@ fn source_mode_scroll_short_markdown() {
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn source_mode_scroll_large_markdown() {
     let mut app = TestApp::new();
     let text = large_plain_markdown_fixture();
@@ -270,7 +271,7 @@ fn source_mode_scroll_large_markdown() {
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn source_mode_scroll_short_markdown_cached_region() {
     let mut app = TestApp::new();
     let text = short_plain_markdown_fixture();
@@ -284,7 +285,7 @@ fn source_mode_scroll_short_markdown_cached_region() {
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn source_mode_scroll_large_markdown_cached_region() {
     let mut app = TestApp::new();
     let text = large_plain_markdown_fixture();
@@ -298,7 +299,7 @@ fn source_mode_scroll_large_markdown_cached_region() {
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn rendered_mode_scroll_short_markdown() {
     let mut app = TestApp::new();
     let text = short_plain_markdown_fixture();
@@ -314,7 +315,7 @@ fn rendered_mode_scroll_short_markdown() {
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn rendered_mode_scroll_large_markdown() {
     let mut app = TestApp::new();
     let text = large_plain_markdown_fixture();
@@ -330,7 +331,7 @@ fn rendered_mode_scroll_large_markdown() {
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn rendered_mode_scroll_short_markdown_cached_region() {
     let mut app = TestApp::new();
     let text = short_plain_markdown_fixture();
@@ -344,7 +345,7 @@ fn rendered_mode_scroll_short_markdown_cached_region() {
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn rendered_mode_scroll_large_markdown_cached_region() {
     let mut app = TestApp::new();
     let text = large_plain_markdown_fixture();
@@ -358,7 +359,7 @@ fn rendered_mode_scroll_large_markdown_cached_region() {
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn source_mode_single_row_edit_large_markdown() {
     let mut app = TestApp::new();
     let text = large_plain_markdown_fixture();
@@ -375,7 +376,7 @@ fn source_mode_single_row_edit_large_markdown() {
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn source_mode_single_row_edit_large_markdown_length_change() {
     let mut app = TestApp::new();
     let text = large_plain_markdown_fixture();
@@ -392,7 +393,7 @@ fn source_mode_single_row_edit_large_markdown_length_change() {
     });
 }
 
-#[perf(important, iterations = 1)]
+#[perf(important, iterations = PERF_ITERATIONS)]
 fn rendered_mode_resize_large_markdown() {
     let mut app = TestApp::new();
     let text = large_plain_markdown_fixture();
