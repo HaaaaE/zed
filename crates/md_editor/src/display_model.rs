@@ -10,6 +10,7 @@ pub struct DisplayRow {
     pub(crate) source_text: String,
     pub(crate) source_range: Range<usize>,
     pub(crate) active_projection_source_ranges: Vec<Range<usize>>,
+    pub(crate) heading_level: Option<u8>,
     pub(crate) projection: MarkdownProjectionMap,
     pub(crate) insertions: Vec<DisplayInsertion>,
 }

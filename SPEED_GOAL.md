@@ -31,6 +31,10 @@
 - 2026-05-27: Tightened the stage-1 shared-layout path for Source mode.
   - `cached_source_text_layout` now returns the shared cached text layout instead of cloning the cached layout payload on cache hits.
   - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
+- 2026-05-27: Started stage-5 Rendered-mode query consolidation with cached heading levels.
+  - `DisplayRow` now carries the heading level computed during rendered display-row creation.
+  - Row style selection reuses the cached heading level instead of issuing another Markdown block query from layout.
+  - Verified with `cargo check -p md_editor` and `cargo test -p md_editor`.
 
 ## 背景
 

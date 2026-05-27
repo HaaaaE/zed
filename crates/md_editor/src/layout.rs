@@ -744,12 +744,12 @@ pub(super) fn line_fragments_for_wrapping<'a>(
 }
 
 pub(super) fn row_display_style_for_display_row(
-    snapshot: &BufferSnapshot,
+    _snapshot: &BufferSnapshot,
     display_row: &DisplayRow,
     mode: MarkdownEditorMode,
 ) -> RowDisplayStyle {
     if mode == MarkdownEditorMode::Rendered {
-        if let Some(level) = heading_level_for_display_row(snapshot, display_row) {
+        if let Some(level) = display_row.heading_level {
             return heading_row_metrics(level).into();
         }
     }
@@ -878,31 +878,6 @@ fn combined_style_for_range(
         }
     }
     combined
-}
-
-fn heading_level_for_display_row(
-    snapshot: &BufferSnapshot,
-    display_row: &DisplayRow,
-) -> Option<u8> {
-    heading_level_for_source_range(
-        snapshot,
-        display_row.source_range.clone(),
-        display_row.row as usize,
-    )
-}
-
-fn heading_level_for_source_range(
-    snapshot: &BufferSnapshot,
-    source_range: Range<usize>,
-    row: usize,
-) -> Option<u8> {
-    snapshot
-        .syntax_tree()
-        .blocks_in_source_range(source_range)
-        .find_map(|block| match block.kind {
-            MarkdownBlockKind::AtxHeading { level } if block.row_range.start == row => Some(level),
-            _ => None,
-        })
 }
 
 pub(super) fn inline_style(kind: MarkdownInlineKind) -> DisplayTextStyle {

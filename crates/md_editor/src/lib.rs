@@ -12,9 +12,7 @@ use gpui::{
     ListAlignment, ListSizingBehavior, ListState, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Render, SharedString, TextAlign, Window, div, list, prelude::*, px,
 };
-#[cfg(test)]
-use markdown_wysiwyg::MarkdownBlockKind;
-use markdown_wysiwyg::{MarkdownInlineKind, MarkdownProjectionMap};
+use markdown_wysiwyg::{MarkdownBlockKind, MarkdownInlineKind, MarkdownProjectionMap};
 use md_assets::EDITOR_FONT_FAMILY;
 use md_buffer::{Buffer, BufferSnapshot};
 use md_settings::EditorSettings;
@@ -1897,12 +1895,14 @@ fn display_row_in_mode(
         mode,
         document_path,
     );
+    let heading_level = heading_level_for_display_row(snapshot, source_range.clone(), row);
     DisplayRow {
         row,
         text,
         source_text,
         source_range,
         active_projection_source_ranges,
+        heading_level,
         projection,
         insertions,
     }
@@ -1932,9 +1932,26 @@ fn source_display_row_in_text_snapshot(snapshot: &TextBufferSnapshot, row: u32) 
         source_text,
         source_range,
         active_projection_source_ranges: Vec::new(),
+        heading_level: None,
         projection,
         insertions: Vec::new(),
     }
+}
+
+fn heading_level_for_display_row(
+    snapshot: &BufferSnapshot,
+    source_range: Range<usize>,
+    row: u32,
+) -> Option<u8> {
+    snapshot
+        .syntax_tree()
+        .blocks_in_source_range(source_range)
+        .find_map(|block| match block.kind {
+            MarkdownBlockKind::AtxHeading { level } if block.row_range.start == row as usize => {
+                Some(level)
+            }
+            _ => None,
+        })
 }
 
 fn row_source_range(snapshot: &BufferSnapshot, row: u32) -> Range<usize> {
