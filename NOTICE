@@ -26,4 +26,7 @@ Third-party dependencies:
 - Other third-party dependencies are consumed through Cargo under their
   respective licenses.
 
+Some repository configuration files were originally adapted from Zed and have
+been simplified for this project.
+
 This project is not affiliated with Zed Industries.
