@@ -62,6 +62,7 @@
   - This keeps offscreen measuring for fast scrolling, while reducing the extra rows laid out on each list pass now that display rows, layouts, and height hints are prewarmed.
   - Stage 7 cache caps remain deferred because this pass does not have memory data showing the expanded row/layout caches need eviction yet.
   - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
+  - `cargo perf-test -p md_editor` was attempted again after the final Speed slice and timed out after roughly 3 minutes in this workspace.
 
 ## 背景
 
