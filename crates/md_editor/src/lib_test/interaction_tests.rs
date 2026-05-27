@@ -1050,6 +1050,7 @@ fn inline_atom_deferred_remeasure_only_clears_affected_row(cx: &mut gpui::TestAp
             fallback_text: "x".to_string(),
             row_style,
             resource_id: None,
+            image_max_width: None,
             formula_scale_factor_bits: Some(window.scale_factor().to_bits()),
         };
         editor

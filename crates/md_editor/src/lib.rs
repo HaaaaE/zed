@@ -40,7 +40,7 @@ use block::DisplayBlockLayout;
 use block::{
     RENDERED_FORMULA_BLOCK_VERTICAL_PADDING, RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT,
     RENDERED_IMAGE_BLOCK_VERTICAL_PADDING, RenderedFormulaBlock, RenderedFormulaBlockLayout,
-    RenderedImageBlock, RenderedImageBlockLayout, image_block_height_for_size,
+    RenderedImageBlock, RenderedImageBlockLayout, image_block_size_for_size,
     image_block_source_offset_for_x, rendered_formula_block_for_row, rendered_image_block_for_row,
 };
 use display_model::{DisplayInsertion, DisplayRow, DisplayTextStyle, StyledDisplaySegment};
@@ -55,8 +55,8 @@ use inline_atom::{
 };
 #[cfg(test)]
 use inline_atom::{
-    INLINE_IMAGE_ATOM_MAX_WIDTH, INLINE_IMAGE_ATOM_SIZE, INLINE_MATH_ATOM_EXTRA_HEIGHT,
-    INLINE_MATH_ATOM_HORIZONTAL_PADDING, inline_image_atom_size_for_size,
+    INLINE_IMAGE_ATOM_SIZE, INLINE_MATH_ATOM_EXTRA_HEIGHT, INLINE_MATH_ATOM_HORIZONTAL_PADDING,
+    inline_image_atom_size_for_size,
 };
 use interaction::mouse_target_for_text_layout;
 use layout::{

@@ -11,9 +11,8 @@ use md_text::{Point, Selection};
 use md_theme::{default_row_metrics, editor_palette, gutter_width, heading_row_metrics};
 
 use super::{
-    DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, InlineAtomMeasurementKey,
-    InlineAtomMeasurementState, MarkdownEditorMode, RowDisplayStyle,
-    active_source_range_for_selection,
+    DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, InlineAtomMeasurementState,
+    MarkdownEditorMode, RowDisplayStyle, active_source_range_for_selection,
     block::DisplayBlockLayout,
     display_model::{DisplayRow, DisplayTextStyle, StyledDisplaySegment},
     inactive_rendered_element_source_ranges_for_selection, ranges_overlap,
@@ -45,7 +44,6 @@ pub(super) struct DisplayRowLayoutInputs {
     pub(super) shaped_line: gpui::ShapedLine,
     pub(super) text_len: usize,
     pub(super) has_inline_atoms: bool,
-    pub(super) inline_atom_keys: Vec<InlineAtomMeasurementKey>,
 }
 
 impl DisplayRowLayoutInputs {
@@ -199,15 +197,6 @@ pub(super) fn display_row_layout_inputs_for_fragments(
         None,
     );
     let has_inline_atoms = has_inline_atoms(&fragments);
-    let inline_atom_keys = fragments
-        .iter()
-        .filter_map(|fragment| match fragment {
-            DisplayInlineFragment::Text(_) => None,
-            DisplayInlineFragment::Atom(atom) => {
-                Some(atom.measurement_key_with_scale(row_style, window.scale_factor()))
-            }
-        })
-        .collect();
 
     DisplayRowLayoutInputs {
         fragments,
@@ -215,7 +204,6 @@ pub(super) fn display_row_layout_inputs_for_fragments(
         shaped_line,
         text_len: display_row.text.len(),
         has_inline_atoms,
-        inline_atom_keys,
     }
 }
 

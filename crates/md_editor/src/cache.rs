@@ -277,6 +277,7 @@ impl MarkdownEditor {
                 display_row.row as usize,
                 &inputs,
                 row_style,
+                wrap_width,
                 measure_inline_atoms,
                 window,
                 cx,
@@ -331,6 +332,7 @@ impl MarkdownEditor {
             display_row.row as usize,
             &inputs,
             row_style,
+            wrap_width,
             measure_inline_atoms,
             window,
             cx,
@@ -657,6 +659,7 @@ impl MarkdownEditor {
         row: usize,
         inputs: &DisplayRowLayoutInputs,
         row_style: RowDisplayStyle,
+        wrap_width: gpui::Pixels,
         measure_inline_atoms: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -664,28 +667,35 @@ impl MarkdownEditor {
         let atoms = inputs.inline_atoms().cloned().collect::<Vec<_>>();
         atoms
             .iter()
-            .zip(inputs.inline_atom_keys.iter())
-            .map(|(atom, key)| {
+            .map(|atom| {
                 let fallback_size = atom.fallback_size(&inputs.shaped_line, row_style);
-                if let Some(measurement) = self.inline_atom_measurement_cache.get(key).copied() {
+                let image_max_width = (atom.kind() == DisplayInlineAtomKind::InlineImage)
+                    .then_some(wrap_width.max(gpui::px(1.)));
+                let key = atom.measurement_key_with_scale(
+                    row_style,
+                    window.scale_factor(),
+                    image_max_width,
+                );
+                if let Some(measurement) = self.inline_atom_measurement_cache.get(&key).copied() {
                     if measure_inline_atoms && atom.kind() == DisplayInlineAtomKind::InlineImage {
-                        let measured =
-                            atom.measure_size_state(fallback_size, row_style, window, cx);
+                        let measured = atom.measure_size_state(
+                            fallback_size,
+                            row_style,
+                            image_max_width,
+                            window,
+                            cx,
+                        );
                         match measured {
                             InlineAtomMeasurementState::Ready(_)
                             | InlineAtomMeasurementState::Invalid(_) => {
                                 self.update_inline_atom_measurement_cache(
-                                    row,
-                                    key.clone(),
-                                    measured,
-                                    window,
-                                    cx,
+                                    row, key, measured, window, cx,
                                 );
                                 return measured;
                             }
                             InlineAtomMeasurementState::Pending(_) => {
                                 self.pending_inline_atom_rows
-                                    .entry(key.clone())
+                                    .entry(key)
                                     .or_default()
                                     .insert(row);
                             }
@@ -698,13 +708,14 @@ impl MarkdownEditor {
                     return InlineAtomMeasurementState::Pending(fallback_size);
                 }
 
-                let measurement = atom.measure_size_state(fallback_size, row_style, window, cx);
+                let measurement =
+                    atom.measure_size_state(fallback_size, row_style, image_max_width, window, cx);
                 match measurement {
                     InlineAtomMeasurementState::Ready(_)
                     | InlineAtomMeasurementState::Invalid(_) => {
                         self.update_inline_atom_measurement_cache(
                             row,
-                            key.clone(),
+                            key,
                             measurement,
                             window,
                             cx,
@@ -712,7 +723,7 @@ impl MarkdownEditor {
                     }
                     InlineAtomMeasurementState::Pending(_) => {
                         self.pending_inline_atom_rows
-                            .entry(key.clone())
+                            .entry(key)
                             .or_default()
                             .insert(row);
                     }

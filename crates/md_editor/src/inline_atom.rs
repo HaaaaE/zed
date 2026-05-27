@@ -18,7 +18,6 @@ use super::{
 pub(super) const INLINE_MATH_ATOM_EXTRA_HEIGHT: gpui::Pixels = px(4.);
 pub(super) const INLINE_MATH_ATOM_HORIZONTAL_PADDING: gpui::Pixels = px(4.);
 pub(super) const INLINE_IMAGE_ATOM_SIZE: gpui::Pixels = px(24.);
-pub(super) const INLINE_IMAGE_ATOM_MAX_WIDTH: gpui::Pixels = px(96.);
 pub(super) const INLINE_IMAGE_PLACEHOLDER: &str = "\u{fffc}";
 
 #[derive(Clone, Debug, PartialEq)]
@@ -59,6 +58,7 @@ pub(super) struct InlineAtomMeasurementKey {
     pub(super) fallback_text: String,
     pub(super) row_style: RowDisplayStyle,
     pub(super) resource_id: Option<MarkdownImageSourceKey>,
+    pub(super) image_max_width: Option<gpui::Pixels>,
     pub(super) formula_scale_factor_bits: Option<u32>,
 }
 
@@ -122,7 +122,11 @@ impl DisplayInlineAtom {
             .expect("inline atom descriptor must map to an atom kind")
     }
 
-    pub(super) fn measurement_key(&self, row_style: RowDisplayStyle) -> InlineAtomMeasurementKey {
+    pub(super) fn measurement_key(
+        &self,
+        row_style: RowDisplayStyle,
+        image_max_width: Option<gpui::Pixels>,
+    ) -> InlineAtomMeasurementKey {
         InlineAtomMeasurementKey {
             kind: self.kind(),
             source_range: self.source_range.clone(),
@@ -133,6 +137,7 @@ impl DisplayInlineAtom {
                 .image_source
                 .as_ref()
                 .map(MarkdownImageSource::cache_key),
+            image_max_width,
             formula_scale_factor_bits: None,
         }
     }
@@ -141,8 +146,9 @@ impl DisplayInlineAtom {
         &self,
         row_style: RowDisplayStyle,
         scale_factor: f32,
+        image_max_width: Option<gpui::Pixels>,
     ) -> InlineAtomMeasurementKey {
-        let mut key = self.measurement_key(row_style);
+        let mut key = self.measurement_key(row_style, image_max_width);
         if self.kind() == DisplayInlineAtomKind::InlineMath {
             key.formula_scale_factor_bits = Some(scale_factor.to_bits());
         }
@@ -171,12 +177,13 @@ impl DisplayInlineAtom {
         &self,
         fallback_size: gpui::Size<gpui::Pixels>,
         row_style: RowDisplayStyle,
+        image_max_width: Option<gpui::Pixels>,
         window: &mut Window,
         cx: &mut App,
     ) -> InlineAtomMeasurementState {
         match self.kind() {
             DisplayInlineAtomKind::InlineImage => {
-                self.measure_inline_image_size(fallback_size, window, cx)
+                self.measure_inline_image_size(fallback_size, image_max_width, window, cx)
             }
             DisplayInlineAtomKind::InlineMath => {
                 let key = self.formula_key(row_style, window.scale_factor());
@@ -193,6 +200,7 @@ impl DisplayInlineAtom {
     fn measure_inline_image_size(
         &self,
         fallback_size: gpui::Size<gpui::Pixels>,
+        image_max_width: Option<gpui::Pixels>,
         window: &mut Window,
         cx: &mut App,
     ) -> InlineAtomMeasurementState {
@@ -211,7 +219,10 @@ impl DisplayInlineAtom {
             Ok(image) => {
                 let size = image.size(0);
                 InlineAtomMeasurementState::Ready(
-                    inline_image_atom_size_for_size(size.width.0, size.height.0)
+                    image_max_width
+                        .and_then(|max_width| {
+                            inline_image_atom_size_for_size(size.width.0, size.height.0, max_width)
+                        })
                         .unwrap_or(fallback_size),
                 )
             }
@@ -446,23 +457,26 @@ impl DisplayInlineAtom {
 pub(super) fn inline_image_atom_size_for_size(
     image_width: i32,
     image_height: i32,
+    max_width: gpui::Pixels,
 ) -> Option<gpui::Size<gpui::Pixels>> {
     if image_width <= 0 || image_height <= 0 {
         return None;
     }
 
-    let aspect_ratio = image_width as f32 / image_height as f32;
-    let width_at_default_height = INLINE_IMAGE_ATOM_SIZE * aspect_ratio;
-    if width_at_default_height <= INLINE_IMAGE_ATOM_MAX_WIDTH {
+    let natural_width = px(image_width as f32);
+    let natural_height = px(image_height as f32);
+    let max_width = max_width.max(px(1.));
+    if natural_width <= max_width {
         return Some(gpui::size(
-            width_at_default_height.max(px(1.)),
-            INLINE_IMAGE_ATOM_SIZE,
+            natural_width.max(px(1.)),
+            natural_height.max(px(1.)),
         ));
     }
 
+    let aspect_ratio = image_width as f32 / image_height as f32;
     Some(gpui::size(
-        INLINE_IMAGE_ATOM_MAX_WIDTH,
-        (INLINE_IMAGE_ATOM_MAX_WIDTH / aspect_ratio).max(px(1.)),
+        max_width,
+        (max_width / aspect_ratio).max(px(1.)),
     ))
 }
 

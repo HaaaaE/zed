@@ -480,7 +480,7 @@ fn inline_atom_measurement_key_tracks_descriptor_content_and_row_style() {
         height: INLINE_IMAGE_ATOM_SIZE,
         width: px(0.),
     };
-    let same_image = image.measurement_key(row_style);
+    let same_image = image.measurement_key(row_style, Some(px(300.)));
     let different_url = DisplayInlineAtom {
         descriptor: image_descriptor(
             0..30,
@@ -491,8 +491,9 @@ fn inline_atom_measurement_key_tracks_descriptor_content_and_row_style() {
         image_source: Some(markdown_image_source("https://example.com/dog.png", "")),
         ..image.clone()
     }
-    .measurement_key(row_style);
-    let different_style = image.measurement_key(heading_style);
+    .measurement_key(row_style, Some(px(300.)));
+    let different_style = image.measurement_key(heading_style, Some(px(300.)));
+    let different_image_width = image.measurement_key(row_style, Some(px(200.)));
     let math = DisplayInlineAtom {
         descriptor: math_descriptor(0..3, "x"),
         source_range: 0..3,
@@ -508,15 +509,16 @@ fn inline_atom_measurement_key_tracks_descriptor_content_and_row_style() {
         fallback_text: "y".to_string(),
         ..math.clone()
     }
-    .measurement_key(row_style);
+    .measurement_key(row_style, None);
 
-    assert_eq!(same_image, image.measurement_key(row_style));
+    assert_eq!(same_image, image.measurement_key(row_style, Some(px(300.))));
     assert_ne!(same_image, different_url);
     assert_ne!(same_image, different_style);
-    assert_ne!(math.measurement_key(row_style), different_math);
+    assert_ne!(same_image, different_image_width);
+    assert_ne!(math.measurement_key(row_style, None), different_math);
     assert_ne!(
-        math.measurement_key_with_scale(row_style, 1.),
-        math.measurement_key_with_scale(row_style, 2.)
+        math.measurement_key_with_scale(row_style, 1., None),
+        math.measurement_key_with_scale(row_style, 2., None)
     );
 }
 
@@ -658,26 +660,38 @@ fn inline_atom_width_includes_horizontal_padding() {
 }
 
 #[test]
-fn inline_image_atom_size_preserves_loaded_image_aspect_ratio() {
+fn inline_image_atom_size_uses_natural_size_when_it_fits() {
     assert_eq!(
-        inline_image_atom_size_for_size(80, 40),
-        Some(gpui::size(px(48.), INLINE_IMAGE_ATOM_SIZE))
+        inline_image_atom_size_for_size(80, 40, px(300.)),
+        Some(gpui::size(px(80.), px(40.)))
+    );
+}
+
+#[test]
+fn inline_image_atom_size_scales_wide_image_to_max_width() {
+    assert_eq!(
+        inline_image_atom_size_for_size(1200, 800, px(600.)),
+        Some(gpui::size(px(600.), px(400.)))
+    );
+}
+
+#[test]
+fn inline_image_atom_size_preserves_tall_image_aspect_ratio() {
+    assert_eq!(
+        inline_image_atom_size_for_size(800, 1200, px(300.)),
+        Some(gpui::size(px(300.), px(450.)))
     );
     assert_eq!(
-        inline_image_atom_size_for_size(40, 80),
-        Some(gpui::size(px(12.), INLINE_IMAGE_ATOM_SIZE))
-    );
-    assert_eq!(
-        inline_image_atom_size_for_size(1200, 120),
-        Some(gpui::size(INLINE_IMAGE_ATOM_MAX_WIDTH, px(9.6)))
+        inline_image_atom_size_for_size(40, 80, px(300.)),
+        Some(gpui::size(px(40.), px(80.)))
     );
 }
 
 #[test]
 fn inline_image_atom_size_rejects_invalid_image_dimensions() {
-    assert_eq!(inline_image_atom_size_for_size(0, 40), None);
-    assert_eq!(inline_image_atom_size_for_size(80, 0), None);
-    assert_eq!(inline_image_atom_size_for_size(0, 0), None);
+    assert_eq!(inline_image_atom_size_for_size(0, 40, px(300.)), None);
+    assert_eq!(inline_image_atom_size_for_size(80, 0, px(300.)), None);
+    assert_eq!(inline_image_atom_size_for_size(0, 0, px(300.)), None);
 }
 
 #[test]
@@ -1560,22 +1574,38 @@ fn image_block_layout_cacheability_tracks_loaded_size() {
 }
 
 #[test]
-fn image_block_height_preserves_aspect_ratio() {
+fn image_block_size_uses_natural_size_when_it_fits() {
     assert_eq!(
-        image_block_height_for_size(px(600.), 1200, 800),
-        Some(px(400.))
-    );
-    assert_eq!(
-        image_block_height_for_size(px(300.), 800, 1200),
-        Some(px(450.))
+        image_block_size_for_size(300, 200, px(600.)),
+        Some(gpui::size(px(300.), px(200.)))
     );
 }
 
 #[test]
-fn image_block_height_returns_none_for_empty_image_size() {
-    assert_eq!(image_block_height_for_size(px(600.), 0, 800), None);
-    assert_eq!(image_block_height_for_size(px(600.), 1200, 0), None);
-    assert_eq!(image_block_height_for_size(px(600.), 0, 0), None);
+fn image_block_size_scales_wide_image_to_max_width() {
+    assert_eq!(
+        image_block_size_for_size(1200, 800, px(600.)),
+        Some(gpui::size(px(600.), px(400.)))
+    );
+}
+
+#[test]
+fn image_block_size_preserves_tall_image_aspect_ratio() {
+    assert_eq!(
+        image_block_size_for_size(800, 1200, px(300.)),
+        Some(gpui::size(px(300.), px(450.)))
+    );
+    assert_eq!(
+        image_block_size_for_size(40, 80, px(300.)),
+        Some(gpui::size(px(40.), px(80.)))
+    );
+}
+
+#[test]
+fn image_block_size_returns_none_for_empty_image_size() {
+    assert_eq!(image_block_size_for_size(0, 800, px(600.)), None);
+    assert_eq!(image_block_size_for_size(1200, 0, px(600.)), None);
+    assert_eq!(image_block_size_for_size(0, 0, px(600.)), None);
 }
 
 #[test]

@@ -21,7 +21,6 @@ use super::{
     rendered_element_source_range_is_active, selection_byte_range, visual_horizontal_goal,
 };
 
-pub(super) const RENDERED_IMAGE_BLOCK_MAX_WIDTH: gpui::Pixels = px(600.);
 pub(super) const RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT: gpui::Pixels = px(120.);
 pub(super) const RENDERED_IMAGE_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(4.);
 pub(super) const RENDERED_FORMULA_BLOCK_HORIZONTAL_PADDING: gpui::Pixels = px(12.);
@@ -276,7 +275,7 @@ impl RenderedImageBlockLayout {
         window: &mut Window,
         cx: &mut App,
     ) -> Self {
-        let width = wrap_width.max(px(1.)).min(RENDERED_IMAGE_BLOCK_MAX_WIDTH);
+        let width = wrap_width.max(px(1.));
         if !measure_layout {
             return Self {
                 image_block,
@@ -286,18 +285,18 @@ impl RenderedImageBlockLayout {
             };
         }
 
-        let loaded_height = image_block
+        let loaded_size = image_block
             .image_source
             .resource()
             .and_then(|resource| window.use_asset::<ImgResourceLoader>(&resource, cx))
             .and_then(|image| {
                 let image = image.ok()?;
                 let size = image.size(0);
-                image_block_height_for_size(width, size.width.0, size.height.0)
+                image_block_size_for_size(size.width.0, size.height.0, width)
             });
-        let (image_height, cacheable) = loaded_height
-            .map(|height| (height, true))
-            .unwrap_or((RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT, false));
+        let (width, image_height, cacheable) = loaded_size
+            .map(|size| (size.width, size.height, true))
+            .unwrap_or((width, RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT, false));
 
         Self {
             image_block,
@@ -393,16 +392,29 @@ impl RenderedFormulaBlockLayout {
     }
 }
 
-pub(super) fn image_block_height_for_size(
-    width: gpui::Pixels,
+pub(super) fn image_block_size_for_size(
     image_width: i32,
     image_height: i32,
-) -> Option<gpui::Pixels> {
+    max_width: gpui::Pixels,
+) -> Option<gpui::Size<gpui::Pixels>> {
     if image_width <= 0 || image_height <= 0 {
         return None;
     }
 
-    Some(width * (image_height as f32 / image_width as f32))
+    let natural_width = px(image_width as f32);
+    let natural_height = px(image_height as f32);
+    let max_width = max_width.max(px(1.));
+    if natural_width <= max_width {
+        return Some(gpui::size(
+            natural_width.max(px(1.)),
+            natural_height.max(px(1.)),
+        ));
+    }
+
+    Some(gpui::size(
+        max_width,
+        (max_width * (image_height as f32 / image_width as f32)).max(px(1.)),
+    ))
 }
 
 pub(super) fn image_block_source_offset_for_x(
