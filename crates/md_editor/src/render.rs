@@ -141,12 +141,14 @@ fn render_visual_text_row(
     let mouse_move_visual_row = visual_row.clone();
 
     div()
+        .w_full()
         .h(visual_row.height)
         .flex()
         .items_center()
         .relative()
         .overflow_hidden()
         .whitespace_nowrap()
+        .cursor_text()
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event, window, cx| {

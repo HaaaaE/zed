@@ -57,34 +57,48 @@ pub struct KeyBindingSpec {
     pub context: &'static str,
 }
 
+const fn key_binding(keystroke: &'static str, action: &'static str) -> KeyBindingSpec {
+    KeyBindingSpec {
+        keystroke,
+        action,
+        context: "MarkdownEditor",
+    }
+}
+
 /// Default editor keymap bindings (Zed-style key bindings).
 ///
 /// Each entry maps a keystroke to an action name within the
 /// `MarkdownEditor` key context. The `md_editor` crate consumes
 /// these to construct `gpui::KeyBinding` values.
 pub const DEFAULT_EDITOR_KEYBINDINGS: &[KeyBindingSpec] = &[
-    KeyBindingSpec { keystroke: "left", action: "MoveLeft", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "right", action: "MoveRight", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "up", action: "MoveUp", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "down", action: "MoveDown", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "home", action: "MoveToBeginningOfLine", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "end", action: "MoveToEndOfLine", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "shift-left", action: "SelectLeft", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "shift-right", action: "SelectRight", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "shift-up", action: "SelectUp", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "shift-down", action: "SelectDown", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "shift-home", action: "SelectToBeginningOfLine", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "shift-end", action: "SelectToEndOfLine", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "ctrl-a", action: "SelectAll", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "cmd-a", action: "SelectAll", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "backspace", action: "Backspace", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "delete", action: "Delete", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "enter", action: "InsertNewline", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "tab", action: "Tab", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "ctrl-z", action: "Undo", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "cmd-z", action: "Undo", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "ctrl-shift-z", action: "Redo", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "cmd-shift-z", action: "Redo", context: "MarkdownEditor" },
+    key_binding("left", "MoveLeft"),
+    key_binding("right", "MoveRight"),
+    key_binding("up", "MoveUp"),
+    key_binding("down", "MoveDown"),
+    key_binding("home", "MoveToBeginningOfLine"),
+    key_binding("end", "MoveToEndOfLine"),
+    key_binding("shift-left", "SelectLeft"),
+    key_binding("shift-right", "SelectRight"),
+    key_binding("shift-up", "SelectUp"),
+    key_binding("shift-down", "SelectDown"),
+    key_binding("shift-home", "SelectToBeginningOfLine"),
+    key_binding("shift-end", "SelectToEndOfLine"),
+    key_binding("ctrl-a", "SelectAll"),
+    key_binding("cmd-a", "SelectAll"),
+    key_binding("ctrl-c", "Copy"),
+    key_binding("cmd-c", "Copy"),
+    key_binding("ctrl-v", "Paste"),
+    key_binding("cmd-v", "Paste"),
+    key_binding("ctrl-x", "Cut"),
+    key_binding("cmd-x", "Cut"),
+    key_binding("backspace", "Backspace"),
+    key_binding("delete", "Delete"),
+    key_binding("enter", "InsertNewline"),
+    key_binding("tab", "Tab"),
+    key_binding("ctrl-z", "Undo"),
+    key_binding("cmd-z", "Undo"),
+    key_binding("ctrl-shift-z", "Redo"),
+    key_binding("cmd-shift-z", "Redo"),
 ];
 
 /// Default application-level keymap bindings.
@@ -92,14 +106,14 @@ pub const DEFAULT_EDITOR_KEYBINDINGS: &[KeyBindingSpec] = &[
 /// These control the outer shell (new/open/save/mode toggle)
 /// within the `MarkdownEditor` key context.
 pub const DEFAULT_APP_KEYBINDINGS: &[KeyBindingSpec] = &[
-    KeyBindingSpec { keystroke: "ctrl-n", action: "NewDocument", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "cmd-n", action: "NewDocument", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "ctrl-o", action: "OpenDocument", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "cmd-o", action: "OpenDocument", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "ctrl-shift-m", action: "ToggleMode", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "cmd-shift-m", action: "ToggleMode", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "ctrl-s", action: "Save", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "cmd-s", action: "Save", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "ctrl-shift-s", action: "SaveAs", context: "MarkdownEditor" },
-    KeyBindingSpec { keystroke: "cmd-shift-s", action: "SaveAs", context: "MarkdownEditor" },
+    key_binding("ctrl-n", "NewDocument"),
+    key_binding("cmd-n", "NewDocument"),
+    key_binding("ctrl-o", "OpenDocument"),
+    key_binding("cmd-o", "OpenDocument"),
+    key_binding("ctrl-shift-m", "ToggleMode"),
+    key_binding("cmd-shift-m", "ToggleMode"),
+    key_binding("ctrl-s", "Save"),
+    key_binding("cmd-s", "Save"),
+    key_binding("ctrl-shift-s", "SaveAs"),
+    key_binding("cmd-shift-s", "SaveAs"),
 ];

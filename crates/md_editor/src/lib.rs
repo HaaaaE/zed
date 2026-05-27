@@ -8,9 +8,10 @@ use std::{
 #[cfg(test)]
 use gpui::FontWeight;
 use gpui::{
-    App, Context, EventEmitter, FocusHandle, Focusable, IntoElement, KeyBinding, KeyDownEvent,
-    ListAlignment, ListSizingBehavior, ListState, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Render, SharedString, TextAlign, Window, div, list, prelude::*, px,
+    App, ClipboardItem, Context, EventEmitter, FocusHandle, Focusable, IntoElement, KeyBinding,
+    KeyDownEvent, ListAlignment, ListSizingBehavior, ListState, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Render, SharedString, TextAlign, Window, div, list, prelude::*,
+    px,
 };
 use markdown_wysiwyg::{
     MarkdownBlock, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownProjectionMap,
@@ -137,6 +138,9 @@ gpui::actions!(
         SelectToBeginningOfLine,
         SelectToEndOfLine,
         SelectAll,
+        Copy,
+        Paste,
+        Cut,
         Backspace,
         Delete,
         InsertNewline,
@@ -175,6 +179,9 @@ fn editor_keybindings() -> Vec<KeyBinding> {
                 }
                 "SelectToEndOfLine" => KeyBinding::new(spec.keystroke, SelectToEndOfLine, context),
                 "SelectAll" => KeyBinding::new(spec.keystroke, SelectAll, context),
+                "Copy" => KeyBinding::new(spec.keystroke, Copy, context),
+                "Paste" => KeyBinding::new(spec.keystroke, Paste, context),
+                "Cut" => KeyBinding::new(spec.keystroke, Cut, context),
                 "Backspace" => KeyBinding::new(spec.keystroke, Backspace, context),
                 "Delete" => KeyBinding::new(spec.keystroke, Delete, context),
                 "InsertNewline" => KeyBinding::new(spec.keystroke, InsertNewline, context),
@@ -1109,6 +1116,27 @@ impl MarkdownEditor {
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
+    pub fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = self.selected_text() {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
+    }
+
+    pub fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+            return;
+        };
+        self.replace_current_selection(&text, cx);
+    }
+
+    pub fn cut(&mut self, _: &Cut, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(text) = self.selected_text() else {
+            return;
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        self.replace_current_selection("", cx);
+    }
+
     pub fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
@@ -1150,51 +1178,19 @@ impl MarkdownEditor {
     }
 
     pub fn insert_newline(&mut self, _: &InsertNewline, _: &mut Window, cx: &mut Context<Self>) {
-        let selection_before = self.selection.clone();
-        let previous_selection = self.selection.clone();
-        let row_count_before = self.display_list_state.item_count();
         let current_line_indent =
             current_line_indent_in_text_snapshot(self.buffer.as_text_snapshot(), self.cursor());
         let insert_text = format!("\n{current_line_indent}");
-        let buffer_len_before = self.buffer.len();
-        let (selection, transaction_id) =
-            replace_selection(&mut self.buffer, &self.selection, &insert_text);
-        let changed = transaction_id.is_some();
-        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
-        self.selection = selection;
-        self.record_selection_history(transaction_id, selection_before, self.selection.clone());
-        self.notify_after_edit(
-            changed,
-            row_count_before,
-            &previous_selection,
-            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
-            cx,
-        );
+        self.replace_current_selection(&insert_text, cx);
     }
 
     pub fn tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
-        let selection_before = self.selection.clone();
-        let previous_selection = self.selection.clone();
-        let row_count_before = self.display_list_state.item_count();
         let tab_text = if self.settings.use_soft_tabs {
             " ".repeat(self.settings.tab_size)
         } else {
             "\t".to_string()
         };
-        let buffer_len_before = self.buffer.len();
-        let (selection, transaction_id) =
-            replace_selection(&mut self.buffer, &self.selection, &tab_text);
-        let changed = transaction_id.is_some();
-        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
-        self.selection = selection;
-        self.record_selection_history(transaction_id, selection_before, self.selection.clone());
-        self.notify_after_edit(
-            changed,
-            row_count_before,
-            &previous_selection,
-            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
-            cx,
-        );
+        self.replace_current_selection(&tab_text, cx);
     }
 
     /// Update editor settings at runtime.
@@ -1285,6 +1281,22 @@ impl MarkdownEditor {
             return;
         }
 
+        cx.stop_propagation();
+        self.replace_current_selection(text, cx);
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        let snapshot = self.buffer.as_text_snapshot();
+        let selection = clip_selection_in_text_snapshot(snapshot, &self.selection);
+        if selection.is_empty() {
+            return None;
+        }
+
+        let range = selection_byte_range_in_text_snapshot(snapshot, &selection);
+        Some(snapshot.text_for_range(range).collect())
+    }
+
+    fn replace_current_selection(&mut self, text: &str, cx: &mut Context<Self>) {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
@@ -1295,7 +1307,6 @@ impl MarkdownEditor {
         let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
-        cx.stop_propagation();
         self.notify_after_edit(
             changed,
             row_count_before,
@@ -1787,6 +1798,9 @@ impl Render for MarkdownEditor {
             .on_action(cx.listener(Self::select_to_beginning_of_line))
             .on_action(cx.listener(Self::select_to_end_of_line))
             .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::copy))
+            .on_action(cx.listener(Self::paste))
+            .on_action(cx.listener(Self::cut))
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::insert_newline))
@@ -1818,6 +1832,7 @@ fn render_editor_row(
 
     div()
         .id(display_row.row as usize)
+        .w_full()
         .min_h(row_min_height)
         .flex()
         .items_center()

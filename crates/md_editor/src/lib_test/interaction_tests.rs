@@ -680,6 +680,88 @@ fn source_mouse_events_hit_and_select_wrapped_visual_rows(cx: &mut gpui::TestApp
 }
 
 #[gpui::test]
+fn source_mouse_down_hits_blank_area_after_text(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(240.), px(120.)));
+    let editor = cx.new(|cx| MarkdownEditor::for_text("short\nnext\n", cx));
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(240.), px(120.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    let blank_area_after_text = gpui::point(gutter_width() + px(180.), px(10.));
+    cx.simulate_mouse_move(blank_area_after_text, None, gpui::Modifiers::none());
+    cx.simulate_mouse_down(
+        blank_area_after_text,
+        MouseButton::Left,
+        gpui::Modifiers::none(),
+    );
+    cx.simulate_mouse_up(
+        blank_area_after_text,
+        MouseButton::Left,
+        gpui::Modifiers::none(),
+    );
+
+    editor.read_with(cx, |editor, _| {
+        assert_eq!(editor.cursor(), Point::new(0, 5));
+    });
+}
+
+#[gpui::test]
+fn source_clipboard_keybindings_copy_paste_and_cut(cx: &mut gpui::TestAppContext) {
+    cx.update(init_standalone);
+    let (editor, cx) = cx.add_window_view(|window, cx| {
+        let mut editor = MarkdownEditor::for_text("alpha beta", cx);
+        editor.selection = Selection {
+            id: 0,
+            start: Point::new(0, 0),
+            end: Point::new(0, 5),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        window.focus(&editor.focus_handle(cx), cx);
+        window.activate_window();
+        editor
+    });
+
+    cx.simulate_keystrokes("ctrl-c");
+    assert_eq!(
+        cx.cx.read_from_clipboard().and_then(|item| item.text()),
+        Some("alpha".to_string())
+    );
+
+    editor.update(cx, |editor, _| {
+        editor.set_cursor(Point::new(0, 10));
+    });
+    cx.cx
+        .write_to_clipboard(ClipboardItem::new_string(" gamma".to_string()));
+    cx.simulate_keystrokes("ctrl-v");
+    editor.read_with(cx, |editor, _| {
+        assert_eq!(editor.serialized_text(), "alpha beta gamma");
+    });
+
+    editor.update(cx, |editor, _| {
+        editor.selection = Selection {
+            id: 0,
+            start: Point::new(0, 6),
+            end: Point::new(0, 10),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+    });
+    cx.simulate_keystrokes("ctrl-x");
+    assert_eq!(
+        cx.cx.read_from_clipboard().and_then(|item| item.text()),
+        Some("beta".to_string())
+    );
+    editor.read_with(cx, |editor, _| {
+        assert_eq!(editor.serialized_text(), "alpha  gamma");
+    });
+}
+
+#[gpui::test]
 fn rendered_mode_actions_update_marker_visibility(cx: &mut gpui::TestAppContext) {
     cx.update(init_standalone);
     let (editor, cx) = cx.add_window_view(|window, cx| {
