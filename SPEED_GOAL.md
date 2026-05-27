@@ -35,6 +35,10 @@
   - `DisplayRow` now carries the heading level computed during rendered display-row creation.
   - Row style selection reuses the cached heading level instead of issuing another Markdown block query from layout.
   - Verified with `cargo check -p md_editor` and `cargo test -p md_editor`.
+- 2026-05-27: Reused Rendered inline spans from display rows.
+  - Rendered `DisplayRow` creation now captures the row's inline spans once.
+  - Inline image placeholder insertion, inline style/atom input collection, and block image/formula detection now reuse those cached spans instead of repeating row inline-span queries.
+  - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
 
 ## 背景
 

@@ -12,7 +12,9 @@ use gpui::{
     ListAlignment, ListSizingBehavior, ListState, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Render, SharedString, TextAlign, Window, div, list, prelude::*, px,
 };
-use markdown_wysiwyg::{MarkdownBlockKind, MarkdownInlineKind, MarkdownProjectionMap};
+use markdown_wysiwyg::{
+    MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownProjectionMap,
+};
 use md_assets::EDITOR_FONT_FAMILY;
 use md_buffer::{Buffer, BufferSnapshot};
 use md_settings::EditorSettings;
@@ -1887,11 +1889,12 @@ fn display_row_in_mode(
             ),
     };
 
+    let inline_spans = inline_spans_for_display_row(snapshot, source_range.clone(), mode);
     let (text, insertions) = project_display_row_text(
-        snapshot,
         &source_text,
         &source_range,
         &projection,
+        &inline_spans,
         mode,
         document_path,
     );
@@ -1903,6 +1906,7 @@ fn display_row_in_mode(
         source_range,
         active_projection_source_ranges,
         heading_level,
+        inline_spans,
         projection,
         insertions,
     }
@@ -1933,6 +1937,7 @@ fn source_display_row_in_text_snapshot(snapshot: &TextBufferSnapshot, row: u32) 
         source_range,
         active_projection_source_ranges: Vec::new(),
         heading_level: None,
+        inline_spans: Vec::new(),
         projection,
         insertions: Vec::new(),
     }
@@ -1954,6 +1959,22 @@ fn heading_level_for_display_row(
         })
 }
 
+fn inline_spans_for_display_row(
+    snapshot: &BufferSnapshot,
+    source_range: Range<usize>,
+    mode: MarkdownEditorMode,
+) -> Vec<MarkdownInlineSpan> {
+    if mode != MarkdownEditorMode::Rendered {
+        return Vec::new();
+    }
+
+    snapshot
+        .syntax_tree()
+        .inline_spans_in_source_range(source_range)
+        .cloned()
+        .collect()
+}
+
 fn row_source_range(snapshot: &BufferSnapshot, row: u32) -> Range<usize> {
     row_source_range_in_text_snapshot(snapshot.as_text_snapshot(), row)
 }
@@ -1970,10 +1991,10 @@ fn row_source_range_in_text_snapshot(snapshot: &TextBufferSnapshot, row: u32) ->
 }
 
 fn project_display_row_text(
-    snapshot: &BufferSnapshot,
     source_text: &str,
     row_source_range: &Range<usize>,
     projection: &MarkdownProjectionMap,
+    inline_spans: &[MarkdownInlineSpan],
     mode: MarkdownEditorMode,
     document_path: Option<&Path>,
 ) -> (String, Vec<DisplayInsertion>) {
@@ -1983,10 +2004,7 @@ fn project_display_row_text(
     }
 
     let mut insertions = Vec::new();
-    for span in snapshot
-        .syntax_tree()
-        .inline_spans_in_source_range(row_source_range.clone())
-    {
+    for span in inline_spans {
         let descriptor = rendered_element_descriptor_for_inline_span_in_row(
             span,
             source_text,

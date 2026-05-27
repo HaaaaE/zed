@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use gpui::FontWeight;
-use markdown_wysiwyg::MarkdownProjectionMap;
+use markdown_wysiwyg::{MarkdownInlineSpan, MarkdownProjectionMap};
 
 #[derive(Clone, Debug)]
 pub struct DisplayRow {
@@ -11,6 +11,7 @@ pub struct DisplayRow {
     pub(crate) source_range: Range<usize>,
     pub(crate) active_projection_source_ranges: Vec<Range<usize>>,
     pub(crate) heading_level: Option<u8>,
+    pub(crate) inline_spans: Vec<MarkdownInlineSpan>,
     pub(crate) projection: MarkdownProjectionMap,
     pub(crate) insertions: Vec<DisplayInsertion>,
 }

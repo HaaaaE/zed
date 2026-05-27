@@ -681,10 +681,7 @@ pub(super) fn display_inline_row_inputs(
     );
 
     let hidden_ranges = display_row.projection.hidden_ranges();
-    for span in snapshot
-        .syntax_tree()
-        .inline_spans_in_source_range(row_source_range.clone())
-    {
+    for span in &display_row.inline_spans {
         let style = inline_style(span.kind);
         for content_range in &span.content_ranges {
             push_style_range(

@@ -712,18 +712,15 @@ fn rendered_block_descriptor_for_row(
 
     let row_source_range = &display_row.source_range;
     let source_text = &display_row.source_text;
-    let mut matching_spans = snapshot
-        .syntax_tree()
-        .inline_spans_in_source_range(row_source_range.clone())
-        .filter_map(|span| {
-            rendered_element_descriptor_for_inline_span_in_row(
-                span,
-                source_text,
-                row_source_range,
-                document_path,
-            )
-            .filter(|descriptor| descriptor.placement == RenderedElementPlacement::Block)
-        });
+    let mut matching_spans = display_row.inline_spans.iter().filter_map(|span| {
+        rendered_element_descriptor_for_inline_span_in_row(
+            span,
+            source_text,
+            row_source_range,
+            document_path,
+        )
+        .filter(|descriptor| descriptor.placement == RenderedElementPlacement::Block)
+    });
 
     let descriptor = matching_spans.next()?;
     if matching_spans.next().is_some() {
