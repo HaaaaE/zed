@@ -1,0 +1,29 @@
+Markdown Editor
+
+This project includes code adapted from Zed.
+
+Original Zed code is Copyright 2022-2025 Zed Industries, Inc.
+Zed source code is distributed under multiple licenses. The portions used by
+this project are identified below.
+
+GPL-3.0-or-later derived portions:
+
+- md_rope includes code adapted from Zed crates/rope.
+- md_text includes code adapted from Zed crates/text.
+- md_editor includes concepts and code adapted from Zed crates/editor.
+
+Apache-2.0 derived portions:
+
+- md_sum_tree includes code adapted from Zed crates/sum_tree.
+- crates/collections includes code adapted from Zed crates/collections.
+- crates/util_macros includes code adapted from Zed crates/util_macros.
+- tooling/perf includes code adapted from Zed tooling/perf.
+
+Third-party dependencies:
+
+- gpui and gpui_* crates are consumed through Cargo and are licensed under
+  Apache-2.0.
+- Other third-party dependencies are consumed through Cargo under their
+  respective licenses.
+
+This project is not affiliated with Zed Industries.

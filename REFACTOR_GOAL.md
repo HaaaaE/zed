@@ -584,7 +584,7 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
 - 对应目标：继续推进 `md_editor` 的 selection/input 迁移，先补上最小鼠标 click + drag 单选区。
 - 完成情况：
   - `md_editor` 现在支持左键点击放置 caret、`Shift+Click` 基于现有 tail 扩展单选区，以及按住左键跨行拖选。
-  - 鼠标命中暂时基于当前逻辑行文本和 `Zed Mono` 的单行 shape 结果，将 x 坐标映射为 UTF-8 安全的 `md_text::Point`；未接入 Zed `PositionMap` / soft wrap / block map。
+  - 鼠标命中暂时基于当前逻辑行文本和默认 monospace 字体的单行 shape 结果，将 x 坐标映射为 UTF-8 安全的 `md_text::Point`；未接入 Zed `PositionMap` / soft wrap / block map。
   - 当前仍只覆盖单选区；double-click word select、triple-click line select、column selection、hover/link hit testing 和 autoscroll drag 继续留给后续 R3 批次。
 - 验收结果：
   - cargo test -p md_editor: 9/9 ✓
@@ -717,7 +717,7 @@ md-editor = ["dep:md_editor", "dep:md_buffer", ...]
 - 对应目标：继续推进 R4，给 `md_settings` 和 `md_assets` 填入最小产品常量，并把 `markdown_editor` 的默认 feature 从 `legacy-editor` 切换为 `md-editor`，让 standalone 路径成为默认编译目标。
 - 完成情况：
   - `md_settings` 已填充最小 `EditorSettings`（tab_size=4, use_soft_tabs=true）和 `MarkdownSettings::load_defaults()`，后续可扩展 JSON 配置加载。
-  - `md_assets` 已填充最小常量：`EDITOR_FONT_FAMILY`（Zed Mono）、`UI_FONT_FAMILY`（Zed Sans）、`DEFAULT_THEME_NAME`（One Dark），后续可扩展实际字体/主题资产加载。
+  - `md_assets` 已填充最小常量：`EDITOR_FONT_FAMILY`（monospace）、`UI_FONT_FAMILY`（system-ui）、`DEFAULT_THEME_NAME`（One Dark），后续可扩展实际字体/主题资产加载。
   - `markdown_editor/Cargo.toml` 的 `default` feature 从 `["legacy-editor"]` 改为 `["md-editor"]`；`legacy-editor` 仍保留为可选 feature。
 - 验收结果：
   - cargo check -p md_settings ✓

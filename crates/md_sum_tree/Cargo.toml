@@ -3,7 +3,7 @@ name = "md_sum_tree"
 version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
-license = "GPL-3.0-or-later"
+license = "Apache-2.0"
 description = "Sum-tree (B-tree) for md_* text stack; ported from crates/sum_tree"
 
 [lints]
