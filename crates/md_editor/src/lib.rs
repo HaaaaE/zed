@@ -211,6 +211,7 @@ pub struct MarkdownEditor {
     pending_inline_atom_remeasure_rows: HashSet<usize>,
     inline_atom_remeasure_scheduled: bool,
     source_prewarm: Option<SourcePrewarmState>,
+    rendered_prewarm: Option<RenderedPrewarmState>,
     #[cfg(perf_enabled)]
     layout_computation_counts: LayoutComputationCounts,
 }
@@ -274,6 +275,14 @@ struct SourcePrewarmState {
     scheduled: bool,
 }
 
+struct RenderedPrewarmState {
+    version: md_text::Global,
+    wrap_width: gpui::Pixels,
+    selection: Selection<Point>,
+    rows: VecDeque<usize>,
+    scheduled: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct RowDisplayStyle {
     min_height: gpui::Pixels,
@@ -324,6 +333,7 @@ impl MarkdownEditor {
             pending_inline_atom_remeasure_rows: HashSet::default(),
             inline_atom_remeasure_scheduled: false,
             source_prewarm: None,
+            rendered_prewarm: None,
             #[cfg(perf_enabled)]
             layout_computation_counts: LayoutComputationCounts::default(),
         }
@@ -1700,6 +1710,7 @@ impl Render for MarkdownEditor {
                 let display_row_state =
                     DisplayRowProjectionState::new(&snapshot, Some(&selection), mode);
                 let cursor = selection.head();
+                self.schedule_rendered_cache_prewarm(wrap_width, selection.clone(), window, cx);
 
                 list(
                     self.display_list_state.clone(),

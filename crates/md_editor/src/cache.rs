@@ -14,9 +14,9 @@ use super::{
     DisplayRowLayoutInputs, DisplayRowProjectionState, DisplayRowTextLayout,
     InlineAtomMeasurementKey, InlineAtomMeasurementState, LocalSourceEditInvalidation,
     MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, RowLayoutCacheKey, RowLayoutInputCacheKey,
-    active_projection_source_ranges, display_row_in_mode, inline_spans_for_display_row,
-    layout::DisplayRowCacheKey, markdown_blocks_for_display_row, row_source_range,
-    source_display_row_in_text_snapshot,
+    active_projection_source_ranges, clip_selection, display_row_in_mode,
+    inline_spans_for_display_row, layout::DisplayRowCacheKey, markdown_blocks_for_display_row,
+    row_source_range, source_display_row_in_text_snapshot,
 };
 use crate::layout::{
     display_row_layout_inputs, source_display_row_layout_inputs, text_layout_for_display_row_inputs,
@@ -31,6 +31,7 @@ impl MarkdownEditor {
         self.display_row_cache.clear();
         self.row_layout_input_cache.clear();
         self.source_prewarm = None;
+        self.rendered_prewarm = None;
     }
 
     pub(crate) fn rekey_source_display_row_cache_for_local_edit(
@@ -386,7 +387,7 @@ impl MarkdownEditor {
                 version,
                 wrap_width,
                 row_style,
-                rows: source_prewarm_rows(row_count, byte_len, start_row),
+                rows: cache_prewarm_rows(row_count, byte_len, start_row),
                 scheduled: false,
             });
         }
@@ -458,6 +459,131 @@ impl MarkdownEditor {
 
         if has_more_rows {
             self.schedule_source_cache_prewarm(wrap_width, row_style, window, cx);
+        }
+    }
+
+    pub(crate) fn schedule_rendered_cache_prewarm(
+        &mut self,
+        wrap_width: gpui::Pixels,
+        selection: Selection<Point>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.mode != MarkdownEditorMode::Rendered {
+            self.rendered_prewarm = None;
+            return;
+        }
+
+        let snapshot = self.buffer.as_text_snapshot();
+        let version = snapshot.version().clone();
+        let row_count = snapshot.row_count() as usize;
+        if row_count == 0 {
+            self.rendered_prewarm = None;
+            return;
+        }
+
+        let reset_queue = self.rendered_prewarm.as_ref().is_none_or(|state| {
+            state.version != version
+                || state.wrap_width != wrap_width
+                || state.selection != selection
+        });
+        if reset_queue {
+            let start_row = self.display_list_state.logical_scroll_top().item_ix;
+            let byte_len = self.buffer.len();
+            self.rendered_prewarm = Some(super::RenderedPrewarmState {
+                version,
+                wrap_width,
+                selection,
+                rows: cache_prewarm_rows(row_count, byte_len, start_row),
+                scheduled: false,
+            });
+        }
+
+        if self
+            .rendered_prewarm
+            .as_ref()
+            .is_some_and(|state| state.scheduled || state.rows.is_empty())
+        {
+            return;
+        }
+
+        if let Some(state) = self.rendered_prewarm.as_mut() {
+            state.scheduled = true;
+        }
+        cx.on_next_frame(window, |this, window, cx| {
+            this.flush_rendered_cache_prewarm(window, cx);
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn flush_rendered_cache_prewarm(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let snapshot = self.buffer.snapshot();
+        let selection = clip_selection(&snapshot, &self.selection);
+        let Some(state) = self.rendered_prewarm.as_mut() else {
+            return;
+        };
+        state.scheduled = false;
+        if self.mode != MarkdownEditorMode::Rendered
+            || state.version != *snapshot.version()
+            || state.selection != selection
+        {
+            self.rendered_prewarm = None;
+            return;
+        }
+
+        let deadline = Instant::now() + Duration::from_millis(2);
+        let mut rows = Vec::new();
+        while rows.len() < 64 && Instant::now() < deadline {
+            let Some(row) = state.rows.pop_front() else {
+                break;
+            };
+            rows.push(row);
+        }
+        let has_more_rows = !state.rows.is_empty();
+        let wrap_width = state.wrap_width;
+
+        let display_row_state = DisplayRowProjectionState::new(
+            &snapshot,
+            Some(&selection),
+            MarkdownEditorMode::Rendered,
+        );
+        for row in rows {
+            let Some(display_row) = self.cached_display_row(
+                &snapshot,
+                row,
+                MarkdownEditorMode::Rendered,
+                &display_row_state,
+            ) else {
+                continue;
+            };
+            let row_style = super::row_display_style_for_display_row(
+                &snapshot,
+                &display_row,
+                MarkdownEditorMode::Rendered,
+            );
+            let row_layout = self.cached_row_layout(
+                &snapshot,
+                &display_row,
+                &selection,
+                MarkdownEditorMode::Rendered,
+                row_style,
+                wrap_width,
+                false,
+                window,
+                cx,
+            );
+            self.display_list_state.set_item_size_hint(
+                row,
+                gpui::size(gpui::px(0.), row_layout.row_min_height(row_style)),
+            );
+        }
+
+        if has_more_rows {
+            self.schedule_rendered_cache_prewarm(wrap_width, selection, window, cx);
         }
     }
 
@@ -658,7 +784,7 @@ impl MarkdownEditor {
     }
 }
 
-fn source_prewarm_rows(row_count: usize, byte_len: usize, start_row: usize) -> VecDeque<usize> {
+fn cache_prewarm_rows(row_count: usize, byte_len: usize, start_row: usize) -> VecDeque<usize> {
     const SMALL_FILE_MAX_BYTES: usize = 1024 * 1024;
     const SMALL_FILE_MAX_ROWS: usize = 20_000;
     const MEDIUM_FILE_MAX_BYTES: usize = 5 * 1024 * 1024;

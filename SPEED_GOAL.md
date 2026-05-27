@@ -52,6 +52,11 @@
   - Rendered `DisplayRow` creation now resolves inline/block image and math descriptors once from the row's cached inline spans.
   - Inline image placeholder insertion, inline atom layout input creation, and block image/formula detection now reuse those descriptors instead of reparsing descriptor data in each path.
   - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, and `cargo test -p md_editor`.
+- 2026-05-27: Added bounded Rendered cache prewarming.
+  - Rendered render now schedules next-frame prewarm work keyed by buffer version, wrap width, and selection state.
+  - The prewarm pass reuses the Source row priority queue and 64-row / 2ms caps to populate rendered display rows, layout inputs, cacheable current-width layouts, and list height hints.
+  - Added a Rendered prewarm regression test mirroring Source prewarm cache coverage.
+  - Verified with `cargo fmt -p md_editor`, `cargo check -p md_editor`, `cargo test -p md_editor rendered_render_prewarms_display_rows_and_layout_inputs`, and `cargo test -p md_editor`.
 
 ## 背景
 
