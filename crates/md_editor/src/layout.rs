@@ -232,7 +232,7 @@ pub(super) fn text_layout_for_display_row_inputs(
         inputs.text_len,
         &fragments,
         row_style,
-        inputs.shaped_line.width(),
+        inputs.shaped_line.width,
         wrap_width,
     ) {
         visual_rows

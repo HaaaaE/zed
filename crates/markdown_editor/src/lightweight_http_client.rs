@@ -12,7 +12,7 @@ use std::{
 use anyhow::{Context as _, anyhow};
 use bytes::Bytes;
 use futures::{FutureExt as _, channel::oneshot, future::BoxFuture};
-use http_client::{
+use gpui::http_client::{
     AsyncBody, HttpClient, Inner, RedirectPolicy, Response, Url,
     http::{self, HeaderValue},
 };
@@ -59,7 +59,7 @@ struct HostLimitPermit {
 impl MarkdownHttpClient {
     pub(crate) fn new(user_agent: &str) -> anyhow::Result<Self> {
         let user_agent = HeaderValue::from_str(user_agent)?;
-        let proxy = http_client::read_proxy_from_env();
+        let proxy = gpui::http_client::read_proxy_from_env();
         let mut config = ureq::Agent::config_builder()
             .user_agent(user_agent.to_str()?)
             .timeout_global(Some(REQUEST_TIMEOUT))
@@ -93,6 +93,10 @@ impl MarkdownHttpClient {
 }
 
 impl HttpClient for MarkdownHttpClient {
+    fn type_name(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
+
     fn user_agent(&self) -> Option<&HeaderValue> {
         Some(&self.user_agent)
     }

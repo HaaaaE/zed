@@ -35,7 +35,7 @@ impl MarkdownEditorShell {
             None => (None, String::new(), None),
         };
         let (editor, editor_subscription) = Self::build_editor(contents, path.clone(), mode, cx);
-        window.focus(&editor.focus_handle(cx), cx);
+        window.focus(&editor.focus_handle(cx));
 
         Self {
             editor,
@@ -84,7 +84,7 @@ impl MarkdownEditorShell {
         self.path = path;
         self.is_dirty = false;
         self.error_message = error_message;
-        window.focus(&self.editor.focus_handle(cx), cx);
+        window.focus(&self.editor.focus_handle(cx));
         cx.notify();
     }
 
@@ -407,7 +407,7 @@ fn app_keybindings() -> Vec<KeyBinding> {
 pub fn run() {
     let path = env::args_os().nth(1).map(PathBuf::from);
 
-    gpui_platform::application().run(move |cx| {
+    gpui::Application::new().run(move |cx| {
         init_standalone(cx);
         configure_http_client(cx);
         cx.bind_keys(app_keybindings());

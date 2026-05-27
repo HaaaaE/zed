@@ -13,11 +13,10 @@ use gpui::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, DispatchPhase, Edges, Element, EntityId,
     ElementId, FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId,
     IntoElement, LayoutId,
-    Overflow, Pixels, Point, ScrollDelta, ScrollWheelEvent, Size, Style, StyleRefinement, Styled,
-    Window, point, px, size,
+    Overflow, Pixels, Point, Refineable as _, ScrollDelta, ScrollWheelEvent, Size, Style,
+    StyleRefinement, Styled, Window, point, px, size,
 };
 use md_sum_tree::{Bias, Dimensions, SumTree};
-use refineable::Refineable as _;
 use std::collections::VecDeque;
 use std::{cell::RefCell, ops::Range, rc::Rc};
 

@@ -1469,7 +1469,7 @@ impl MarkdownEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        window.focus(&self.focus_handle.clone(), cx);
+        window.focus(&self.focus_handle.clone());
         self.is_selecting_with_mouse = true;
 
         if self.mode == MarkdownEditorMode::Source {
@@ -1619,7 +1619,7 @@ impl MarkdownEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        window.focus(&self.focus_handle.clone(), cx);
+        window.focus(&self.focus_handle.clone());
         self.is_selecting_with_mouse = true;
 
         let snapshot = self.buffer.snapshot();
