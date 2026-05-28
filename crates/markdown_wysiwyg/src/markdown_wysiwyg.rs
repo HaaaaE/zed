@@ -8,6 +8,7 @@ pub struct MarkdownSyntaxTree {
     source_len: usize,
     line_starts: Vec<usize>,
     blocks: Vec<MarkdownBlock>,
+    tables: Vec<MarkdownTable>,
     inline_spans: Vec<MarkdownInlineSpan>,
     inline_span_prefix_maximum_ends: Vec<usize>,
     projection_marker_dependencies: Vec<ProjectionMarkerDependency>,
@@ -34,6 +35,7 @@ impl fmt::Debug for MarkdownSyntaxTree {
             .field("source_len", &self.source_len)
             .field("line_starts", &self.line_starts)
             .field("blocks", &self.blocks)
+            .field("tables", &self.tables)
             .field("inline_spans", &self.inline_spans)
             .finish_non_exhaustive()
     }
@@ -88,6 +90,50 @@ pub enum MarkdownBlockKind {
     AtxHeading { level: u8 },
     FencedCodeBlock,
     PipeTable,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MarkdownTable {
+    pub id: MarkdownNodeId,
+    pub source_range: Range<usize>,
+    pub row_range: Range<usize>,
+    pub header: MarkdownTableRow,
+    pub delimiter: MarkdownTableRow,
+    pub body: Vec<MarkdownTableRow>,
+    pub alignments: Vec<MarkdownTableAlignment>,
+    pub pipe_marker_ranges: Vec<Range<usize>>,
+    pub delimiter_marker_ranges: Vec<Range<usize>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MarkdownTableRow {
+    pub source_range: Range<usize>,
+    pub row: usize,
+    pub cells: Vec<MarkdownTableCell>,
+    pub pipe_marker_ranges: Vec<Range<usize>>,
+    pub delimiter_marker_ranges: Vec<Range<usize>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MarkdownTableCell {
+    pub source_range: Range<usize>,
+    pub content_range: Range<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MarkdownTableAlignment {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+impl MarkdownTable {
+    pub fn rows(&self) -> impl Iterator<Item = &MarkdownTableRow> {
+        std::iter::once(&self.header)
+            .chain(std::iter::once(&self.delimiter))
+            .chain(self.body.iter())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -173,6 +219,33 @@ impl MarkdownSyntaxTree {
 
     pub fn blocks(&self) -> &[MarkdownBlock] {
         &self.blocks
+    }
+
+    pub fn tables(&self) -> &[MarkdownTable] {
+        &self.tables
+    }
+
+    pub fn table_for_source_row(&self, row: usize) -> Option<&MarkdownTable> {
+        self.tables
+            .iter()
+            .find(|table| table.row_range.contains(&row))
+    }
+
+    pub fn table_for_source_range(&self, range: Range<usize>) -> Option<&MarkdownTable> {
+        self.tables
+            .iter()
+            .find(|table| ranges_overlap(&table.source_range, &range))
+    }
+
+    pub fn table_row_for_source_row(
+        &self,
+        row: usize,
+    ) -> Option<(&MarkdownTable, &MarkdownTableRow)> {
+        let table = self.table_for_source_row(row)?;
+        table
+            .rows()
+            .find(|table_row| table_row.row == row)
+            .map(|table_row| (table, table_row))
     }
 
     pub fn inline_spans(&self) -> &[MarkdownInlineSpan] {
@@ -317,6 +390,7 @@ impl MarkdownSyntaxTree {
         let tree = parse_markdown(source, old_tree);
         let line_starts = line_starts(source);
         let blocks = collect_blocks(source, &line_starts, tree.block_tree());
+        let tables = collect_tables(source, &line_starts, &blocks);
         let inline_spans = collect_inline_spans(source, &tree);
         let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
         let projection_marker_dependencies = projection_marker_dependencies(&blocks, &inline_spans);
@@ -328,6 +402,7 @@ impl MarkdownSyntaxTree {
             source_len: source.len(),
             line_starts,
             blocks,
+            tables,
             inline_spans,
             inline_span_prefix_maximum_ends,
             projection_marker_dependencies,
@@ -554,6 +629,171 @@ fn collect_blocks(source: &str, line_starts: &[usize], tree: &Tree) -> Vec<Markd
     add_blank_blocks(source, line_starts, &mut blocks);
     blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
     blocks
+}
+
+fn collect_tables(
+    source: &str,
+    line_starts: &[usize],
+    blocks: &[MarkdownBlock],
+) -> Vec<MarkdownTable> {
+    blocks
+        .iter()
+        .filter(|block| block.kind == MarkdownBlockKind::PipeTable)
+        .filter_map(|block| table_from_block(source, line_starts, block))
+        .collect()
+}
+
+fn table_from_block(
+    source: &str,
+    line_starts: &[usize],
+    block: &MarkdownBlock,
+) -> Option<MarkdownTable> {
+    if block.row_range.len() < 2 {
+        return None;
+    }
+
+    let mut rows = block
+        .row_range
+        .clone()
+        .enumerate()
+        .map(|(index, row)| table_row_from_source_row(source, line_starts, row, index == 1))
+        .collect::<Option<Vec<_>>>()?;
+    if rows.len() < 2 {
+        return None;
+    }
+
+    let header = rows.remove(0);
+    let delimiter = rows.remove(0);
+    let alignments = delimiter
+        .cells
+        .iter()
+        .map(|cell| alignment_for_delimiter_cell(source, cell.content_range.clone()))
+        .collect::<Vec<_>>();
+    let pipe_marker_ranges = std::iter::once(&header)
+        .chain(std::iter::once(&delimiter))
+        .chain(rows.iter())
+        .flat_map(|row| row.pipe_marker_ranges.iter().cloned())
+        .collect();
+    let delimiter_marker_ranges = delimiter.delimiter_marker_ranges.clone();
+
+    Some(MarkdownTable {
+        id: block.id,
+        source_range: block.source_range.clone(),
+        row_range: block.row_range.clone(),
+        header,
+        delimiter,
+        body: rows,
+        alignments,
+        pipe_marker_ranges,
+        delimiter_marker_ranges,
+    })
+}
+
+fn table_row_from_source_row(
+    source: &str,
+    line_starts: &[usize],
+    row: usize,
+    is_delimiter_row: bool,
+) -> Option<MarkdownTableRow> {
+    let source_range = trim_line_end(source, line_range(source, line_starts, row));
+    let line = source.get(source_range.clone())?;
+    let pipe_offsets = line
+        .match_indices('|')
+        .map(|(offset, _)| source_range.start + offset)
+        .collect::<Vec<_>>();
+    let pipe_marker_ranges = pipe_offsets
+        .iter()
+        .map(|offset| *offset..*offset + 1)
+        .collect::<Vec<_>>();
+    let cells = table_cells_for_line(source, source_range.clone(), &pipe_offsets);
+    let delimiter_marker_ranges = if is_delimiter_row {
+        cells
+            .iter()
+            .map(|cell| cell.content_range.clone())
+            .filter(|range| source.get(range.clone()).is_some_and(is_delimiter_cell))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    Some(MarkdownTableRow {
+        source_range,
+        row,
+        cells,
+        pipe_marker_ranges,
+        delimiter_marker_ranges,
+    })
+}
+
+fn table_cells_for_line(
+    source: &str,
+    line_range: Range<usize>,
+    pipe_offsets: &[usize],
+) -> Vec<MarkdownTableCell> {
+    let leading_pipe = pipe_offsets
+        .first()
+        .is_some_and(|pipe| source[line_range.start..*pipe].trim().is_empty());
+    let trailing_pipe = pipe_offsets
+        .last()
+        .is_some_and(|pipe| source[*pipe + 1..line_range.end].trim().is_empty());
+
+    let mut cells = Vec::new();
+    let mut cell_start = if leading_pipe {
+        pipe_offsets[0] + 1
+    } else {
+        line_range.start
+    };
+
+    let first_separator = usize::from(leading_pipe);
+    let last_separator = pipe_offsets
+        .len()
+        .saturating_sub(usize::from(trailing_pipe));
+    for pipe in &pipe_offsets[first_separator..last_separator] {
+        cells.push(table_cell(source, cell_start..*pipe));
+        cell_start = *pipe + 1;
+    }
+
+    let cell_end = if trailing_pipe {
+        *pipe_offsets.last().unwrap_or(&line_range.end)
+    } else {
+        line_range.end
+    };
+    if cell_start <= cell_end {
+        cells.push(table_cell(source, cell_start..cell_end));
+    }
+
+    cells
+}
+
+fn table_cell(source: &str, source_range: Range<usize>) -> MarkdownTableCell {
+    MarkdownTableCell {
+        content_range: trim_ascii_whitespace(source, source_range.clone()),
+        source_range,
+    }
+}
+
+fn alignment_for_delimiter_cell(
+    source: &str,
+    content_range: Range<usize>,
+) -> MarkdownTableAlignment {
+    let Some(delimiter) = source.get(content_range) else {
+        return MarkdownTableAlignment::Left;
+    };
+    let delimiter = delimiter.trim();
+    match (delimiter.starts_with(':'), delimiter.ends_with(':')) {
+        (true, true) => MarkdownTableAlignment::Center,
+        (false, true) => MarkdownTableAlignment::Right,
+        _ => MarkdownTableAlignment::Left,
+    }
+}
+
+fn is_delimiter_cell(text: &str) -> bool {
+    let text = text.trim();
+    !text.is_empty()
+        && text
+            .bytes()
+            .all(|byte| matches!(byte, b':' | b'-' | b' ' | b'\t'))
+        && text.bytes().any(|byte| byte == b'-')
 }
 
 fn collect_inline_spans(source: &str, parse_tree: &MarkdownParseTree) -> Vec<MarkdownInlineSpan> {
@@ -960,6 +1200,16 @@ fn trim_line_end(source: &str, mut range: Range<usize>) -> Range<usize> {
     range
 }
 
+fn trim_ascii_whitespace(source: &str, mut range: Range<usize>) -> Range<usize> {
+    while range.start < range.end && matches!(source.as_bytes()[range.start], b' ' | b'\t') {
+        range.start += 1;
+    }
+    while range.end > range.start && matches!(source.as_bytes()[range.end - 1], b' ' | b'\t') {
+        range.end -= 1;
+    }
+    range
+}
+
 fn point_for_offset(line_starts: &[usize], offset: usize) -> Point {
     let row = line_starts.partition_point(|line_start| *line_start <= offset) - 1;
     Point {
@@ -1193,6 +1443,113 @@ mod tests {
         assert!(
             has_pipe_marker,
             "table markers should include pipe characters"
+        );
+    }
+
+    #[test]
+    fn parses_pipe_table_structure_and_ranges() {
+        let source = "| left | center | right |\n| :--- | :---: | ---: |\n| **a** |  | c |\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let table = tree.tables().first().expect("expected a table");
+
+        assert_eq!(table.row_range, 0..3);
+        assert_eq!(
+            table.alignments,
+            vec![
+                MarkdownTableAlignment::Left,
+                MarkdownTableAlignment::Center,
+                MarkdownTableAlignment::Right
+            ]
+        );
+        assert_eq!(
+            table
+                .header
+                .cells
+                .iter()
+                .map(|cell| &source[cell.content_range.clone()])
+                .collect::<Vec<_>>(),
+            vec!["left", "center", "right"]
+        );
+        assert_eq!(
+            table
+                .body
+                .first()
+                .expect("expected a body row")
+                .cells
+                .iter()
+                .map(|cell| &source[cell.content_range.clone()])
+                .collect::<Vec<_>>(),
+            vec!["**a**", "", "c"]
+        );
+        assert_eq!(table.delimiter_marker_ranges, vec![28..32, 35..40, 43..47]);
+        assert_eq!(tree.table_for_source_row(1), Some(table));
+        assert_eq!(
+            tree.table_row_for_source_row(2).map(|(_, row)| row.row),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn parses_pipe_table_without_leading_or_trailing_pipes() {
+        let source = "left | center | right\n--- | :---: | ---:\n1 | 2 | 3\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let table = tree.tables().first().expect("expected a table");
+
+        assert_eq!(
+            table
+                .header
+                .cells
+                .iter()
+                .map(|cell| &source[cell.content_range.clone()])
+                .collect::<Vec<_>>(),
+            vec!["left", "center", "right"]
+        );
+        assert_eq!(
+            table.alignments,
+            vec![
+                MarkdownTableAlignment::Left,
+                MarkdownTableAlignment::Center,
+                MarkdownTableAlignment::Right
+            ]
+        );
+        assert_eq!(
+            table
+                .body
+                .first()
+                .expect("expected a body row")
+                .cells
+                .iter()
+                .map(|cell| &source[cell.content_range.clone()])
+                .collect::<Vec<_>>(),
+            vec!["1", "2", "3"]
+        );
+    }
+
+    #[test]
+    fn parses_pipe_table_empty_cells() {
+        let source = "| a |  | c |\n| - | - | - |\n|  | b |  |\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let table = tree.tables().first().expect("expected a table");
+
+        assert_eq!(
+            table
+                .header
+                .cells
+                .iter()
+                .map(|cell| &source[cell.content_range.clone()])
+                .collect::<Vec<_>>(),
+            vec!["a", "", "c"]
+        );
+        assert_eq!(
+            table
+                .body
+                .first()
+                .expect("expected a body row")
+                .cells
+                .iter()
+                .map(|cell| &source[cell.content_range.clone()])
+                .collect::<Vec<_>>(),
+            vec!["", "b", ""]
         );
     }
 

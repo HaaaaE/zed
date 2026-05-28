@@ -126,6 +126,26 @@ work, while table structure and column widths are cached at table level.
 - Update the existing pipe table rendered-mode test so it no longer asserts that
   pipe tables always remain plain text layout.
 
+## Progress
+
+### 2026-05-28
+
+- Added the `markdown_wysiwyg` table syntax model:
+  - `MarkdownTable`
+  - `MarkdownTableRow`
+  - `MarkdownTableCell`
+  - `MarkdownTableAlignment`
+- Added structured extraction for existing `MarkdownBlockKind::PipeTable`
+  blocks, including table/source row ranges, header/delimiter/body rows, cell
+  source/content ranges, pipe marker ranges, delimiter marker ranges, and
+  delimiter-derived left/center/right alignment.
+- Added read-only table lookup helpers by source row and source range.
+- Added parser tests for structured ranges, alignments, missing
+  leading/trailing pipes, empty cells, and inline Markdown text inside cells.
+- Formatted the touched Rust file with `rustfmt`.
+- Cargo validation has not been run because the current plan still carries the
+  local "no cargo" constraint.
+
 ## Assumptions
 
 - First version is "structured rendering plus source editing", not full
