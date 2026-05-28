@@ -13,6 +13,10 @@ This project is licensed primarily under GPL-3.0-or-later. See `LICENSE`.
 Some components adapted from Zed remain under Apache-2.0. See
 `LICENSE-APACHE`, per-crate license metadata, and `NOTICE` for details.
 
+For installer or binary distributions, include `LICENSE`, `LICENSE-APACHE`,
+`NOTICE`, and `THIRD_PARTY_LICENSES.html`. See `DISTRIBUTION.md` for the
+release checklist and the command used to regenerate third-party notices.
+
 ## Development
 
 Build the default application:
