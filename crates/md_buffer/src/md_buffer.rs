@@ -25,6 +25,7 @@ pub struct Buffer {
     preview_version: Global,
     cached_syntax_tree: Arc<MarkdownSyntaxTree>,
     cached_syntax_version: Global,
+    pending_incremental_reparse: Option<PendingIncrementalReparse>,
 }
 
 #[derive(Clone)]
@@ -33,6 +34,12 @@ pub struct BufferSnapshot {
     syntax_tree: Arc<MarkdownSyntaxTree>,
     saved_version: Global,
     has_unsaved_edits: bool,
+}
+
+struct PendingIncrementalReparse {
+    old_source: String,
+    old_range: Range<usize>,
+    syntax_tree: Arc<MarkdownSyntaxTree>,
 }
 
 impl Buffer {
@@ -48,6 +55,7 @@ impl Buffer {
             preview_version,
             cached_syntax_tree,
             cached_syntax_version,
+            pending_incremental_reparse: None,
         }
     }
 
@@ -68,6 +76,7 @@ impl Buffer {
             preview_version,
             cached_syntax_tree,
             cached_syntax_version,
+            pending_incremental_reparse: None,
         }
     }
 
@@ -260,23 +269,43 @@ impl Buffer {
     }
 
     pub fn undo(&mut self) -> Option<TransactionId> {
-        self.text.undo().map(|(transaction_id, _)| transaction_id)
+        self.text.undo().map(|(transaction_id, _)| {
+            self.pending_incremental_reparse = None;
+            transaction_id
+        })
     }
 
     pub fn undo_transaction(&mut self, transaction_id: TransactionId) -> bool {
-        self.text.undo_transaction(transaction_id).is_some()
+        let undone = self.text.undo_transaction(transaction_id).is_some();
+        if undone {
+            self.pending_incremental_reparse = None;
+        }
+        undone
     }
 
     pub fn undo_to_transaction(&mut self, transaction_id: TransactionId) -> bool {
-        !self.text.undo_to_transaction(transaction_id).is_empty()
+        let transactions = self.text.undo_to_transaction(transaction_id);
+        let undone = !transactions.is_empty();
+        if undone {
+            self.pending_incremental_reparse = None;
+        }
+        undone
     }
 
     pub fn redo(&mut self) -> Option<TransactionId> {
-        self.text.redo().map(|(transaction_id, _)| transaction_id)
+        self.text.redo().map(|(transaction_id, _)| {
+            self.pending_incremental_reparse = None;
+            transaction_id
+        })
     }
 
     pub fn redo_to_transaction(&mut self, transaction_id: TransactionId) -> bool {
-        !self.text.redo_to_transaction(transaction_id).is_empty()
+        let transactions = self.text.redo_to_transaction(transaction_id);
+        let redone = !transactions.is_empty();
+        if redone {
+            self.pending_incremental_reparse = None;
+        }
+        redone
     }
 
     pub fn transaction_group_interval(&self) -> Duration {
@@ -338,7 +367,26 @@ impl Buffer {
             return None;
         }
 
+        let pending_incremental_reparse =
+            if edits.len() == 1 && self.cached_syntax_version == self.text.version() {
+                Some((
+                    self.text.snapshot().text(),
+                    edits[0].0.clone(),
+                    self.cached_syntax_tree.clone(),
+                ))
+            } else {
+                None
+            };
+
         let operation = self.text.edit(edits);
+        self.pending_incremental_reparse =
+            pending_incremental_reparse.map(|(old_source, old_range, syntax_tree)| {
+                PendingIncrementalReparse {
+                    old_source,
+                    old_range,
+                    syntax_tree,
+                }
+            });
         Some(operation.timestamp())
     }
 
@@ -347,7 +395,21 @@ impl Buffer {
         if self.cached_syntax_version == current_version {
             return;
         }
-        self.cached_syntax_tree = Arc::new(parse_markdown(self.text.snapshot()));
+        self.cached_syntax_tree =
+            if let Some(pending_incremental_reparse) = self.pending_incremental_reparse.take() {
+                let new_source = self.text.snapshot().text();
+                Arc::new(
+                    pending_incremental_reparse
+                        .syntax_tree
+                        .reparse_after_edit_range(
+                            &pending_incremental_reparse.old_source,
+                            pending_incremental_reparse.old_range,
+                            &new_source,
+                        ),
+                )
+            } else {
+                Arc::new(parse_markdown(self.text.snapshot()))
+            };
         self.cached_syntax_version = current_version;
     }
 }
@@ -468,6 +530,33 @@ mod tests {
         assert!(!Arc::ptr_eq(&first.syntax_tree, &third.syntax_tree));
         assert_eq!(
             third
+                .syntax_tree()
+                .blocks()
+                .iter()
+                .filter(|block| matches!(block.kind, MarkdownBlockKind::AtxHeading { .. }))
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn single_edit_defers_incremental_reparse_until_syntax_is_requested() {
+        let mut buffer = Buffer::local("# One\n");
+        let initial_syntax_version = buffer.cached_syntax_version_for_tests();
+
+        assert!(buffer.append("\n## Two\n").is_some());
+        let edited_version = buffer.version();
+
+        assert_eq!(
+            buffer.cached_syntax_version_for_tests(),
+            initial_syntax_version
+        );
+
+        let snapshot = buffer.snapshot();
+
+        assert_eq!(buffer.cached_syntax_version_for_tests(), edited_version);
+        assert_eq!(
+            snapshot
                 .syntax_tree()
                 .blocks()
                 .iter()

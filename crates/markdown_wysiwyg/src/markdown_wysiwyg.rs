@@ -162,11 +162,26 @@ pub enum MarkdownInlineKind {
     InlineMath,
 }
 
+impl MarkdownInlineKind {
+    pub fn is_rendered_element_candidate(self) -> bool {
+        matches!(self, Self::Image | Self::InlineMath)
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MarkdownProjectionMap {
     source_len: usize,
     visible_source_range: Range<usize>,
     hidden_ranges: Vec<Range<usize>>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MarkdownRangeSemantics {
+    pub blocks: Vec<MarkdownBlock>,
+    pub inline_spans: Vec<MarkdownInlineSpan>,
+    pub projection: MarkdownProjectionMap,
+    pub active_projection_source_ranges: Vec<Range<usize>>,
+    pub rendered_element_candidates: Vec<MarkdownInlineSpan>,
 }
 
 impl MarkdownSyntaxTree {
@@ -175,6 +190,15 @@ impl MarkdownSyntaxTree {
     }
 
     pub fn reparse_after_edit(
+        &self,
+        old_source: &str,
+        old_range: Range<usize>,
+        new_source: &str,
+    ) -> Self {
+        self.reparse_after_edit_range(old_source, old_range, new_source)
+    }
+
+    pub fn reparse_after_edit_range(
         &self,
         old_source: &str,
         old_range: Range<usize>,
@@ -289,6 +313,61 @@ impl MarkdownSyntaxTree {
         start..end
     }
 
+    pub fn range_semantics_for_visible_rows(
+        &self,
+        rows: Range<usize>,
+        active_source_range: Option<Range<usize>>,
+        inactive_source_ranges: &[Range<usize>],
+    ) -> MarkdownRangeSemantics {
+        self.range_semantics_for_source_range(
+            self.source_range_for_rows(rows),
+            active_source_range,
+            inactive_source_ranges,
+        )
+    }
+
+    pub fn range_semantics_for_source_range(
+        &self,
+        visible_source_range: Range<usize>,
+        active_source_range: Option<Range<usize>>,
+        inactive_source_ranges: &[Range<usize>],
+    ) -> MarkdownRangeSemantics {
+        let blocks = self
+            .blocks_in_source_range(visible_source_range.clone())
+            .cloned()
+            .collect::<Vec<_>>();
+        let inline_spans = self
+            .inline_spans_in_source_range(visible_source_range.clone())
+            .cloned()
+            .collect::<Vec<_>>();
+        let projection = self.projection_for_source_range_with_semantics(
+            visible_source_range.clone(),
+            active_source_range.as_ref(),
+            inactive_source_ranges,
+            blocks.iter(),
+            inline_spans.iter(),
+        );
+        let active_projection_source_ranges = self
+            .active_projection_source_ranges_for_source_range(
+                visible_source_range,
+                active_source_range,
+                inactive_source_ranges,
+            );
+        let rendered_element_candidates = inline_spans
+            .iter()
+            .filter(|span| span.kind.is_rendered_element_candidate())
+            .cloned()
+            .collect();
+
+        MarkdownRangeSemantics {
+            blocks,
+            inline_spans,
+            projection,
+            active_projection_source_ranges,
+            rendered_element_candidates,
+        }
+    }
+
     pub fn projection_for_visible_rows(
         &self,
         rows: Range<usize>,
@@ -315,19 +394,38 @@ impl MarkdownSyntaxTree {
         active_source_range: Option<Range<usize>>,
         inactive_source_ranges: &[Range<usize>],
     ) -> MarkdownProjectionMap {
+        let blocks = self.blocks_in_source_range(visible_source_range.clone());
+        let inline_spans = self.inline_spans_in_source_range(visible_source_range.clone());
+        self.projection_for_source_range_with_semantics(
+            visible_source_range,
+            active_source_range.as_ref(),
+            inactive_source_ranges,
+            blocks,
+            inline_spans,
+        )
+    }
+
+    fn projection_for_source_range_with_semantics<'a>(
+        &self,
+        visible_source_range: Range<usize>,
+        active_source_range: Option<&Range<usize>>,
+        inactive_source_ranges: &[Range<usize>],
+        blocks: impl IntoIterator<Item = &'a MarkdownBlock>,
+        inline_spans: impl IntoIterator<Item = &'a MarkdownInlineSpan>,
+    ) -> MarkdownProjectionMap {
         let mut hidden_ranges = Vec::new();
-        for block in self.blocks_in_source_range(visible_source_range.clone()) {
+        for block in blocks {
             let block_is_active = if block.kind == MarkdownBlockKind::PipeTable {
                 table_row_source_range_is_active(
                     &block.source_range,
                     &visible_source_range,
-                    active_source_range.as_ref(),
+                    active_source_range,
                     inactive_source_ranges,
                 )
             } else {
                 source_range_is_active(
                     &block.source_range,
-                    active_source_range.as_ref(),
+                    active_source_range,
                     inactive_source_ranges,
                 )
             };
@@ -348,17 +446,17 @@ impl MarkdownSyntaxTree {
             table_row_source_range_is_active(
                 &table.source_range,
                 &visible_source_range,
-                active_source_range.as_ref(),
+                active_source_range,
                 inactive_source_ranges,
             )
         });
-        for span in self.inline_spans_in_source_range(visible_source_range.clone()) {
+        for span in inline_spans {
             let span_is_active = if active_table_row {
                 ranges_overlap(&span.source_range, &visible_source_range)
             } else {
                 source_range_is_active(
                     &span.source_range,
-                    active_source_range.as_ref(),
+                    active_source_range,
                     inactive_source_ranges,
                 )
             };
@@ -1337,6 +1435,20 @@ mod tests {
     }
 
     #[test]
+    fn reparses_after_edit_range_with_tree_sitter() {
+        let old_source = "# Title\nBody\n";
+        let tree = MarkdownSyntaxTree::parse(old_source);
+        let new_source = "# Title\n## Body\n";
+        let tree = tree.reparse_after_edit_range(old_source, 8..12, new_source);
+
+        assert_eq!(tree.source_len(), new_source.len());
+        assert_eq!(
+            tree.blocks()[1].kind,
+            MarkdownBlockKind::AtxHeading { level: 2 }
+        );
+    }
+
+    #[test]
     fn parses_inline_trees_with_tree_sitter() {
         let tree = MarkdownSyntaxTree::parse("Text with **bold** and [link](https://zed.dev).\n");
 
@@ -1449,6 +1561,63 @@ mod tests {
                 &[],
             ),
             vec![tree.blocks()[0].source_range.clone()]
+        );
+    }
+
+    #[test]
+    fn range_semantics_collects_visible_markdown_state_once() {
+        let source = "# Title\nBefore **bold** and ![alt](img.png)\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let row_start = source.find("Before").expect("expected second row");
+        let visible_source_range = row_start..source.len();
+        let active_start = source.find("bold").expect("expected bold text");
+        let active_source_range = active_start..active_start + 1;
+
+        let semantics = tree.range_semantics_for_source_range(
+            visible_source_range.clone(),
+            Some(active_source_range.clone()),
+            &[],
+        );
+
+        assert_eq!(
+            semantics.blocks,
+            tree.blocks_in_source_range(visible_source_range.clone())
+                .cloned()
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            semantics.inline_spans,
+            tree.inline_spans_in_source_range(visible_source_range.clone())
+                .cloned()
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            semantics.projection,
+            tree.projection_for_source_range_with_inactive_ranges(
+                visible_source_range.clone(),
+                Some(active_source_range.clone()),
+                &[],
+            )
+        );
+        assert_eq!(
+            semantics.active_projection_source_ranges,
+            tree.active_projection_source_ranges_for_source_range(
+                visible_source_range,
+                Some(active_source_range.clone()),
+                &[],
+            )
+        );
+        assert_eq!(
+            semantics
+                .rendered_element_candidates
+                .iter()
+                .map(|span| span.kind)
+                .collect::<Vec<_>>(),
+            vec![MarkdownInlineKind::Image]
+        );
+        assert_eq!(
+            semantics,
+            tree.range_semantics_for_visible_rows(1..2, Some(active_source_range), &[])
         );
     }
 

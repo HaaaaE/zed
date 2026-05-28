@@ -1786,17 +1786,19 @@ fn active_projection_source_ranges_tracks_marker_visibility_dependencies() {
         MarkdownEditorMode::Rendered,
     );
     let active_ranges_for_row = |row, state: &DisplayRowProjectionState, mode| {
+        if mode != MarkdownEditorMode::Rendered {
+            return Vec::new();
+        }
+
         let row_source_range = row_source_range(&snapshot, row);
-        let markdown_blocks =
-            markdown_blocks_for_display_row(&snapshot, row_source_range.clone(), mode);
-        let inline_spans = inline_spans_for_display_row(&snapshot, row_source_range.clone(), mode);
-        active_projection_source_ranges(
-            &row_source_range,
-            state,
-            mode,
-            &markdown_blocks,
-            &inline_spans,
-        )
+        snapshot
+            .syntax_tree()
+            .range_semantics_for_source_range(
+                row_source_range,
+                state.active_source_range.clone(),
+                &state.inactive_source_ranges,
+            )
+            .active_projection_source_ranges
     };
 
     assert_eq!(

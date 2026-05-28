@@ -15,7 +15,8 @@ use gpui::{
 #[cfg(test)]
 use markdown_wysiwyg::MarkdownTableAlignment;
 use markdown_wysiwyg::{
-    MarkdownBlock, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownProjectionMap,
+    MarkdownBlock, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan,
+    MarkdownProjectionMap, MarkdownRangeSemantics,
 };
 use md_assets::EDITOR_FONT_FAMILY;
 use md_buffer::{Buffer, BufferSnapshot};
@@ -1976,6 +1977,10 @@ fn display_rows_in_mode(
     selection: Option<&Selection<Point>>,
     mode: MarkdownEditorMode,
 ) -> Vec<DisplayRow> {
+    if mode == MarkdownEditorMode::Source {
+        return display_rows_in_text_snapshot(snapshot.as_text_snapshot(), range);
+    }
+
     let row_count = snapshot.row_count() as usize;
     let start = range.start.min(row_count);
     let end = range.end.min(row_count);
@@ -1984,66 +1989,39 @@ fn display_rows_in_mode(
         .map(|row| {
             let row = row as u32;
             let source_range = row_source_range(snapshot, row);
-            let markdown_blocks =
-                markdown_blocks_for_display_row(snapshot, source_range.clone(), mode);
-            let inline_spans = inline_spans_for_display_row(snapshot, source_range.clone(), mode);
-            let active_projection_source_ranges = active_projection_source_ranges(
-                &source_range,
-                &display_row_state,
-                mode,
-                &markdown_blocks,
-                &inline_spans,
+            let range_semantics = snapshot.syntax_tree().range_semantics_for_source_range(
+                source_range.clone(),
+                display_row_state.active_source_range.clone(),
+                &display_row_state.inactive_source_ranges,
             );
-            display_row_in_mode(
-                snapshot,
-                row,
-                mode,
-                &display_row_state,
-                source_range,
-                active_projection_source_ranges,
-                markdown_blocks,
-                inline_spans,
-                None,
-            )
+            rendered_display_row(snapshot, row, source_range, range_semantics, None)
         })
         .collect()
 }
 
-fn display_row_in_mode(
+fn rendered_display_row(
     snapshot: &BufferSnapshot,
     row: u32,
-    mode: MarkdownEditorMode,
-    display_row_state: &DisplayRowProjectionState,
     source_range: Range<usize>,
-    active_projection_source_ranges: Vec<Range<usize>>,
-    markdown_blocks: Vec<MarkdownBlock>,
-    inline_spans: Vec<MarkdownInlineSpan>,
+    range_semantics: MarkdownRangeSemantics,
     document_path: Option<&Path>,
 ) -> DisplayRow {
     let source_text: String = snapshot
         .as_text_snapshot()
         .text_for_range(source_range.clone())
         .collect();
-    let projection = match mode {
-        MarkdownEditorMode::Source => MarkdownProjectionMap::new(
-            snapshot.as_text_snapshot().len(),
-            source_range.clone(),
-            Vec::new(),
-        ),
-        MarkdownEditorMode::Rendered => snapshot
-            .syntax_tree()
-            .projection_for_source_range_with_inactive_ranges(
-                source_range.clone(),
-                display_row_state.active_source_range.clone(),
-                &display_row_state.inactive_source_ranges,
-            ),
-    };
+    let MarkdownRangeSemantics {
+        blocks: markdown_blocks,
+        inline_spans,
+        projection,
+        active_projection_source_ranges,
+        rendered_element_candidates,
+    } = range_semantics;
 
     let rendered_element_descriptors = rendered_element_descriptors_for_display_row(
-        &inline_spans,
+        &rendered_element_candidates,
         &source_text,
         &source_range,
-        mode,
         document_path,
     );
     let (text, insertions) = project_display_row_text(
@@ -2052,7 +2030,7 @@ fn display_row_in_mode(
         &projection,
         &inline_spans,
         &rendered_element_descriptors,
-        mode,
+        MarkdownEditorMode::Rendered,
     );
     let heading_level = heading_level_for_display_row(&markdown_blocks, row);
     DisplayRow {
@@ -2114,50 +2092,13 @@ fn heading_level_for_display_row(markdown_blocks: &[MarkdownBlock], row: u32) ->
     })
 }
 
-fn markdown_blocks_for_display_row(
-    snapshot: &BufferSnapshot,
-    source_range: Range<usize>,
-    mode: MarkdownEditorMode,
-) -> Vec<MarkdownBlock> {
-    if mode != MarkdownEditorMode::Rendered {
-        return Vec::new();
-    }
-
-    snapshot
-        .syntax_tree()
-        .blocks_in_source_range(source_range)
-        .cloned()
-        .collect()
-}
-
-fn inline_spans_for_display_row(
-    snapshot: &BufferSnapshot,
-    source_range: Range<usize>,
-    mode: MarkdownEditorMode,
-) -> Vec<MarkdownInlineSpan> {
-    if mode != MarkdownEditorMode::Rendered {
-        return Vec::new();
-    }
-
-    snapshot
-        .syntax_tree()
-        .inline_spans_in_source_range(source_range)
-        .cloned()
-        .collect()
-}
-
 fn rendered_element_descriptors_for_display_row(
-    inline_spans: &[MarkdownInlineSpan],
+    rendered_element_candidates: &[MarkdownInlineSpan],
     source_text: &str,
     row_source_range: &Range<usize>,
-    mode: MarkdownEditorMode,
     document_path: Option<&Path>,
 ) -> Vec<RenderedElementDescriptor> {
-    if mode != MarkdownEditorMode::Rendered {
-        return Vec::new();
-    }
-
-    inline_spans
+    rendered_element_candidates
         .iter()
         .filter_map(|span| {
             rendered_element_descriptor_for_inline_span_in_row(
@@ -2378,67 +2319,6 @@ fn selection_intersects_visible_row_range(
     } else {
         selection_range.end > row_range.start && selection_range.start < row_range.end
     }
-}
-
-fn active_projection_source_ranges(
-    source_range: &Range<usize>,
-    display_row_state: &DisplayRowProjectionState,
-    mode: MarkdownEditorMode,
-    markdown_blocks: &[MarkdownBlock],
-    inline_spans: &[MarkdownInlineSpan],
-) -> Vec<Range<usize>> {
-    if mode != MarkdownEditorMode::Rendered {
-        return Vec::new();
-    }
-
-    let Some(active_source_range) = display_row_state.active_source_range.as_ref() else {
-        return Vec::new();
-    };
-
-    let mut source_ranges = Vec::new();
-    for block in markdown_blocks {
-        if block
-            .marker_ranges
-            .iter()
-            .any(|marker_range| ranges_overlap(marker_range, source_range))
-            && projection_source_range_is_active(
-                &block.source_range,
-                active_source_range,
-                &display_row_state.inactive_source_ranges,
-            )
-        {
-            source_ranges.push(block.source_range.clone());
-        }
-    }
-    for span in inline_spans {
-        if span
-            .marker_ranges
-            .iter()
-            .any(|marker_range| ranges_overlap(marker_range, source_range))
-            && projection_source_range_is_active(
-                &span.source_range,
-                active_source_range,
-                &display_row_state.inactive_source_ranges,
-            )
-        {
-            source_ranges.push(span.source_range.clone());
-        }
-    }
-
-    source_ranges.sort_by_key(|source_range| (source_range.start, source_range.end));
-    source_ranges.dedup();
-    source_ranges
-}
-
-fn projection_source_range_is_active(
-    source_range: &Range<usize>,
-    active_source_range: &Range<usize>,
-    inactive_source_ranges: &[Range<usize>],
-) -> bool {
-    ranges_overlap(source_range, active_source_range)
-        && !inactive_source_ranges
-            .iter()
-            .any(|inactive_source_range| range_contains(inactive_source_range, source_range))
 }
 
 fn source_range_to_row_range(

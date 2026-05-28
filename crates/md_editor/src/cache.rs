@@ -14,8 +14,8 @@ use super::{
     DisplayRowLayoutInputs, DisplayRowProjectionState, DisplayRowTextLayout,
     InlineAtomMeasurementKey, InlineAtomMeasurementState, LocalSourceEditInvalidation,
     MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, RowLayoutCacheKey, RowLayoutInputCacheKey,
-    clip_selection, display_row_in_mode, inline_spans_for_display_row, layout::DisplayRowCacheKey,
-    markdown_blocks_for_display_row, row_source_range, source_display_row_in_text_snapshot,
+    clip_selection, layout::DisplayRowCacheKey, rendered_display_row, row_source_range,
+    source_display_row_in_text_snapshot,
 };
 use crate::layout::{
     display_row_layout_inputs, source_display_row_layout_inputs, text_layout_for_display_row_inputs,
@@ -177,17 +177,16 @@ impl MarkdownEditor {
             self.layout_computation_counts.rendered_block_queries += 1;
             self.layout_computation_counts.rendered_inline_span_queries += 1;
         }
-        let markdown_blocks = markdown_blocks_for_display_row(snapshot, source_range.clone(), mode);
-        let inline_spans = inline_spans_for_display_row(snapshot, source_range.clone(), mode);
-        let display_row = Arc::new(display_row_in_mode(
+        let range_semantics = snapshot.syntax_tree().range_semantics_for_source_range(
+            source_range.clone(),
+            display_row_state.active_source_range.clone(),
+            &display_row_state.inactive_source_ranges,
+        );
+        let display_row = Arc::new(rendered_display_row(
             snapshot,
             row,
-            mode,
-            display_row_state,
             source_range,
-            active_projection_source_ranges,
-            markdown_blocks,
-            inline_spans,
+            range_semantics,
             self.document_path(),
         ));
         self.display_row_cache
