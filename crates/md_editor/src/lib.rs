@@ -114,7 +114,7 @@ pub use selection::{
     move_to_end_of_line, select_left, select_right, select_to_beginning_of_line,
     select_to_end_of_line, select_to_point, select_vertical, selection_byte_range,
 };
-use table::DisplayTableRowLayout;
+use table::{DisplayTableLayout, DisplayTableRowLayout, TableLayoutCacheKey};
 #[cfg(test)]
 use virtual_list::ListOffset;
 use virtual_list::{ListAlignment, ListSizingBehavior, MdListState, md_list};
@@ -222,6 +222,7 @@ pub struct MarkdownEditor {
     display_row_cache: HashMap<DisplayRowCacheKey, Arc<DisplayRow>>,
     row_layout_input_cache: HashMap<RowLayoutInputCacheKey, DisplayRowLayoutInputs>,
     row_layout_cache: HashMap<RowLayoutCacheKey, DisplayRowLayout>,
+    table_layout_cache: HashMap<TableLayoutCacheKey, Arc<DisplayTableLayout>>,
     inline_atom_measurement_cache: HashMap<InlineAtomMeasurementKey, InlineAtomMeasurementState>,
     pending_inline_atom_rows: HashMap<InlineAtomMeasurementKey, HashSet<usize>>,
     pending_inline_atom_remeasure_rows: HashSet<usize>,
@@ -350,6 +351,7 @@ impl MarkdownEditor {
             display_row_cache: HashMap::default(),
             row_layout_input_cache: HashMap::default(),
             row_layout_cache: HashMap::default(),
+            table_layout_cache: HashMap::default(),
             inline_atom_measurement_cache: HashMap::default(),
             pending_inline_atom_rows: HashMap::default(),
             pending_inline_atom_remeasure_rows: HashSet::default(),
@@ -1379,6 +1381,9 @@ impl MarkdownEditor {
         };
 
         if changed {
+            if self.mode == MarkdownEditorMode::Rendered {
+                self.table_layout_cache.clear();
+            }
             if let Some(invalidation) = local_source_edit_invalidation.as_ref() {
                 let version = self.buffer.as_text_snapshot().version().clone();
                 self.rekey_source_display_row_cache_for_local_edit(invalidation, version.clone());

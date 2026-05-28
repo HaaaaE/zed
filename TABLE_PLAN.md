@@ -164,6 +164,18 @@ work, while table structure and column widths are cached at table level.
 - Cargo validation has not been run because the current plan still carries the
   local "no cargo" constraint.
 
+### 2026-05-28, table layout cache
+
+- Added a table-level layout cache keyed by buffer version, table source range,
+  wrap width, and row style.
+- Reused cached table column metrics across multiple rendered table source rows.
+- Cleared table layout cache with row-layout/display-row cache clears and on
+  rendered-mode edits.
+- Extended the rendered table row test to assert table metric reuse across
+  header/body rows.
+- Cargo validation has not been run because the current plan still carries the
+  local "no cargo" constraint.
+
 ## Assumptions
 
 - First version is "structured rendering plus source editing", not full

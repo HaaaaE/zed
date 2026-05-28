@@ -24,11 +24,13 @@ use crate::layout::{
 impl MarkdownEditor {
     pub(crate) fn clear_row_layout_cache(&mut self) {
         self.row_layout_cache.clear();
+        self.table_layout_cache.clear();
     }
 
     pub(crate) fn clear_display_row_cache(&mut self) {
         self.display_row_cache.clear();
         self.row_layout_input_cache.clear();
+        self.table_layout_cache.clear();
         self.source_prewarm = None;
         self.rendered_prewarm = None;
     }
@@ -253,7 +255,7 @@ impl MarkdownEditor {
         {
             self.layout_computation_counts.row_layouts_created += 1;
         }
-        let layout = if let Some(table_layout) = super::DisplayTableRowLayout::for_display_row(
+        let layout = if let Some(table_layout) = self.cached_table_row_layout(
             snapshot,
             display_row,
             selection,
@@ -305,6 +307,53 @@ impl MarkdownEditor {
             self.row_layout_cache.insert(cache_key, layout.clone());
         }
         layout
+    }
+
+    fn cached_table_row_layout(
+        &mut self,
+        snapshot: &BufferSnapshot,
+        display_row: &DisplayRow,
+        selection: &Selection<Point>,
+        mode: MarkdownEditorMode,
+        wrap_width: gpui::Pixels,
+        row_style: RowDisplayStyle,
+    ) -> Option<super::DisplayTableRowLayout> {
+        if !super::DisplayTableRowLayout::is_inactive_table_row(
+            snapshot,
+            display_row,
+            selection,
+            mode,
+        ) {
+            return None;
+        }
+
+        let (table, table_row) = snapshot
+            .syntax_tree()
+            .table_row_for_source_row(display_row.row as usize)?;
+        let cache_key = super::TableLayoutCacheKey {
+            version: snapshot.version().clone(),
+            table_source_range: table.source_range.clone(),
+            wrap_width,
+            row_style,
+        };
+        let table_layout = if let Some(table_layout) = self.table_layout_cache.get(&cache_key) {
+            table_layout.clone()
+        } else {
+            let table_layout = Arc::new(super::DisplayTableLayout::new(
+                snapshot, table, wrap_width, row_style,
+            ));
+            self.table_layout_cache
+                .insert(cache_key, table_layout.clone());
+            table_layout
+        };
+
+        Some(super::DisplayTableRowLayout::new(
+            snapshot,
+            table,
+            table_row,
+            &table_layout,
+            row_style,
+        ))
     }
 
     pub(crate) fn cached_source_text_layout(

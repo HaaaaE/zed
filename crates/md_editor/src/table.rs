@@ -1,7 +1,9 @@
 use std::ops::Range;
 
 use gpui::{Context, IntoElement, MouseButton, SharedString, TextAlign, div, prelude::*, px};
-use markdown_wysiwyg::{MarkdownTableAlignment, MarkdownTableCell, MarkdownTableRow};
+use markdown_wysiwyg::{
+    MarkdownTable, MarkdownTableAlignment, MarkdownTableCell, MarkdownTableRow,
+};
 use md_buffer::BufferSnapshot;
 use md_text::{Point, Selection, SelectionGoal};
 use md_theme::{editor_palette, gutter_width};
@@ -15,6 +17,21 @@ const TABLE_CELL_HORIZONTAL_PADDING: gpui::Pixels = px(8.);
 const TABLE_CELL_VERTICAL_PADDING: gpui::Pixels = px(3.);
 const TABLE_BORDER_WIDTH: gpui::Pixels = px(1.);
 const TABLE_MIN_CELL_WIDTH: gpui::Pixels = px(32.);
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) struct TableLayoutCacheKey {
+    pub(super) version: md_text::Global,
+    pub(super) table_source_range: Range<usize>,
+    pub(super) wrap_width: gpui::Pixels,
+    pub(super) row_style: RowDisplayStyle,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct DisplayTableLayout {
+    pub(super) table_source_range: Range<usize>,
+    pub(super) column_widths: Vec<gpui::Pixels>,
+    pub(super) width: gpui::Pixels,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct DisplayTableRowLayout {
@@ -39,6 +56,24 @@ pub(super) struct DisplayTableCellLayout {
 }
 
 impl DisplayTableRowLayout {
+    pub(super) fn is_inactive_table_row(
+        snapshot: &BufferSnapshot,
+        display_row: &DisplayRow,
+        selection: &Selection<Point>,
+        mode: MarkdownEditorMode,
+    ) -> bool {
+        mode == MarkdownEditorMode::Rendered
+            && snapshot
+                .syntax_tree()
+                .table_for_source_row(display_row.row as usize)
+                .is_some()
+            && !rendered_element_source_range_is_active(
+                snapshot,
+                selection,
+                &display_row.source_range,
+            )
+    }
+
     pub(super) fn for_display_row(
         snapshot: &BufferSnapshot,
         display_row: &DisplayRow,
@@ -60,16 +95,33 @@ impl DisplayTableRowLayout {
         let (table, table_row) = snapshot
             .syntax_tree()
             .table_row_for_source_row(display_row.row as usize)?;
+        let table_layout = DisplayTableLayout::new(snapshot, table, wrap_width, row_style);
+        Some(Self::new(
+            snapshot,
+            table,
+            table_row,
+            &table_layout,
+            row_style,
+        ))
+    }
+
+    pub(super) fn new(
+        snapshot: &BufferSnapshot,
+        table: &MarkdownTable,
+        table_row: &MarkdownTableRow,
+        table_layout: &DisplayTableLayout,
+        row_style: RowDisplayStyle,
+    ) -> Self {
         let is_header = table.header.row == table_row.row;
         let is_delimiter = table.delimiter.row == table_row.row;
-        let column_widths = table_column_widths(snapshot, table.rows(), wrap_width, row_style);
         let mut x = px(0.);
         let cells = table_row
             .cells
             .iter()
             .enumerate()
             .map(|(column, cell)| {
-                let width = column_widths
+                let width = table_layout
+                    .column_widths
                     .get(column)
                     .copied()
                     .unwrap_or(TABLE_MIN_CELL_WIDTH);
@@ -92,7 +144,7 @@ impl DisplayTableRowLayout {
             row_style.line_height + TABLE_CELL_VERTICAL_PADDING * 2. + TABLE_BORDER_WIDTH
         };
 
-        Some(Self {
+        Self {
             table_source_range: table.source_range.clone(),
             row_source_range: table_row.source_range.clone(),
             row: table_row.row,
@@ -100,8 +152,8 @@ impl DisplayTableRowLayout {
             is_header,
             is_delimiter,
             height,
-            width,
-        })
+            width: table_layout.width,
+        }
     }
 
     pub(super) fn cacheable(&self) -> bool {
@@ -241,6 +293,26 @@ impl DisplayTableRowLayout {
             (cell.source_range.start..=cell.source_range.end).contains(&source_offset)
                 || (cell.content_range.start..=cell.content_range.end).contains(&source_offset)
         })
+    }
+}
+
+impl DisplayTableLayout {
+    pub(super) fn new(
+        snapshot: &BufferSnapshot,
+        table: &MarkdownTable,
+        wrap_width: gpui::Pixels,
+        row_style: RowDisplayStyle,
+    ) -> Self {
+        let column_widths = table_column_widths(snapshot, table.rows(), wrap_width, row_style);
+        let width = column_widths
+            .iter()
+            .fold(px(0.), |sum, width| sum + *width)
+            .max(TABLE_MIN_CELL_WIDTH);
+        Self {
+            table_source_range: table.source_range.clone(),
+            column_widths,
+            width,
+        }
     }
 }
 

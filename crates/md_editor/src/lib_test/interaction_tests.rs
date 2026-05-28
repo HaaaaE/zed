@@ -436,6 +436,29 @@ fn rendered_table_rows_use_structured_layout_when_inactive(cx: &mut gpui::TestAp
             table_layout.cells[1].alignment,
             MarkdownTableAlignment::Right
         );
+        assert_eq!(editor.table_layout_cache.len(), 1);
+
+        let body_row = editor
+            .cached_display_row(&snapshot, 2, editor.mode, &display_row_state)
+            .expect("body row should exist");
+        let body_style = row_display_style_for_display_row(&snapshot, &body_row, editor.mode);
+        let body_layout = editor.cached_row_layout(
+            &snapshot,
+            &body_row,
+            &selection,
+            editor.mode,
+            body_style,
+            wrap_width,
+            false,
+            window,
+            cx,
+        );
+        assert!(matches!(body_layout, DisplayRowLayout::TableRow(_)));
+        assert_eq!(
+            editor.table_layout_cache.len(),
+            1,
+            "table metrics should be reused across visible rows"
+        );
     });
 }
 
