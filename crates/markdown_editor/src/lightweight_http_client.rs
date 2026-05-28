@@ -417,7 +417,7 @@ mod tests {
     }
 
     fn client() -> MarkdownHttpClient {
-        MarkdownHttpClient::new("markdown-editor/test").unwrap()
+        MarkdownHttpClient::new("updraft-editor/test").unwrap()
     }
 
     fn read_body(response: Response<AsyncBody>) -> Vec<u8> {

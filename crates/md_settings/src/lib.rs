@@ -1,4 +1,4 @@
-//! Minimal markdown-editor settings.
+//! Minimal Updraft Editor settings.
 //! Ported from crates/settings (JSON load + keymap subset) in R4.
 
 /// Editor behavior settings for the standalone markdown editor.
@@ -17,7 +17,7 @@ impl Default for EditorSettings {
     }
 }
 
-/// Global markdown-editor settings.
+/// Global Updraft Editor settings.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MarkdownSettings {
     pub editor: EditorSettings,

@@ -1,4 +1,4 @@
-//! Minimal markdown-editor assets.
+//! Minimal Updraft Editor assets.
 //! Default keymap, theme descriptors, and icon placeholders.
 
 /// Default editor font family.

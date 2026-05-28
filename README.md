@@ -1,9 +1,9 @@
-# Markdown Editor
+# Updraft Editor
 
-A single-document Markdown editor built with GPUI.
+A local Markdown editor built with GPUI.
 
-This project is not Zed and is not affiliated with Zed Industries. It uses GPUI
-as a Cargo dependency and includes portions of Zed's editing infrastructure
+Updraft Editor is not Zed and is not affiliated with Zed Industries. It uses
+GPUI as a Cargo dependency and includes portions of Zed's editing infrastructure
 adapted under the licenses described in `NOTICE`.
 
 ## License
@@ -22,13 +22,13 @@ release checklist and the command used to regenerate third-party notices.
 Build the default application:
 
 ```sh
-cargo check -p markdown_editor
+cargo check -p updraft_editor
 ```
 
 Run the application:
 
 ```sh
-cargo run -p markdown_editor
+cargo run -p updraft_editor
 ```
 
 Run focused tests for the editor stack:

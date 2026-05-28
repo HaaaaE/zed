@@ -262,7 +262,7 @@ impl MarkdownEditorShell {
                             .text_sm()
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(palette.title_text)
-                            .child("Markdown Editor"),
+                            .child("Updraft Editor"),
                     )
                     .child(
                         div()
@@ -426,7 +426,7 @@ pub fn run() {
 }
 
 fn configure_http_client(cx: &mut App) {
-    const USER_AGENT: &str = concat!("markdown-editor/", env!("CARGO_PKG_VERSION"));
+    const USER_AGENT: &str = concat!("updraft-editor/", env!("CARGO_PKG_VERSION"));
 
     match MarkdownHttpClient::new(USER_AGENT) {
         Ok(client) => cx.set_http_client(Arc::new(client)),

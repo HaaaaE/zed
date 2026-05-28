@@ -1,7 +1,7 @@
 # Distribution Checklist
 
-This project is GPL-3.0-or-later overall and also carries Apache-2.0 notices for
-some adapted components. Installers and binary packages should include these
+Updraft Editor is GPL-3.0-or-later overall and also carries Apache-2.0 notices
+for some adapted components. Installers and binary packages should include these
 files:
 
 - `LICENSE`
