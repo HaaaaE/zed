@@ -161,6 +161,31 @@
 - task checkbox toggle 行为。
 - 更多 GFM block/inline 覆盖。
 
+### 2026-05-29：完整 HTML5 named character reference 表
+
+已完成：
+
+- `markdown_wysiwyg` named character reference 解码改为使用 `entities` 的 WHATWG HTML5 entity 数据，覆盖完整带分号 named references。
+- 保持 numeric character reference 行为不变，继续支持十进制和十六进制 codepoint。
+- 覆盖多 codepoint replacement，例如 `&NotEqualTilde;` 会投影为 `\u{2242}\u{0338}`，避免只保留第一个 codepoint。
+- 新增 `markdown_wysiwyg` projection test，覆盖长名称、非 BMP 字符和双 codepoint named entity。
+- 新增 `md_editor` rendered display-row test，确认完整 HTML5 named entities 在 rendered mode 中正确替换。
+
+验证：
+
+- `cargo test -p markdown_wysiwyg`：31 passed。
+- `cargo test -p md_editor rendered_display_rows_replace_full_html5_named_entities`：1 passed。
+- `cargo test -p md_editor`：194 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
+- `cargo perf-test -p md_editor -- --quiet`：复跑一次，未见性能门禁失败。
+
+后续仍未完成：
+
+- task checkbox toggle 行为。
+- 更多 GFM block/inline 覆盖。
+- `markdown_wysiwyg` 模块拆分。
+- 300KB mixed GFM fixture 与最终验证。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：

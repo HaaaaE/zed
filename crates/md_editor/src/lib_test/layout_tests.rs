@@ -139,6 +139,26 @@ fn rendered_display_rows_replace_inactive_escapes_and_entities() {
 }
 
 #[test]
+fn rendered_display_rows_replace_full_html5_named_entities() {
+    let source = "Entities &CounterClockwiseContourIntegral; &Aopf; &NotEqualTilde;\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+
+    let row = display_rows_in_mode(
+        &snapshot,
+        0..1,
+        Some(&collapsed_selection(Point::new(0, 0))),
+        MarkdownEditorMode::Rendered,
+    )
+    .remove(0);
+
+    assert_eq!(
+        row.text,
+        "Entities \u{2233} \u{1D538} \u{2242}\u{0338}"
+    );
+}
+
+#[test]
 fn rendered_display_rows_reveal_active_escape_and_entity_source() {
     let source = "Escape \\* &amp; end\n";
     let mut buffer = Buffer::local(source);

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt, ops::Range};
+use std::{collections::HashMap, fmt, ops::Range, sync::OnceLock};
 
 use tree_sitter::{InputEdit, Node, Parser, Point, Range as TreeSitterRange, Tree};
 
@@ -1300,8 +1300,8 @@ fn projection_replacement_from_node(
 }
 
 fn decode_markdown_entity(entity: &str) -> Option<String> {
-    let entity = entity.strip_prefix('&')?.strip_suffix(';')?;
-    if let Some(decimal) = entity.strip_prefix('#') {
+    let entity_body = entity.strip_prefix('&')?.strip_suffix(';')?;
+    if let Some(decimal) = entity_body.strip_prefix('#') {
         let codepoint = if let Some(hex) = decimal
             .strip_prefix('x')
             .or_else(|| decimal.strip_prefix('X'))
@@ -1313,15 +1313,21 @@ fn decode_markdown_entity(entity: &str) -> Option<String> {
         return char::from_u32(codepoint).map(|character| character.to_string());
     }
 
-    match entity {
-        "amp" => Some("&".to_string()),
-        "apos" => Some("'".to_string()),
-        "gt" => Some(">".to_string()),
-        "lt" => Some("<".to_string()),
-        "nbsp" => Some("\u{00a0}".to_string()),
-        "quot" => Some("\"".to_string()),
-        _ => None,
-    }
+    decode_html5_named_character_reference(entity).map(str::to_string)
+}
+
+fn decode_html5_named_character_reference(entity: &str) -> Option<&'static str> {
+    static NAMED_ENTITIES: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
+    NAMED_ENTITIES
+        .get_or_init(|| {
+            entities::ENTITIES
+                .iter()
+                .filter(|entry| entry.entity.ends_with(';'))
+                .map(|entry| (entry.entity, entry.characters))
+                .collect()
+        })
+        .get(entity)
+        .copied()
 }
 
 fn collect_inline_span_nodes(source: &str, node: Node<'_>, spans: &mut Vec<MarkdownInlineSpan>) {
@@ -1929,6 +1935,34 @@ mod tests {
         );
         assert_eq!(projection.project_source_text(source), "Escape * & * *\n");
         assert_eq!(projection.display_len(), "Escape * & * *\n".len());
+    }
+
+    #[test]
+    fn projection_replaces_full_html5_named_entities() {
+        let source = "Entities &CounterClockwiseContourIntegral; &Aopf; &NotEqualTilde;\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let contour = source
+            .find("&CounterClockwiseContourIntegral;")
+            .expect("expected contour entity");
+        let aopf = source.find("&Aopf;").expect("expected Aopf entity");
+        let not_equal_tilde = source
+            .find("&NotEqualTilde;")
+            .expect("expected NotEqualTilde entity");
+
+        let projection = tree.projection_for_visible_rows(0..1, None);
+
+        assert_eq!(
+            projection.hidden_ranges(),
+            &[
+                contour..contour + "&CounterClockwiseContourIntegral;".len(),
+                aopf..aopf + "&Aopf;".len(),
+                not_equal_tilde..not_equal_tilde + "&NotEqualTilde;".len()
+            ]
+        );
+        assert_eq!(
+            projection.project_source_text(source),
+            "Entities \u{2233} \u{1D538} \u{2242}\u{0338}\n"
+        );
     }
 
     #[test]
