@@ -17,7 +17,7 @@ This repository is a GPUI-based Markdown editor, not the Zed IDE.
 ## Development
 
 - Use `rg` for searching.
-- Use `cargo check -p markdown_editor` for the primary build check.
+- Use `cargo check -p updraft_editor` for the primary build check.
 - Use `cargo test -p md_sum_tree`, `cargo test -p md_rope`, and `cargo test -p md_text` for the core text stack.
 - Use `cargo perf-test -p md_editor` only when intentionally running perf triage.
 

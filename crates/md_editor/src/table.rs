@@ -56,7 +56,7 @@ pub(super) struct DisplayTableCellLayout {
     pub(super) content_range: Range<usize>,
     pub(super) text: String,
     pub(super) segments: Vec<StyledDisplaySegment>,
-    pub(super) wrapped_lines: usize,
+    pub(super) visual_lines: Vec<Range<usize>>,
     pub(super) x: gpui::Pixels,
     pub(super) width: gpui::Pixels,
     pub(super) alignment: MarkdownTableAlignment,
@@ -81,39 +81,6 @@ impl DisplayTableRowLayout {
             )
     }
 
-    pub(super) fn for_display_row(
-        snapshot: &BufferSnapshot,
-        display_row: &DisplayRow,
-        selection: &Selection<Point>,
-        mode: MarkdownEditorMode,
-        wrap_width: gpui::Pixels,
-        row_style: RowDisplayStyle,
-        window: &mut Window,
-    ) -> Option<Self> {
-        if mode != MarkdownEditorMode::Rendered
-            || rendered_element_source_range_is_active(
-                snapshot,
-                selection,
-                &display_row.source_range,
-            )
-        {
-            return None;
-        }
-
-        let (table, table_row) = snapshot
-            .syntax_tree()
-            .table_row_for_source_row(display_row.row as usize)?;
-        let table_layout = DisplayTableLayout::new(snapshot, table, wrap_width, row_style, window);
-        Some(Self::new(
-            snapshot,
-            table,
-            table_row,
-            &table_layout,
-            row_style,
-            window,
-        ))
-    }
-
     pub(super) fn new(
         snapshot: &BufferSnapshot,
         table: &MarkdownTable,
@@ -136,13 +103,14 @@ impl DisplayTableRowLayout {
                     .copied()
                     .unwrap_or(TABLE_MIN_CELL_WIDTH);
                 let (text, segments) = table_cell_display(snapshot, cell);
-                let wrapped_lines = wrapped_line_count(&text, &segments, width, row_style, window);
+                let visual_lines =
+                    table_cell_visual_lines(&text, &segments, width, row_style, window);
                 let layout = DisplayTableCellLayout {
                     source_range: cell.source_range.clone(),
                     content_range: cell.content_range.clone(),
                     text,
                     segments,
-                    wrapped_lines,
+                    visual_lines,
                     x,
                     width,
                     alignment: table.alignments.get(column).copied().unwrap_or_default(),
@@ -151,13 +119,12 @@ impl DisplayTableRowLayout {
                 layout
             })
             .collect::<Vec<_>>();
-        let width = x.max(TABLE_MIN_CELL_WIDTH);
         let height = if is_delimiter {
             (row_style.line_height * 0.45).max(px(6.))
         } else {
             let line_count = cells
                 .iter()
-                .map(|cell| cell.wrapped_lines)
+                .map(|cell| cell.visual_lines.len())
                 .max()
                 .unwrap_or(1);
             row_style.line_height * line_count as f32
@@ -381,19 +348,59 @@ fn render_table_cell(
         } else {
             palette.pipe_table_background
         })
-        .child(content.children(render_table_cell_segments(cell)))
+        .child(content.children(render_table_cell_lines(cell, row_style)))
         .into_any_element()
 }
 
-fn render_table_cell_segments(cell: &DisplayTableCellLayout) -> Vec<gpui::AnyElement> {
+fn render_table_cell_lines(
+    cell: &DisplayTableCellLayout,
+    row_style: RowDisplayStyle,
+) -> Vec<gpui::AnyElement> {
     if cell.segments.is_empty() {
         return vec![SharedString::from(String::new()).into_any_element()];
     }
 
+    cell.visual_lines
+        .iter()
+        .map(|line_range| {
+            div()
+                .w_full()
+                .h(row_style.line_height)
+                .children(render_table_cell_segments(cell, line_range))
+                .into_any_element()
+        })
+        .collect()
+}
+
+fn render_table_cell_segments(
+    cell: &DisplayTableCellLayout,
+    line_range: &Range<usize>,
+) -> Vec<gpui::AnyElement> {
     cell.segments
         .iter()
-        .map(|segment| render_text_piece(segment.text.clone(), &segment.style))
+        .filter_map(|segment| table_cell_segment_for_range(segment, line_range))
+        .map(|segment| render_text_piece(segment.text, &segment.style))
         .collect()
+}
+
+fn table_cell_segment_for_range(
+    segment: &StyledDisplaySegment,
+    line_range: &Range<usize>,
+) -> Option<StyledDisplaySegment> {
+    let start = segment.display_range.start.max(line_range.start);
+    let end = segment.display_range.end.min(line_range.end);
+    if start >= end {
+        return None;
+    }
+
+    let local_start = start - segment.display_range.start;
+    let local_end = end - segment.display_range.start;
+    let text = segment.text.get(local_start..local_end)?.to_string();
+    Some(StyledDisplaySegment {
+        display_range: start..end,
+        text,
+        style: segment.style.clone(),
+    })
 }
 
 fn table_column_widths<'a>(
@@ -446,20 +453,20 @@ fn table_cell_preferred_width(
     shaped_line.width + TABLE_CELL_HORIZONTAL_PADDING * 2. + TABLE_BORDER_WIDTH
 }
 
-fn wrapped_line_count(
+fn table_cell_visual_lines(
     text: &str,
     segments: &[StyledDisplaySegment],
     width: gpui::Pixels,
     row_style: RowDisplayStyle,
     window: &mut Window,
-) -> usize {
+) -> Vec<Range<usize>> {
     if text.is_empty() {
-        return 1;
+        return vec![0..0];
     }
 
     let content_width = (width - TABLE_CELL_HORIZONTAL_PADDING * 2.).max(px(1.));
     let text_runs = text_runs_for_segments(segments);
-    window
+    let Some(wrapped_line) = window
         .text_system()
         .shape_text(
             SharedString::from(text.to_string()),
@@ -469,13 +476,29 @@ fn wrapped_line_count(
             None,
         )
         .ok()
-        .and_then(|wrapped_lines| {
-            wrapped_lines
-                .first()
-                .map(|wrapped_line| wrapped_line.wrap_boundaries().len() + 1)
-        })
-        .unwrap_or(1)
-        .max(1)
+        .and_then(|wrapped_lines| wrapped_lines.into_iter().next())
+    else {
+        return vec![0..text.len()];
+    };
+
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    for wrap_boundary in wrapped_line.wrap_boundaries() {
+        let Some(glyph) = wrapped_line
+            .unwrapped_layout
+            .runs
+            .get(wrap_boundary.run_ix)
+            .and_then(|run| run.glyphs.get(wrap_boundary.glyph_ix))
+        else {
+            return vec![0..text.len()];
+        };
+        if glyph.index > start && glyph.index <= text.len() {
+            ranges.push(start..glyph.index);
+            start = glyph.index;
+        }
+    }
+    ranges.push(start..text.len());
+    ranges
 }
 
 fn table_cell_display(

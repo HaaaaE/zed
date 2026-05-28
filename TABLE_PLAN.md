@@ -143,8 +143,8 @@ work, while table structure and column widths are cached at table level.
 - Added parser tests for structured ranges, alignments, missing
   leading/trailing pipes, empty cells, and inline Markdown text inside cells.
 - Formatted the touched Rust file with `rustfmt`.
-- Cargo validation has not been run because the current plan still carries the
-  local "no cargo" constraint.
+- Cargo validation must be run before future commits with
+  `cargo check -p updraft_editor`.
 
 ### 2026-05-28, editor layout skeleton
 
@@ -161,8 +161,8 @@ work, while table structure and column widths are cached at table level.
 - Added a rendered-mode interaction test for inactive structured table row
   layout and updated the old pipe-table text-layout test to cover the active
   row case.
-- Cargo validation has not been run because the current plan still carries the
-  local "no cargo" constraint.
+- Cargo validation must be run before future commits with
+  `cargo check -p updraft_editor`.
 
 ### 2026-05-28, table layout cache
 
@@ -173,8 +173,8 @@ work, while table structure and column widths are cached at table level.
   rendered-mode edits.
 - Extended the rendered table row test to assert table metric reuse across
   header/body rows.
-- Cargo validation has not been run because the current plan still carries the
-  local "no cargo" constraint.
+- Cargo validation must be run before future commits with
+  `cargo check -p updraft_editor`.
 
 ### 2026-05-28, table cell inline fallback
 
@@ -188,8 +188,8 @@ work, while table structure and column widths are cached at table level.
   Markdown marker text.
 - Extended the rendered table row test to assert bold/link inline styling inside
   inactive structured table cells.
-- Cargo validation has not been run because the current plan still carries the
-  local "no cargo" constraint.
+- Cargo validation must be run before future commits with
+  `cargo check -p updraft_editor`.
 
 ### 2026-05-28, table cell wrapping
 
@@ -207,8 +207,8 @@ work, while table structure and column widths are cached at table level.
 - Added a rendered-mode test covering column shrink to wrap width and row height
   growth for a long table cell.
 - Added coverage for measured word wrapping to avoid huge blank table rows.
-- Cargo validation has not been run because the current plan still carries the
-  local "no cargo" constraint.
+- Cargo validation must be run before future commits with
+  `cargo check -p updraft_editor`.
 
 ### 2026-05-28, table interaction coverage
 
@@ -219,8 +219,8 @@ work, while table structure and column widths are cached at table level.
 - Added rendered mouse-click coverage showing that clicking an inactive table row
   reveals only the clicked source row on the next display pass.
 - Added Shift+Down coverage for source-range selection across table rows.
-- Cargo validation has not been run because the current plan still carries the
-  local "no cargo" constraint.
+- Cargo validation must be run before future commits with
+  `cargo check -p updraft_editor`.
 
 ### 2026-05-28, robustness fixes
 
@@ -233,8 +233,17 @@ work, while table structure and column widths are cached at table level.
   the edited row range instead of rebuilding the entire list.
 - Added unit coverage for the row-count splice range used by newline/join-line
   edits.
-- Cargo validation has not been run because the current plan still carries the
-  local "no cargo" constraint.
+- Cargo validation must be run before future commits with
+  `cargo check -p updraft_editor`.
+
+### 2026-05-28, validation policy update
+
+- Updated the project rule and this plan to use the actual product package name:
+  `cargo check -p updraft_editor`.
+- Fixed the latest table wrapping measurement changes so table cells use shaped
+  visual line ranges for both row height and rendered content.
+- Validation run: `cargo check -p updraft_editor` passed, with pre-existing
+  dead-code warnings in `md_editor`.
 
 ## Assumptions
 
@@ -246,4 +255,4 @@ work, while table structure and column widths are cached at table level.
 - Source-row virtualization remains the outer architecture.
 - The delimiter source row may render as a thin separator while preserving source
   row mapping.
-- Do not run cargo validation while the local "no cargo" constraint is in force.
+- Run `cargo check -p updraft_editor` before committing implementation changes.

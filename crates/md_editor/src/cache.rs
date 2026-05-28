@@ -262,6 +262,7 @@ impl MarkdownEditor {
             mode,
             wrap_width,
             row_style,
+            window,
         ) {
             DisplayRowLayout::TableRow(Arc::new(table_layout))
         } else if let Some(block_layout) = DisplayBlockLayout::for_display_row(
@@ -317,6 +318,7 @@ impl MarkdownEditor {
         mode: MarkdownEditorMode,
         wrap_width: gpui::Pixels,
         row_style: RowDisplayStyle,
+        window: &mut Window,
     ) -> Option<super::DisplayTableRowLayout> {
         if !super::DisplayTableRowLayout::is_inactive_table_row(
             snapshot,

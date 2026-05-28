@@ -513,7 +513,7 @@ fn rendered_table_cells_wrap_to_available_width(cx: &mut gpui::TestAppContext) {
             panic!("expected structured table row layout");
         };
         assert!(table_layout.width <= wrap_width);
-        assert!(table_layout.cells[0].wrapped_lines > 1);
+        assert!(table_layout.cells[0].visual_lines.len() > 1);
         assert!(table_layout.height() > row_style.line_height);
     });
 }
@@ -557,7 +557,7 @@ fn rendered_table_wrapping_uses_text_measurement_for_words(cx: &mut gpui::TestAp
             panic!("expected structured table row layout");
         };
         assert!(
-            table_layout.cells[1].wrapped_lines <= 3,
+            table_layout.cells[1].visual_lines.len() <= 3,
             "word wrapping should pack multiple words per visual line, got {:?}",
             table_layout.cells[1]
         );
