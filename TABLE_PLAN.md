@@ -257,6 +257,20 @@ work, while table structure and column widths are cached at table level.
   - `cargo check -p updraft_editor` passed, with pre-existing dead-code warnings
     in `md_editor`.
 
+### 2026-05-28, table column fit and delimiter alignment
+
+- Replaced proportional table-column shrink with a width distribution that keeps
+  short columns at preferred width when possible and lets oversized columns take
+  the wrapping pressure.
+- Kept the editor gutter width fixed and rendered delimiter separators out of
+  flex flow so wide tables do not push delimiter row numbers out of alignment.
+- Added regressions for short `Name` / `Age` columns staying readable beside a
+  long city column, and for delimiter rows using structured separator layout.
+- Validation runs:
+  - `cargo test -p md_editor rendered_table_` passed.
+  - `cargo check -p updraft_editor` passed, with pre-existing dead-code warnings
+    in `md_editor`.
+
 ## Assumptions
 
 - First version is "structured rendering plus source editing", not full

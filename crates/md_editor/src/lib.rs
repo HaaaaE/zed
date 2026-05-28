@@ -1929,6 +1929,7 @@ fn render_editor_row(
         .child(
             div()
                 .w(gutter_width())
+                .flex_none()
                 .pr_2()
                 .text_align(TextAlign::Right)
                 .text_color(if is_cursor_row {

@@ -570,6 +570,100 @@ fn rendered_table_header_cells_fit_preferred_width(cx: &mut gpui::TestAppContext
 }
 
 #[gpui::test]
+fn rendered_table_shrinks_long_columns_before_short_columns(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(620.), px(300.)));
+    let source = format!(
+        "| Name | Age | City |\n| --- | --- | --- |\n| Alice | 30 | {} |\n",
+        "Cit".repeat(36)
+    );
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(&source, cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(3, 0));
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, 2, editor.mode, &display_row_state)
+            .expect("display row should exist");
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let wrap_width = text_wrap_width(window);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            wrap_width,
+            false,
+            window,
+            cx,
+        );
+
+        let DisplayRowLayout::TableRow(table_layout) = row_layout else {
+            panic!("expected structured table row layout");
+        };
+        assert!(table_layout.width <= wrap_width);
+        assert_eq!(table_layout.cells[0].text, "Alice");
+        assert_eq!(table_layout.cells[1].text, "30");
+        assert_eq!(table_layout.cells[0].visual_lines, vec![0.."Alice".len()]);
+        assert_eq!(table_layout.cells[1].visual_lines, vec![0.."30".len()]);
+        assert!(
+            table_layout.cells[2].visual_lines.len() > 1,
+            "long city column should absorb wrapping, got {:?}",
+            table_layout.cells[2]
+        );
+    });
+}
+
+#[gpui::test]
+fn rendered_table_delimiter_row_uses_structured_separator_layout(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor =
+            MarkdownEditor::for_text("| Name | Age |\n| --- | --- |\n| Alice | 30 |\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(2, 0));
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, 1, editor.mode, &display_row_state)
+            .expect("display row should exist");
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            text_wrap_width(window),
+            false,
+            window,
+            cx,
+        );
+
+        let DisplayRowLayout::TableRow(table_layout) = &row_layout else {
+            panic!("expected structured table row layout");
+        };
+        assert!(table_layout.is_delimiter);
+        assert!(table_layout.height() <= row_style.line_height);
+    });
+}
+
+#[gpui::test]
 fn rendered_table_wrapping_uses_text_measurement_for_words(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     cx.simulate_resize(gpui::size(px(720.), px(300.)));

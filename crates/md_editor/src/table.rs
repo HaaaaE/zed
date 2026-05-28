@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{cmp::Ordering, ops::Range};
 
 use gpui::{
     Context, IntoElement, MouseButton, SharedString, TextAlign, Window, div, prelude::*, px,
@@ -237,12 +237,13 @@ impl DisplayTableRowLayout {
 
         if self.is_delimiter {
             row = row.child(
-                div().h_full().flex().items_center().child(
-                    div()
-                        .h(px(1.))
-                        .w(self.width)
-                        .bg(palette.gutter_text.opacity(0.55)),
-                ),
+                div()
+                    .absolute()
+                    .left(px(0.))
+                    .top((self.height - px(1.)) * 0.5)
+                    .h(px(1.))
+                    .w(self.width)
+                    .bg(palette.gutter_text.opacity(0.55)),
             );
         } else {
             for cell in &self.cells {
@@ -435,13 +436,57 @@ fn table_column_widths<'a>(
         }
     }
 
-    let total = widths.iter().fold(px(0.), |sum, width| sum + *width);
-    if total > wrap_width && total > px(0.) {
-        let scale = wrap_width.max(TABLE_MIN_CELL_WIDTH) / total;
-        for width in &mut widths {
-            *width = (*width * scale).max(TABLE_MIN_CELL_WIDTH);
-        }
+    fit_table_column_widths(widths, wrap_width)
+}
+
+fn fit_table_column_widths(
+    preferred_widths: Vec<gpui::Pixels>,
+    wrap_width: gpui::Pixels,
+) -> Vec<gpui::Pixels> {
+    if preferred_widths.is_empty() {
+        return preferred_widths;
     }
+
+    let total_preferred = preferred_widths
+        .iter()
+        .fold(px(0.), |sum, width| sum + *width);
+    if total_preferred <= wrap_width {
+        return preferred_widths;
+    }
+
+    let total_minimum = TABLE_MIN_CELL_WIDTH * preferred_widths.len();
+    if total_minimum >= wrap_width {
+        return vec![TABLE_MIN_CELL_WIDTH; preferred_widths.len()];
+    }
+
+    let mut widths = vec![TABLE_MIN_CELL_WIDTH; preferred_widths.len()];
+    let mut remaining_extra = wrap_width - total_minimum;
+    let mut expandable_columns = preferred_widths
+        .iter()
+        .enumerate()
+        .filter_map(|(column, preferred)| {
+            let extra = (*preferred - TABLE_MIN_CELL_WIDTH).max(px(0.));
+            (extra > px(0.)).then_some((column, extra))
+        })
+        .collect::<Vec<_>>();
+    expandable_columns
+        .sort_by(|(_, left), (_, right)| left.partial_cmp(right).unwrap_or(Ordering::Equal));
+
+    while !expandable_columns.is_empty() {
+        let shared_extra = remaining_extra * (1. / expandable_columns.len() as f32);
+        if expandable_columns[0].1 <= shared_extra {
+            let (column, extra) = expandable_columns.remove(0);
+            widths[column] = TABLE_MIN_CELL_WIDTH + extra;
+            remaining_extra -= extra;
+            continue;
+        }
+
+        for (column, _) in expandable_columns {
+            widths[column] = TABLE_MIN_CELL_WIDTH + shared_extra;
+        }
+        return widths;
+    }
+
     widths
 }
 
