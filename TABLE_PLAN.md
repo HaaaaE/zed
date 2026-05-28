@@ -198,6 +198,9 @@ work, while table structure and column widths are cached at table level.
   the source row.
 - Table cell rendering now allows normal text wrapping instead of forcing a
   single nowrap flex line.
+- Adjusted cell width estimation conservatively and clipped cell contents to
+  avoid single-character overflow artifacts when rendered text is wider than the
+  estimate.
 - Added a rendered-mode test covering column shrink to wrap width and row height
   growth for a long table cell.
 - Cargo validation has not been run because the current plan still carries the
@@ -209,6 +212,9 @@ work, while table structure and column widths are cached at table level.
   mapping into the matching cell source range.
 - Added vertical movement coverage for moving from an active revealed table row
   into neighboring table rows while preserving the rendered-mode path.
+- Added rendered mouse-click coverage showing that clicking an inactive table row
+  reveals only the clicked source row on the next display pass.
+- Added Shift+Down coverage for source-range selection across table rows.
 - Cargo validation has not been run because the current plan still carries the
   local "no cargo" constraint.
 

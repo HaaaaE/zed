@@ -584,6 +584,68 @@ fn rendered_table_vertical_movement_enters_neighboring_table_rows(cx: &mut gpui:
     });
 }
 
+#[gpui::test]
+fn rendered_table_click_reveals_only_clicked_source_row(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor =
+            MarkdownEditor::for_text("| **a** | b |\n| - | - |\n| 1 | 2 |\nafter\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(3, 0));
+        editor
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(320.), px(200.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    let click = gpui::point(
+        gutter_width() + px(18.),
+        default_row_metrics().line_height * 0.5,
+    );
+    cx.simulate_mouse_down(click, MouseButton::Left, gpui::Modifiers::none());
+    cx.simulate_mouse_up(click, MouseButton::Left, gpui::Modifiers::none());
+
+    editor.read_with(cx, |editor, _| {
+        assert_eq!(editor.cursor().row, 0);
+        let snapshot = editor.buffer.snapshot();
+        let rows = display_rows_in_mode(
+            &snapshot,
+            0..3,
+            Some(&editor.selection),
+            MarkdownEditorMode::Rendered,
+        );
+
+        assert_eq!(rows[0].text, "| **a** | b |");
+        assert_ne!(rows[1].text, "| - | - |");
+        assert_ne!(rows[2].text, "| 1 | 2 |");
+    });
+}
+
+#[gpui::test]
+fn rendered_table_shift_down_selects_across_source_rows(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor =
+            MarkdownEditor::for_text("| alpha | beta |\n| - | - |\n| one | two |\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(0, 4));
+        editor.select_down(&SelectDown, window, cx);
+
+        assert_eq!(editor.selection.start.row, 0);
+        assert_eq!(editor.selection.end.row, 1);
+        assert!(!editor.selection.is_empty());
+    });
+}
+
 #[cfg(perf_enabled)]
 #[gpui::test]
 fn rendered_display_row_cache_hit_skips_syntax_queries(cx: &mut gpui::TestAppContext) {

@@ -20,6 +20,7 @@ const TABLE_CELL_HORIZONTAL_PADDING: gpui::Pixels = px(8.);
 const TABLE_CELL_VERTICAL_PADDING: gpui::Pixels = px(3.);
 const TABLE_BORDER_WIDTH: gpui::Pixels = px(1.);
 const TABLE_MIN_CELL_WIDTH: gpui::Pixels = px(32.);
+const TABLE_AVERAGE_CHAR_WIDTH_FACTOR: f32 = 0.75;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct TableLayoutCacheKey {
@@ -366,6 +367,7 @@ fn render_table_cell(
         .top_0()
         .w(cell.width)
         .h(height)
+        .overflow_hidden()
         .border_1()
         .border_color(palette.gutter_text.opacity(0.35))
         .bg(if is_header {
@@ -398,7 +400,9 @@ fn table_column_widths<'a>(
     for row in rows {
         for (column, cell) in row.cells.iter().enumerate() {
             let text = table_cell_display_text(snapshot, cell);
-            let preferred = px(text.chars().count() as f32 * f32::from(row_style.text_size) * 0.55)
+            let preferred = px(text.chars().count() as f32
+                * f32::from(row_style.text_size)
+                * TABLE_AVERAGE_CHAR_WIDTH_FACTOR)
                 + TABLE_CELL_HORIZONTAL_PADDING * 2.
                 + TABLE_BORDER_WIDTH;
             if widths.len() <= column {
@@ -428,7 +432,7 @@ fn wrapped_line_count(text: &str, width: gpui::Pixels, row_style: RowDisplayStyl
         return 1;
     }
 
-    let char_width = (f32::from(row_style.text_size) * 0.55).max(1.);
+    let char_width = (f32::from(row_style.text_size) * TABLE_AVERAGE_CHAR_WIDTH_FACTOR).max(1.);
     let content_width = f32::from((width - TABLE_CELL_HORIZONTAL_PADDING * 2.).max(px(1.)));
     let chars_per_line = (content_width / char_width).floor().max(1.) as usize;
 
