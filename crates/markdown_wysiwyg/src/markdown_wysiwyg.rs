@@ -1170,6 +1170,11 @@ fn collect_projection_replacements(
     parse_tree: &MarkdownParseTree,
 ) -> Vec<MarkdownProjectionReplacement> {
     let mut replacements = Vec::new();
+    collect_projection_replacement_nodes(
+        source,
+        parse_tree.block_tree().root_node(),
+        &mut replacements,
+    );
     for inline_tree in parse_tree.inline_trees() {
         collect_projection_replacement_nodes(
             source,
@@ -1282,6 +1287,8 @@ fn projection_replacement_from_node(
         "entity_reference" | "numeric_character_reference" => {
             decode_markdown_entity(source.get(source_range.clone())?)?
         }
+        "task_list_marker_checked" => "\u{2611}".to_string(),
+        "task_list_marker_unchecked" => "\u{2610}".to_string(),
         _ => return None,
     };
 
@@ -1939,6 +1946,43 @@ mod tests {
                 &[],
             ),
             vec![escaped..escaped + 2]
+        );
+    }
+
+    #[test]
+    fn projection_replaces_inactive_task_list_markers() {
+        let source = "- [ ] todo\n- [x] done\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let unchecked = source.find("[ ]").expect("expected unchecked task marker");
+        let checked = source.find("[x]").expect("expected checked task marker");
+
+        let projection = tree.projection_for_visible_rows(0..2, None);
+
+        assert_eq!(
+            projection.hidden_ranges(),
+            &[unchecked..unchecked + 3, checked..checked + 3]
+        );
+        assert_eq!(
+            projection.project_source_text(source),
+            "- \u{2610} todo\n- \u{2611} done\n"
+        );
+    }
+
+    #[test]
+    fn active_task_list_marker_reveals_source_projection() {
+        let source = "- [ ] todo\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let marker = source.find("[ ]").expect("expected task marker");
+        let projection = tree.projection_for_visible_rows(0..1, Some(marker..marker + 1));
+
+        assert_eq!(projection.project_source_text(source), source);
+        assert_eq!(
+            tree.active_projection_source_ranges_for_source_range(
+                0..source.len(),
+                Some(marker..marker + 1),
+                &[],
+            ),
+            vec![marker..marker + 3]
         );
     }
 

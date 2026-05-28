@@ -111,6 +111,33 @@
 - replacement projection 的 selection/deletion 交互回归。
 - task checkbox replacement projection 及对应 editor tests。
 
+### 2026-05-29：Task checkbox replacement projection
+
+已完成：
+
+- 从 tree-sitter block tree 收集 `task_list_marker_unchecked` 和 `task_list_marker_checked` projection replacements。
+- inactive rendered projection 将 `[ ]` 显示为 `☐`，将 `[x]` 显示为 `☑`，并继续通过 replacement operation 保留 source/display offset 映射。
+- active source reveal 覆盖 task marker source range：光标进入 `[ ]` / `[x]` 时显示源码 marker，非活动行继续显示 checkbox glyph。
+- 新增 `markdown_wysiwyg` projection tests，覆盖 inactive checkbox replacement、active marker reveal 和 active projection source ranges。
+- 新增 `md_editor` rendered display-row tests，覆盖 inactive checkbox glyph 显示、active marker source reveal 和 marker 起点映射。
+
+验证：
+
+- `cargo test -p markdown_wysiwyg`：30 passed。
+- `cargo test -p md_editor rendered_display_rows_`：13 passed。
+- `cargo test -p md_editor`：188 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
+- `cargo perf-test -p md_editor -- --quiet`：第一次 run passed。mean：rendered draw large 1890.90ms，rendered cached redraw 1970.00ms，rendered resize 1911.90ms，rendered scroll large 2074.50ms，rendered cached-region scroll 2281.80ms，source draw large 1947.80ms，source cached redraw 1860.70ms，source scroll large 2093.70ms，source cached-region scroll 2232.10ms，source single-row edit large 2007.50ms，source single-row edit length-change 1986.00ms。
+- 第一次 run 中 rendered cached redraw 相对上一条完整 perf 记录超过约 5%，按性能失败标准复跑。
+- `cargo perf-test -p md_editor -- --quiet` 复跑：passed。复跑 mean：rendered draw large 2019.30ms，rendered cached redraw 1936.80ms，rendered resize 1945.60ms，rendered scroll large 2113.60ms，rendered cached-region scroll 2246.60ms，source draw large 1931.50ms，source cached redraw 1952.10ms，source scroll large 2118.90ms，source cached-region scroll 2216.40ms，source single-row edit large 1925.70ms，source single-row edit length-change 1929.70ms。
+- 原可疑的 rendered cached redraw 复跑后低于 5%；rendered scroll large 仅在复跑中略过阈值、首跑未持续，未见同一 important case 连续超过约 5% 的回退。
+
+后续仍未完成：
+
+- 完整 HTML5 named character reference 表。
+- replacement projection 的 selection/deletion 交互回归。
+- task checkbox toggle 行为。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：

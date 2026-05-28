@@ -166,6 +166,43 @@ fn rendered_display_rows_reveal_active_escape_and_entity_source() {
 }
 
 #[test]
+fn rendered_display_rows_replace_inactive_task_list_markers() {
+    let source = "- [ ] todo\n- [x] done\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+
+    let rows = display_rows_in_mode(
+        &snapshot,
+        0..2,
+        Some(&collapsed_selection(Point::new(0, 0))),
+        MarkdownEditorMode::Rendered,
+    );
+
+    assert_eq!(rows[0].text, "- \u{2610} todo");
+    assert_eq!(rows[1].text, "- \u{2611} done");
+}
+
+#[test]
+fn rendered_display_rows_reveal_active_task_list_marker_source() {
+    let source = "- [ ] todo\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+    let marker = source.find("[ ]").expect("expected task marker");
+
+    let row = display_rows_in_mode(
+        &snapshot,
+        0..1,
+        Some(&collapsed_selection(Point::new(0, marker as u32))),
+        MarkdownEditorMode::Rendered,
+    )
+    .remove(0);
+
+    assert_eq!(row.text, "- [ ] todo");
+    assert_eq!(row.source_to_display(marker), marker);
+    assert_eq!(row.display_to_source(marker), marker);
+}
+
+#[test]
 fn rendered_display_rows_keep_inline_atom_boundaries_inactive() {
     let mut buffer = Buffer::local("Before $x + y$ after\n");
     let snapshot = buffer.snapshot();
