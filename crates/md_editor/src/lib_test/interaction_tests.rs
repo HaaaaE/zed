@@ -2037,6 +2037,29 @@ fn local_edit_invalidation_stays_conservative_for_cross_row_or_rendered_edits() 
 }
 
 #[test]
+fn row_count_change_splice_preserves_rows_outside_edit() {
+    assert_eq!(
+        row_count_change_splice(
+            100,
+            101,
+            &collapsed_selection(Point::new(50, 4)),
+            &collapsed_selection(Point::new(51, 0)),
+        ),
+        Some((50..51, 2))
+    );
+
+    assert_eq!(
+        row_count_change_splice(
+            100,
+            99,
+            &collapsed_selection(Point::new(50, 0)),
+            &collapsed_selection(Point::new(49, 8)),
+        ),
+        Some((49..51, 1))
+    );
+}
+
+#[test]
 fn rendered_active_source_range_change_drops_stale_visual_row_goal_once() {
     let previous_active = 8..12;
     let current_active = 16..24;

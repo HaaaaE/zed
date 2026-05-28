@@ -218,6 +218,20 @@ work, while table structure and column widths are cached at table level.
 - Cargo validation has not been run because the current plan still carries the
   local "no cargo" constraint.
 
+### 2026-05-28, robustness fixes
+
+- Malformed pipe-table candidates now fail closed: unsafe row ranges are ignored
+  and rows without a valid delimiter no longer build a structured
+  `MarkdownTable`.
+- Added parser coverage for malformed pipe-table input staying out of the
+  structured table model.
+- Fixed a general virtual-list jump on row-count-changing edits by splicing only
+  the edited row range instead of rebuilding the entire list.
+- Added unit coverage for the row-count splice range used by newline/join-line
+  edits.
+- Cargo validation has not been run because the current plan still carries the
+  local "no cargo" constraint.
+
 ## Assumptions
 
 - First version is "structured rendering plus source editing", not full

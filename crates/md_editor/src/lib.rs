@@ -1424,8 +1424,17 @@ impl MarkdownEditor {
     ) {
         let row_count_after = self.buffer.as_text_snapshot().row_count() as usize;
         if row_count_before != row_count_after {
-            self.display_list_state
-                .splice(0..row_count_before, row_count_after);
+            if let Some((old_range, count)) = row_count_change_splice(
+                row_count_before,
+                row_count_after,
+                previous_selection,
+                &self.selection,
+            ) {
+                self.display_list_state.splice(old_range, count);
+            } else {
+                self.display_list_state
+                    .splice(0..row_count_before, row_count_after);
+            }
             if self.mode == MarkdownEditorMode::Rendered {
                 self.display_list_state.remeasure();
             }
@@ -2293,6 +2302,39 @@ fn local_source_edit_invalidation_rows(
     }
 
     Some(row..row.saturating_add(1))
+}
+
+fn row_count_change_splice(
+    row_count_before: usize,
+    row_count_after: usize,
+    previous_selection: &Selection<Point>,
+    current_selection: &Selection<Point>,
+) -> Option<(Range<usize>, usize)> {
+    if row_count_before == 0 || row_count_before == row_count_after {
+        return None;
+    }
+
+    let start = [
+        previous_selection.start.row,
+        previous_selection.end.row,
+        current_selection.start.row,
+        current_selection.end.row,
+    ]
+    .into_iter()
+    .map(|row| row as usize)
+    .min()?
+    .min(row_count_before.saturating_sub(1));
+
+    let delta = row_count_after as isize - row_count_before as isize;
+    let old_count = if delta < 0 {
+        1 + delta.unsigned_abs()
+    } else {
+        1
+    };
+    let new_count = if delta > 0 { 1 + delta as usize } else { 1 };
+    let old_end = start.saturating_add(old_count).min(row_count_before);
+
+    Some((start..old_end, new_count))
 }
 
 fn range_contains(container: &Range<usize>, candidate: &Range<usize>) -> bool {

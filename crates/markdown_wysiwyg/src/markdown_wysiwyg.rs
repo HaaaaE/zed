@@ -687,6 +687,9 @@ fn table_from_block(
 
     let header = rows.remove(0);
     let delimiter = rows.remove(0);
+    if delimiter.delimiter_marker_ranges.is_empty() {
+        return None;
+    }
     let alignments = delimiter
         .cells
         .iter()
@@ -718,7 +721,7 @@ fn table_row_from_source_row(
     row: usize,
     is_delimiter_row: bool,
 ) -> Option<MarkdownTableRow> {
-    let source_range = trim_line_end(source, line_range(source, line_starts, row));
+    let source_range = trim_line_end(source, line_range_checked(source, line_starts, row)?);
     let line = source.get(source_range.clone())?;
     let pipe_offsets = line
         .match_indices('|')
@@ -1216,6 +1219,12 @@ fn line_range(source: &str, line_starts: &[usize], row: usize) -> Range<usize> {
     start..end
 }
 
+fn line_range_checked(source: &str, line_starts: &[usize], row: usize) -> Option<Range<usize>> {
+    let start = line_starts.get(row).copied()?;
+    let end = line_starts.get(row + 1).copied().unwrap_or(source.len());
+    Some(start..end)
+}
+
 fn trim_line_end(source: &str, mut range: Range<usize>) -> Range<usize> {
     while range.end > range.start && matches!(source.as_bytes()[range.end - 1], b'\r' | b'\n') {
         range.end -= 1;
@@ -1608,6 +1617,14 @@ mod tests {
 
         assert_eq!(header_projection.hidden_ranges(), &[0..1, 4..5, 8..9]);
         assert!(body_projection.hidden_ranges().is_empty());
+    }
+
+    #[test]
+    fn malformed_pipe_table_does_not_build_structured_table() {
+        let source = "| a | b |\n| not a delimiter |\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+
+        assert!(tree.tables().is_empty());
     }
 
     #[test]
