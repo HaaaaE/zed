@@ -892,7 +892,7 @@ fn source_clipboard_keybindings_copy_paste_and_cut(cx: &mut gpui::TestAppContext
             reversed: false,
             goal: SelectionGoal::None,
         };
-        window.focus(&editor.focus_handle(cx), cx);
+        window.focus(&editor.focus_handle(cx));
         window.activate_window();
         editor
     });
@@ -939,7 +939,7 @@ fn rendered_mode_actions_update_marker_visibility(cx: &mut gpui::TestAppContext)
         let mut editor = MarkdownEditor::for_text("# Title\nBody\n", cx);
         editor.set_mode(MarkdownEditorMode::Rendered, cx);
         editor.set_cursor(Point::new(1, 0));
-        window.focus(&editor.focus_handle(cx), cx);
+        window.focus(&editor.focus_handle(cx));
         window.activate_window();
         editor
     });

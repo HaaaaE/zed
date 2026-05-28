@@ -1,5 +1,28 @@
 use super::test_support::*;
 
+fn test_text_run(len: usize) -> TextRun {
+    TextRun {
+        len,
+        font: font(EDITOR_FONT_FAMILY),
+        color: md_theme::editor_palette().text,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }
+}
+
+fn shape_test_line(cx: &mut gpui::TestAppContext, text: &str) -> gpui::ShapedLine {
+    let cx = cx.add_empty_window();
+    cx.update(|window, _| {
+        window.text_system().shape_line(
+            SharedString::from(text.to_string()),
+            px(10.),
+            &[test_text_run(text.len())],
+            None,
+        )
+    })
+}
+
 #[test]
 fn rendered_styled_segments_apply_heading_semantics() {
     let mut buffer = Buffer::local("# Title\nBody\n");
@@ -70,27 +93,17 @@ fn rendered_styled_segments_apply_inline_semantics() {
     );
 }
 
-#[test]
-fn mouse_target_for_wrapped_row_end_keeps_clicked_visual_row_goal() {
+#[gpui::test]
+fn mouse_target_for_wrapped_row_end_keeps_clicked_visual_row_goal(
+    cx: &mut gpui::TestAppContext,
+) {
     let mut buffer = Buffer::local("abcdefghij\n");
     let snapshot = buffer.snapshot();
     let Some(display_row) = display_rows(&snapshot, 0..1).into_iter().next() else {
         panic!("expected display row");
     };
     let text = display_row.text.clone();
-    let text_system = gpui::WindowTextSystem::new(std::sync::Arc::new(gpui::TextSystem::new(
-        std::sync::Arc::new(gpui::NoopTextSystem::new()),
-    )));
-    let shaped_line = text_system.shape_line(
-        SharedString::from(text.clone()),
-        px(10.),
-        &[TextRun {
-            len: text.len(),
-            font: font(EDITOR_FONT_FAMILY),
-            ..Default::default()
-        }],
-        None,
-    );
+    let shaped_line = shape_test_line(cx, &text);
     let first_visual_row = VisualDisplayRow {
         display_range: 0..5,
         line_start_x: px(0.),
@@ -142,27 +155,15 @@ fn mouse_target_for_wrapped_row_end_keeps_clicked_visual_row_goal() {
     );
 }
 
-#[test]
-fn mouse_target_for_wrapped_row_uses_visual_row_local_x() {
+#[gpui::test]
+fn mouse_target_for_wrapped_row_uses_visual_row_local_x(cx: &mut gpui::TestAppContext) {
     let mut buffer = Buffer::local("abcdefghij\n");
     let snapshot = buffer.snapshot();
     let Some(display_row) = display_rows(&snapshot, 0..1).into_iter().next() else {
         panic!("expected display row");
     };
     let text = display_row.text.clone();
-    let text_system = gpui::WindowTextSystem::new(std::sync::Arc::new(gpui::TextSystem::new(
-        std::sync::Arc::new(gpui::NoopTextSystem::new()),
-    )));
-    let shaped_line = text_system.shape_line(
-        SharedString::from(text.clone()),
-        px(10.),
-        &[TextRun {
-            len: text.len(),
-            font: font(EDITOR_FONT_FAMILY),
-            ..Default::default()
-        }],
-        None,
-    );
+    let shaped_line = shape_test_line(cx, &text);
     let second_visual_row = VisualDisplayRow {
         display_range: 5..text.len(),
         line_start_x: shaped_line.x_for_index(5),
@@ -397,22 +398,10 @@ fn selection_bounds_skip_non_empty_visual_row_boundary_touch() {
     );
 }
 
-#[test]
-fn selection_bounds_are_relative_to_each_wrapped_visual_row() {
+#[gpui::test]
+fn selection_bounds_are_relative_to_each_wrapped_visual_row(cx: &mut gpui::TestAppContext) {
     let text = "abcdefghijklmno".to_string();
-    let text_system = gpui::WindowTextSystem::new(std::sync::Arc::new(gpui::TextSystem::new(
-        std::sync::Arc::new(gpui::NoopTextSystem::new()),
-    )));
-    let shaped_line = text_system.shape_line(
-        SharedString::from(text.clone()),
-        px(10.),
-        &[TextRun {
-            len: text.len(),
-            font: font(EDITOR_FONT_FAMILY),
-            ..Default::default()
-        }],
-        None,
-    );
+    let shaped_line = shape_test_line(cx, &text);
     let fragments = vec![DisplayInlineFragment::Text(StyledDisplaySegment {
         display_range: 0..text.len(),
         text,
