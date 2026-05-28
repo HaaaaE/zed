@@ -203,6 +203,15 @@ work, while table structure and column widths are cached at table level.
 - Cargo validation has not been run because the current plan still carries the
   local "no cargo" constraint.
 
+### 2026-05-28, table interaction coverage
+
+- Added rendered-mode interaction coverage for inactive table-row mouse target
+  mapping into the matching cell source range.
+- Added vertical movement coverage for moving from an active revealed table row
+  into neighboring table rows while preserving the rendered-mode path.
+- Cargo validation has not been run because the current plan still carries the
+  local "no cargo" constraint.
+
 ## Assumptions
 
 - First version is "structured rendering plus source editing", not full

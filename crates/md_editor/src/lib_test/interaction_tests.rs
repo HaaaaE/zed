@@ -518,6 +518,72 @@ fn rendered_table_cells_wrap_to_available_width(cx: &mut gpui::TestAppContext) {
     });
 }
 
+#[gpui::test]
+fn rendered_table_mouse_target_maps_to_cell_source(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("| a | b |\n| - | - |\nafter\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(2, 0));
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
+            .expect("display row should exist");
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            text_wrap_width(window),
+            false,
+            window,
+            cx,
+        );
+        let DisplayRowLayout::TableRow(table_layout) = row_layout else {
+            panic!("expected structured table row layout");
+        };
+
+        let second_cell_x = gutter_width() + table_layout.cells[1].x + px(10.);
+        let (point, _) = table_layout.mouse_target_for_x(&snapshot, second_cell_x);
+        assert_eq!(point.row, 0);
+        assert!(
+            point.column >= 6 && point.column <= 7,
+            "expected target near second cell content, got {point:?}"
+        );
+    });
+}
+
+#[gpui::test]
+fn rendered_table_vertical_movement_enters_neighboring_table_rows(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor =
+            MarkdownEditor::for_text("| alpha | beta |\n| - | - |\n| one | two |\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(0, 4));
+        editor.move_down(&MoveDown, window, cx);
+        assert_eq!(editor.cursor().row, 1);
+
+        editor.move_down(&MoveDown, window, cx);
+        assert_eq!(editor.cursor().row, 2);
+    });
+}
+
 #[cfg(perf_enabled)]
 #[gpui::test]
 fn rendered_display_row_cache_hit_skips_syntax_queries(cx: &mut gpui::TestAppContext) {
