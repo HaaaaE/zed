@@ -91,7 +91,25 @@
 
 - 完整 HTML5 named character reference 表。
 - task checkbox replacement projection。
-- replacement projection 的 editor 级 cursor/selection/deletion tests。
+- replacement projection 的 selection/deletion 交互回归。
+
+### 2026-05-28：Replacement projection 的 editor display-row 回归
+
+已完成：
+
+- 新增 `md_editor` rendered display row tests，覆盖 inactive escape/entity replacement 的显示文本。
+- 覆盖 replacement source/display offset 映射：display offset 落在 replacement 起点时映射回 source replacement 起点。
+- 覆盖 active source reveal：光标进入 escape/entity source range 时显示源码，其它 replacement 仍保持 rendered 显示。
+
+验证：
+
+- `cargo test -p md_editor rendered_display_rows_`：11 passed。
+- `cargo test -p md_editor`：186 passed，保留既有 `move_selection_right` dead_code warning。
+
+后续仍未完成：
+
+- replacement projection 的 selection/deletion 交互回归。
+- task checkbox replacement projection 及对应 editor tests。
 
 ## 关键改动
 

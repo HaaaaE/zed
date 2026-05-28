@@ -116,6 +116,56 @@ fn rendered_display_rows_reveal_active_inline_markers() {
 }
 
 #[test]
+fn rendered_display_rows_replace_inactive_escapes_and_entities() {
+    let source = "Escape \\* &amp; end\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+    let escaped = source.find("\\*").expect("expected escape");
+    let entity = source.find("&amp;").expect("expected entity");
+
+    let row = display_rows_in_mode(
+        &snapshot,
+        0..1,
+        Some(&collapsed_selection(Point::new(0, 0))),
+        MarkdownEditorMode::Rendered,
+    )
+    .remove(0);
+
+    assert_eq!(row.text, "Escape * & end");
+    assert_eq!(row.source_to_display(escaped), "Escape ".len());
+    assert_eq!(row.display_to_source("Escape ".len()), escaped);
+    assert_eq!(row.source_to_display(entity), "Escape * ".len());
+    assert_eq!(row.display_to_source("Escape * ".len()), entity);
+}
+
+#[test]
+fn rendered_display_rows_reveal_active_escape_and_entity_source() {
+    let source = "Escape \\* &amp; end\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+    let escaped = source.find("\\*").expect("expected escape");
+    let entity = source.find("&amp;").expect("expected entity");
+
+    let escape_row = display_rows_in_mode(
+        &snapshot,
+        0..1,
+        Some(&collapsed_selection(Point::new(0, escaped as u32))),
+        MarkdownEditorMode::Rendered,
+    )
+    .remove(0);
+    let entity_row = display_rows_in_mode(
+        &snapshot,
+        0..1,
+        Some(&collapsed_selection(Point::new(0, entity as u32))),
+        MarkdownEditorMode::Rendered,
+    )
+    .remove(0);
+
+    assert_eq!(escape_row.text, "Escape \\* & end");
+    assert_eq!(entity_row.text, "Escape * &amp; end");
+}
+
+#[test]
 fn rendered_display_rows_keep_inline_atom_boundaries_inactive() {
     let mut buffer = Buffer::local("Before $x + y$ after\n");
     let snapshot = buffer.snapshot();
