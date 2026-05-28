@@ -146,6 +146,24 @@ work, while table structure and column widths are cached at table level.
 - Cargo validation has not been run because the current plan still carries the
   local "no cargo" constraint.
 
+### 2026-05-28, editor layout skeleton
+
+- Added an internal `md_editor::table` module with `DisplayTableRowLayout` and
+  per-cell layout data.
+- Added `DisplayRowLayout::TableRow` and wired it through rendered row layout
+  caching, row height calculation, rendering, mouse hit testing, Home/End, and
+  vertical movement target mapping.
+- Inactive rendered table source rows now choose structured table row layout;
+  the active table source row still falls back to existing text layout/editing.
+- Adjusted table projection so entering one table source row reveals only that
+  row while other rows in the same table remain inactive; inline Markdown
+  markers in the active table row are also revealed with the row source.
+- Added a rendered-mode interaction test for inactive structured table row
+  layout and updated the old pipe-table text-layout test to cover the active
+  row case.
+- Cargo validation has not been run because the current plan still carries the
+  local "no cargo" constraint.
+
 ## Assumptions
 
 - First version is "structured rendering plus source editing", not full

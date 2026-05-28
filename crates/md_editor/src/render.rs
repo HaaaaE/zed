@@ -67,6 +67,7 @@ pub(super) fn render_display_row_layout(
         DisplayRowLayout::Block(block_layout) => {
             block_layout.render(snapshot, selection, row_style, cx)
         }
+        DisplayRowLayout::TableRow(table_layout) => table_layout.render(cx),
     }
 }
 

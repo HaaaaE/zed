@@ -1182,7 +1182,7 @@ fn fenced_code_stays_text_layout_in_rendered_mode() {
 }
 
 #[test]
-fn pipe_table_stays_text_layout_in_rendered_mode() {
+fn active_pipe_table_row_stays_text_layout_in_rendered_mode() {
     let source = "| a | b |\n| - | - |\n| 1 | 2 |\n";
     let mut buffer = Buffer::local(source);
     let snapshot = buffer.snapshot();

@@ -11,8 +11,9 @@ use md_text::{Point, Selection};
 use md_theme::{default_row_metrics, editor_palette, gutter_width, heading_row_metrics};
 
 use super::{
-    DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, InlineAtomMeasurementState,
-    MarkdownEditorMode, RowDisplayStyle, active_source_range_for_selection,
+    DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, DisplayTableRowLayout,
+    InlineAtomMeasurementState, MarkdownEditorMode, RowDisplayStyle,
+    active_source_range_for_selection,
     block::DisplayBlockLayout,
     display_model::{DisplayRow, DisplayTextStyle, StyledDisplaySegment},
     inactive_rendered_element_source_ranges_for_selection, ranges_overlap,
@@ -70,6 +71,7 @@ impl DisplayRowTextLayout {
 pub(super) enum DisplayRowLayout {
     Text(Arc<DisplayRowTextLayout>),
     Block(Arc<DisplayBlockLayout>),
+    TableRow(Arc<DisplayTableRowLayout>),
 }
 
 impl DisplayRowLayout {
@@ -77,6 +79,7 @@ impl DisplayRowLayout {
         match self {
             Self::Text(text_layout) => text_layout.cacheable,
             Self::Block(block_layout) => block_layout.cacheable(),
+            Self::TableRow(table_layout) => table_layout.cacheable(),
         }
     }
 
@@ -84,6 +87,7 @@ impl DisplayRowLayout {
         match self {
             Self::Text(text_layout) => row_style.min_height.max(text_layout.height(row_style)),
             Self::Block(block_layout) => row_style.min_height.max(block_layout.height()),
+            Self::TableRow(table_layout) => row_style.min_height.max(table_layout.height()),
         }
     }
 
@@ -91,6 +95,7 @@ impl DisplayRowLayout {
         match self {
             Self::Text(text_layout) => text_layout.height(row_style),
             Self::Block(block_layout) => row_style.min_height.max(block_layout.height()),
+            Self::TableRow(table_layout) => row_style.min_height.max(table_layout.height()),
         }
     }
 }

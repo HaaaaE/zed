@@ -382,6 +382,63 @@ fn rendered_interaction_layouts_cache_plain_text_rows(cx: &mut gpui::TestAppCont
     });
 }
 
+#[gpui::test]
+fn rendered_table_rows_use_structured_layout_when_inactive(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("| a | b |\n| :- | -: |\n| 1 | 2 |\nafter\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(3, 0));
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
+            .expect("display row should exist");
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let wrap_width = text_wrap_width(window);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            wrap_width,
+            false,
+            window,
+            cx,
+        );
+
+        let DisplayRowLayout::TableRow(table_layout) = row_layout else {
+            panic!("expected structured table row layout");
+        };
+        assert!(table_layout.is_header);
+        assert!(!table_layout.is_delimiter);
+        assert_eq!(
+            table_layout
+                .cells
+                .iter()
+                .map(|cell| cell.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+        assert_eq!(
+            table_layout.cells[0].alignment,
+            MarkdownTableAlignment::Left
+        );
+        assert_eq!(
+            table_layout.cells[1].alignment,
+            MarkdownTableAlignment::Right
+        );
+    });
+}
+
 #[cfg(perf_enabled)]
 #[gpui::test]
 fn rendered_display_row_cache_hit_skips_syntax_queries(cx: &mut gpui::TestAppContext) {

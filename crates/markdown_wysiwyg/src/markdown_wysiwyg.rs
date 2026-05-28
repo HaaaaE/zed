@@ -317,11 +317,21 @@ impl MarkdownSyntaxTree {
     ) -> MarkdownProjectionMap {
         let mut hidden_ranges = Vec::new();
         for block in self.blocks_in_source_range(visible_source_range.clone()) {
-            if source_range_is_active(
-                &block.source_range,
-                active_source_range.as_ref(),
-                inactive_source_ranges,
-            ) {
+            let block_is_active = if block.kind == MarkdownBlockKind::PipeTable {
+                table_row_source_range_is_active(
+                    &block.source_range,
+                    &visible_source_range,
+                    active_source_range.as_ref(),
+                    inactive_source_ranges,
+                )
+            } else {
+                source_range_is_active(
+                    &block.source_range,
+                    active_source_range.as_ref(),
+                    inactive_source_ranges,
+                )
+            };
+            if block_is_active {
                 continue;
             }
 
@@ -334,12 +344,25 @@ impl MarkdownSyntaxTree {
             }
         }
 
-        for span in self.inline_spans_in_source_range(visible_source_range.clone()) {
-            if source_range_is_active(
-                &span.source_range,
+        let active_table_row = self.tables.iter().any(|table| {
+            table_row_source_range_is_active(
+                &table.source_range,
+                &visible_source_range,
                 active_source_range.as_ref(),
                 inactive_source_ranges,
-            ) {
+            )
+        });
+        for span in self.inline_spans_in_source_range(visible_source_range.clone()) {
+            let span_is_active = if active_table_row {
+                ranges_overlap(&span.source_range, &visible_source_range)
+            } else {
+                source_range_is_active(
+                    &span.source_range,
+                    active_source_range.as_ref(),
+                    inactive_source_ranges,
+                )
+            };
+            if span_is_active {
                 continue;
             }
 
@@ -1247,6 +1270,26 @@ fn source_range_is_active(
         .any(|inactive_source_range| range_contains(inactive_source_range, source_range))
 }
 
+fn table_row_source_range_is_active(
+    table_source_range: &Range<usize>,
+    row_source_range: &Range<usize>,
+    active_source_range: Option<&Range<usize>>,
+    inactive_source_ranges: &[Range<usize>],
+) -> bool {
+    let Some(active_source_range) = active_source_range else {
+        return false;
+    };
+    if !ranges_overlap(table_source_range, active_source_range)
+        || !ranges_overlap(row_source_range, active_source_range)
+    {
+        return false;
+    }
+
+    !inactive_source_ranges
+        .iter()
+        .any(|inactive_source_range| range_contains(inactive_source_range, row_source_range))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1551,6 +1594,20 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["", "b", ""]
         );
+    }
+
+    #[test]
+    fn pipe_table_projection_reveals_only_active_source_row() {
+        let source = "| a | b |\n| - | - |\n| **1** | 2 |\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let body_start = source.find("| **1").expect("expected body row");
+        let header_projection =
+            tree.projection_for_visible_rows(0..1, Some(body_start..body_start + 1));
+        let body_projection =
+            tree.projection_for_visible_rows(2..3, Some(body_start..body_start + 1));
+
+        assert_eq!(header_projection.hidden_ranges(), &[0..1, 4..5, 8..9]);
+        assert!(body_projection.hidden_ranges().is_empty());
     }
 
     #[test]

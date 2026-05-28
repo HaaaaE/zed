@@ -12,6 +12,8 @@ use gpui::{
     KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Render, SharedString,
     TextAlign, Window, div, prelude::*, px,
 };
+#[cfg(test)]
+use markdown_wysiwyg::MarkdownTableAlignment;
 use markdown_wysiwyg::{
     MarkdownBlock, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownProjectionMap,
 };
@@ -33,6 +35,7 @@ mod markdown_image;
 mod render;
 mod rendered_element;
 mod selection;
+mod table;
 mod virtual_list;
 mod visual_row;
 
@@ -111,15 +114,16 @@ pub use selection::{
     move_to_end_of_line, select_left, select_right, select_to_beginning_of_line,
     select_to_end_of_line, select_to_point, select_vertical, selection_byte_range,
 };
+use table::DisplayTableRowLayout;
+#[cfg(test)]
+use virtual_list::ListOffset;
+use virtual_list::{ListAlignment, ListSizingBehavior, MdListState, md_list};
 use visual_row::{
     VisualLineBoundary, desired_visual_x, display_x_for_offset, point_for_display_offset,
     point_for_display_offset_in_text_snapshot, point_for_visual_row_x,
     point_for_visual_row_x_in_text_snapshot, visual_horizontal_goal,
     visual_line_boundary_for_caret, visual_row_index_for_caret,
 };
-use virtual_list::{ListAlignment, ListSizingBehavior, MdListState, md_list};
-#[cfg(test)]
-use virtual_list::ListOffset;
 #[cfg(test)]
 use visual_row::{
     source_offset_for_display_offset, visual_row_contains_caret, visual_row_index_containing_caret,
@@ -945,6 +949,9 @@ impl MarkdownEditor {
             DisplayRowLayout::Block(block_layout) => {
                 Some(block_layout.line_boundary_target(snapshot, boundary))
             }
+            DisplayRowLayout::TableRow(table_layout) => {
+                Some(table_layout.line_boundary_target(snapshot, boundary))
+            }
         }
     }
 
@@ -1025,6 +1032,10 @@ impl MarkdownEditor {
                 selection.goal,
                 block_layout.visible_x_for_source_offset(source_offset),
             ),
+            DisplayRowLayout::TableRow(table_layout) => desired_visual_x(
+                selection.goal,
+                table_layout.visible_x_for_source_offset(source_offset),
+            ),
         };
 
         let target_row = if delta_visual_rows.is_negative() {
@@ -1079,6 +1090,10 @@ impl MarkdownEditor {
             }
             DisplayRowLayout::Block(block_layout) => Some((
                 block_layout.point_for_x(snapshot, desired_x),
+                visual_horizontal_goal(0, desired_x),
+            )),
+            DisplayRowLayout::TableRow(table_layout) => Some((
+                table_layout.point_for_x(snapshot, desired_x),
                 visual_horizontal_goal(0, desired_x),
             )),
         }
@@ -1529,6 +1544,9 @@ impl MarkdownEditor {
                 clip_cursor(&snapshot, selection.head()),
                 SelectionGoal::None,
             ),
+            DisplayRowLayout::TableRow(table_layout) => {
+                table_layout.mouse_target_for_x(&snapshot, event.position.x)
+            }
         };
         let previous_selection = self.selection.clone();
         self.selection = if event.modifiers.shift {
@@ -1606,6 +1624,9 @@ impl MarkdownEditor {
                 clip_cursor(&snapshot, selection.head()),
                 SelectionGoal::None,
             ),
+            DisplayRowLayout::TableRow(table_layout) => {
+                table_layout.mouse_target_for_x(&snapshot, event.position.x)
+            }
         };
         let previous_selection = self.selection.clone();
         self.selection = select_to_point_with_goal(&snapshot, &self.selection, point, goal);
@@ -1646,6 +1667,45 @@ impl MarkdownEditor {
 
         let snapshot = self.buffer.snapshot();
         let (point, goal) = block_layout.mouse_target_for_x(&snapshot, event.position.x);
+        let previous_selection = self.selection.clone();
+        self.selection = select_to_point_with_goal(&snapshot, &self.selection, point, goal);
+        self.notify_after_selection_change(&previous_selection, cx);
+    }
+
+    fn mouse_left_down_on_table_row(
+        &mut self,
+        table_layout: &DisplayTableRowLayout,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.focus(&self.focus_handle.clone());
+        self.is_selecting_with_mouse = true;
+
+        let snapshot = self.buffer.snapshot();
+        let (point, goal) = table_layout.mouse_target_for_x(&snapshot, event.position.x);
+        let previous_selection = self.selection.clone();
+        self.selection = if event.modifiers.shift {
+            select_to_point_with_goal(&snapshot, &self.selection, point, goal)
+        } else {
+            collapsed_selection_with_goal(point, goal)
+        };
+        self.notify_after_selection_change(&previous_selection, cx);
+    }
+
+    fn mouse_move_on_table_row(
+        &mut self,
+        table_layout: &DisplayTableRowLayout,
+        event: &MouseMoveEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.is_selecting_with_mouse || event.pressed_button != Some(MouseButton::Left) {
+            return;
+        }
+
+        let snapshot = self.buffer.snapshot();
+        let (point, goal) = table_layout.mouse_target_for_x(&snapshot, event.position.x);
         let previous_selection = self.selection.clone();
         self.selection = select_to_point_with_goal(&snapshot, &self.selection, point, goal);
         self.notify_after_selection_change(&previous_selection, cx);

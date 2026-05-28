@@ -253,7 +253,16 @@ impl MarkdownEditor {
         {
             self.layout_computation_counts.row_layouts_created += 1;
         }
-        let layout = if let Some(block_layout) = DisplayBlockLayout::for_display_row(
+        let layout = if let Some(table_layout) = super::DisplayTableRowLayout::for_display_row(
+            snapshot,
+            display_row,
+            selection,
+            mode,
+            wrap_width,
+            row_style,
+        ) {
+            DisplayRowLayout::TableRow(Arc::new(table_layout))
+        } else if let Some(block_layout) = DisplayBlockLayout::for_display_row(
             snapshot,
             display_row,
             selection,
