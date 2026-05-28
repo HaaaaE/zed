@@ -475,6 +475,49 @@ fn rendered_table_rows_use_structured_layout_when_inactive(cx: &mut gpui::TestAp
     });
 }
 
+#[gpui::test]
+fn rendered_table_cells_wrap_to_available_width(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(120.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor =
+            MarkdownEditor::for_text("| longwordlongwordlongword |\n| - |\nafter\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(2, 0));
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
+            .expect("display row should exist");
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let wrap_width = text_wrap_width(window);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            wrap_width,
+            false,
+            window,
+            cx,
+        );
+
+        let DisplayRowLayout::TableRow(table_layout) = row_layout else {
+            panic!("expected structured table row layout");
+        };
+        assert!(table_layout.width <= wrap_width);
+        assert!(table_layout.cells[0].wrapped_lines > 1);
+        assert!(table_layout.height() > row_style.line_height);
+    });
+}
+
 #[cfg(perf_enabled)]
 #[gpui::test]
 fn rendered_display_row_cache_hit_skips_syntax_queries(cx: &mut gpui::TestAppContext) {

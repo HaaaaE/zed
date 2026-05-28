@@ -54,6 +54,7 @@ pub(super) struct DisplayTableCellLayout {
     pub(super) content_range: Range<usize>,
     pub(super) text: String,
     pub(super) segments: Vec<StyledDisplaySegment>,
+    pub(super) wrapped_lines: usize,
     pub(super) x: gpui::Pixels,
     pub(super) width: gpui::Pixels,
     pub(super) alignment: MarkdownTableAlignment,
@@ -130,11 +131,13 @@ impl DisplayTableRowLayout {
                     .copied()
                     .unwrap_or(TABLE_MIN_CELL_WIDTH);
                 let (text, segments) = table_cell_display(snapshot, cell);
+                let wrapped_lines = wrapped_line_count(&text, width, row_style);
                 let layout = DisplayTableCellLayout {
                     source_range: cell.source_range.clone(),
                     content_range: cell.content_range.clone(),
                     text,
                     segments,
+                    wrapped_lines,
                     x,
                     width,
                     alignment: table.alignments.get(column).copied().unwrap_or_default(),
@@ -147,7 +150,14 @@ impl DisplayTableRowLayout {
         let height = if is_delimiter {
             (row_style.line_height * 0.45).max(px(6.))
         } else {
-            row_style.line_height + TABLE_CELL_VERTICAL_PADDING * 2. + TABLE_BORDER_WIDTH
+            let line_count = cells
+                .iter()
+                .map(|cell| cell.wrapped_lines)
+                .max()
+                .unwrap_or(1);
+            row_style.line_height * line_count as f32
+                + TABLE_CELL_VERTICAL_PADDING * 2.
+                + TABLE_BORDER_WIDTH
         };
 
         Self {
@@ -229,7 +239,11 @@ impl DisplayTableRowLayout {
         )
     }
 
-    pub(super) fn render(&self, cx: &mut Context<MarkdownEditor>) -> Vec<gpui::AnyElement> {
+    pub(super) fn render(
+        &self,
+        row_style: RowDisplayStyle,
+        cx: &mut Context<MarkdownEditor>,
+    ) -> Vec<gpui::AnyElement> {
         let mouse_down_layout = self.clone();
         let mouse_move_layout = self.clone();
         let palette = editor_palette();
@@ -260,7 +274,12 @@ impl DisplayTableRowLayout {
             );
         } else {
             for cell in &self.cells {
-                row = row.child(render_table_cell(cell, self.is_header, self.height));
+                row = row.child(render_table_cell(
+                    cell,
+                    self.is_header,
+                    self.height,
+                    row_style,
+                ));
             }
         }
 
@@ -326,14 +345,14 @@ fn render_table_cell(
     cell: &DisplayTableCellLayout,
     is_header: bool,
     height: gpui::Pixels,
+    row_style: RowDisplayStyle,
 ) -> gpui::AnyElement {
     let palette = editor_palette();
     let mut content = div()
         .h_full()
         .w_full()
         .px(TABLE_CELL_HORIZONTAL_PADDING)
-        .flex()
-        .items_center()
+        .line_height(row_style.line_height)
         .text_color(palette.text);
     content = match cell.alignment {
         MarkdownTableAlignment::Left => content,
@@ -402,6 +421,24 @@ fn table_column_widths<'a>(
 
 fn table_cell_display_text(snapshot: &BufferSnapshot, cell: &MarkdownTableCell) -> String {
     table_cell_display(snapshot, cell).0
+}
+
+fn wrapped_line_count(text: &str, width: gpui::Pixels, row_style: RowDisplayStyle) -> usize {
+    if text.is_empty() {
+        return 1;
+    }
+
+    let char_width = (f32::from(row_style.text_size) * 0.55).max(1.);
+    let content_width = f32::from((width - TABLE_CELL_HORIZONTAL_PADDING * 2.).max(px(1.)));
+    let chars_per_line = (content_width / char_width).floor().max(1.) as usize;
+
+    text.split_whitespace()
+        .map(|word| {
+            let chars = word.chars().count().max(1);
+            (chars + chars_per_line - 1) / chars_per_line
+        })
+        .sum::<usize>()
+        .max(1)
 }
 
 fn table_cell_display(

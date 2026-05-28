@@ -191,6 +191,18 @@ work, while table structure and column widths are cached at table level.
 - Cargo validation has not been run because the current plan still carries the
   local "no cargo" constraint.
 
+### 2026-05-28, table cell wrapping
+
+- Added width-based wrapped-line estimation for table cells after column shrink.
+- Table row height now grows with the maximum wrapped line count among cells in
+  the source row.
+- Table cell rendering now allows normal text wrapping instead of forcing a
+  single nowrap flex line.
+- Added a rendered-mode test covering column shrink to wrap width and row height
+  growth for a long table cell.
+- Cargo validation has not been run because the current plan still carries the
+  local "no cargo" constraint.
+
 ## Assumptions
 
 - First version is "structured rendering plus source editing", not full
