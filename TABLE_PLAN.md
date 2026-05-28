@@ -201,8 +201,12 @@ work, while table structure and column widths are cached at table level.
 - Adjusted cell width estimation conservatively and clipped cell contents to
   avoid single-character overflow artifacts when rendered text is wider than the
   estimate.
+- Replaced the character-count wrapping heuristic with GPUI text measurement for
+  both preferred cell widths and wrapped line counts, so space-separated words
+  pack into actual visual lines instead of inflating table row height.
 - Added a rendered-mode test covering column shrink to wrap width and row height
   growth for a long table cell.
+- Added coverage for measured word wrapping to avoid huge blank table rows.
 - Cargo validation has not been run because the current plan still carries the
   local "no cargo" constraint.
 

@@ -1,6 +1,8 @@
 use std::ops::Range;
 
-use gpui::{Context, IntoElement, MouseButton, SharedString, TextAlign, div, prelude::*, px};
+use gpui::{
+    Context, IntoElement, MouseButton, SharedString, TextAlign, Window, div, prelude::*, px,
+};
 use markdown_wysiwyg::{
     MarkdownTable, MarkdownTableAlignment, MarkdownTableCell, MarkdownTableRow,
 };
@@ -11,7 +13,7 @@ use md_theme::{editor_palette, gutter_width};
 use super::{
     MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, VisualLineBoundary, clip_cursor,
     display_model::{DisplayRow, DisplayTextStyle, StyledDisplaySegment},
-    layout::inline_style,
+    layout::{inline_style, text_runs_for_segments},
     range_contains, render_text_piece, rendered_element_source_range_is_active,
     visual_horizontal_goal,
 };
@@ -20,7 +22,6 @@ const TABLE_CELL_HORIZONTAL_PADDING: gpui::Pixels = px(8.);
 const TABLE_CELL_VERTICAL_PADDING: gpui::Pixels = px(3.);
 const TABLE_BORDER_WIDTH: gpui::Pixels = px(1.);
 const TABLE_MIN_CELL_WIDTH: gpui::Pixels = px(32.);
-const TABLE_AVERAGE_CHAR_WIDTH_FACTOR: f32 = 0.75;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct TableLayoutCacheKey {
@@ -87,6 +88,7 @@ impl DisplayTableRowLayout {
         mode: MarkdownEditorMode,
         wrap_width: gpui::Pixels,
         row_style: RowDisplayStyle,
+        window: &mut Window,
     ) -> Option<Self> {
         if mode != MarkdownEditorMode::Rendered
             || rendered_element_source_range_is_active(
@@ -101,13 +103,14 @@ impl DisplayTableRowLayout {
         let (table, table_row) = snapshot
             .syntax_tree()
             .table_row_for_source_row(display_row.row as usize)?;
-        let table_layout = DisplayTableLayout::new(snapshot, table, wrap_width, row_style);
+        let table_layout = DisplayTableLayout::new(snapshot, table, wrap_width, row_style, window);
         Some(Self::new(
             snapshot,
             table,
             table_row,
             &table_layout,
             row_style,
+            window,
         ))
     }
 
@@ -117,6 +120,7 @@ impl DisplayTableRowLayout {
         table_row: &MarkdownTableRow,
         table_layout: &DisplayTableLayout,
         row_style: RowDisplayStyle,
+        window: &mut Window,
     ) -> Self {
         let is_header = table.header.row == table_row.row;
         let is_delimiter = table.delimiter.row == table_row.row;
@@ -132,7 +136,7 @@ impl DisplayTableRowLayout {
                     .copied()
                     .unwrap_or(TABLE_MIN_CELL_WIDTH);
                 let (text, segments) = table_cell_display(snapshot, cell);
-                let wrapped_lines = wrapped_line_count(&text, width, row_style);
+                let wrapped_lines = wrapped_line_count(&text, &segments, width, row_style, window);
                 let layout = DisplayTableCellLayout {
                     source_range: cell.source_range.clone(),
                     content_range: cell.content_range.clone(),
@@ -328,8 +332,10 @@ impl DisplayTableLayout {
         table: &MarkdownTable,
         wrap_width: gpui::Pixels,
         row_style: RowDisplayStyle,
+        window: &mut Window,
     ) -> Self {
-        let column_widths = table_column_widths(snapshot, table.rows(), wrap_width, row_style);
+        let column_widths =
+            table_column_widths(snapshot, table.rows(), wrap_width, row_style, window);
         let width = column_widths
             .iter()
             .fold(px(0.), |sum, width| sum + *width)
@@ -395,16 +401,12 @@ fn table_column_widths<'a>(
     rows: impl Iterator<Item = &'a MarkdownTableRow>,
     wrap_width: gpui::Pixels,
     row_style: RowDisplayStyle,
+    window: &mut Window,
 ) -> Vec<gpui::Pixels> {
     let mut widths: Vec<gpui::Pixels> = Vec::new();
     for row in rows {
         for (column, cell) in row.cells.iter().enumerate() {
-            let text = table_cell_display_text(snapshot, cell);
-            let preferred = px(text.chars().count() as f32
-                * f32::from(row_style.text_size)
-                * TABLE_AVERAGE_CHAR_WIDTH_FACTOR)
-                + TABLE_CELL_HORIZONTAL_PADDING * 2.
-                + TABLE_BORDER_WIDTH;
+            let preferred = table_cell_preferred_width(snapshot, cell, row_style, window);
             if widths.len() <= column {
                 widths.push(TABLE_MIN_CELL_WIDTH.max(preferred));
             } else {
@@ -423,25 +425,56 @@ fn table_column_widths<'a>(
     widths
 }
 
-fn table_cell_display_text(snapshot: &BufferSnapshot, cell: &MarkdownTableCell) -> String {
-    table_cell_display(snapshot, cell).0
+fn table_cell_preferred_width(
+    snapshot: &BufferSnapshot,
+    cell: &MarkdownTableCell,
+    row_style: RowDisplayStyle,
+    window: &mut Window,
+) -> gpui::Pixels {
+    let (text, segments) = table_cell_display(snapshot, cell);
+    if text.is_empty() {
+        return TABLE_MIN_CELL_WIDTH;
+    }
+
+    let text_runs = text_runs_for_segments(&segments);
+    let shaped_line = window.text_system().shape_line(
+        SharedString::from(text),
+        row_style.text_size,
+        &text_runs,
+        None,
+    );
+    shaped_line.width + TABLE_CELL_HORIZONTAL_PADDING * 2. + TABLE_BORDER_WIDTH
 }
 
-fn wrapped_line_count(text: &str, width: gpui::Pixels, row_style: RowDisplayStyle) -> usize {
+fn wrapped_line_count(
+    text: &str,
+    segments: &[StyledDisplaySegment],
+    width: gpui::Pixels,
+    row_style: RowDisplayStyle,
+    window: &mut Window,
+) -> usize {
     if text.is_empty() {
         return 1;
     }
 
-    let char_width = (f32::from(row_style.text_size) * TABLE_AVERAGE_CHAR_WIDTH_FACTOR).max(1.);
-    let content_width = f32::from((width - TABLE_CELL_HORIZONTAL_PADDING * 2.).max(px(1.)));
-    let chars_per_line = (content_width / char_width).floor().max(1.) as usize;
-
-    text.split_whitespace()
-        .map(|word| {
-            let chars = word.chars().count().max(1);
-            (chars + chars_per_line - 1) / chars_per_line
+    let content_width = (width - TABLE_CELL_HORIZONTAL_PADDING * 2.).max(px(1.));
+    let text_runs = text_runs_for_segments(segments);
+    window
+        .text_system()
+        .shape_text(
+            SharedString::from(text.to_string()),
+            row_style.text_size,
+            &text_runs,
+            Some(content_width),
+            None,
+        )
+        .ok()
+        .and_then(|wrapped_lines| {
+            wrapped_lines
+                .first()
+                .map(|wrapped_line| wrapped_line.wrap_boundaries().len() + 1)
         })
-        .sum::<usize>()
+        .unwrap_or(1)
         .max(1)
 }
 

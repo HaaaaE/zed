@@ -340,7 +340,7 @@ impl MarkdownEditor {
             table_layout.clone()
         } else {
             let table_layout = Arc::new(super::DisplayTableLayout::new(
-                snapshot, table, wrap_width, row_style,
+                snapshot, table, wrap_width, row_style, window,
             ));
             self.table_layout_cache
                 .insert(cache_key, table_layout.clone());
@@ -353,6 +353,7 @@ impl MarkdownEditor {
             table_row,
             &table_layout,
             row_style,
+            window,
         ))
     }
 
