@@ -176,6 +176,21 @@ work, while table structure and column widths are cached at table level.
 - Cargo validation has not been run because the current plan still carries the
   local "no cargo" constraint.
 
+### 2026-05-28, table cell inline fallback
+
+- Table cell display text now applies the existing Markdown inline span
+  projection rules inside cells: inline markers are hidden for inactive table
+  rendering while cell text remains visible.
+- Basic inline styles inside cells now flow through `StyledDisplaySegment` and
+  the existing text-piece renderer for bold, links, code, emphasis,
+  strikethrough, images, and math fallback text.
+- Column preferred widths now use projected cell display text rather than raw
+  Markdown marker text.
+- Extended the rendered table row test to assert bold/link inline styling inside
+  inactive structured table cells.
+- Cargo validation has not been run because the current plan still carries the
+  local "no cargo" constraint.
+
 ## Assumptions
 
 - First version is "structured rendering plus source editing", not full

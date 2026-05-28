@@ -387,7 +387,8 @@ fn rendered_table_rows_use_structured_layout_when_inactive(cx: &mut gpui::TestAp
     let cx = cx.add_empty_window();
     cx.simulate_resize(gpui::size(px(320.), px(200.)));
     let editor = cx.new(|cx| {
-        let mut editor = MarkdownEditor::for_text("| a | b |\n| :- | -: |\n| 1 | 2 |\nafter\n", cx);
+        let mut editor =
+            MarkdownEditor::for_text("| **a** | [b](url) |\n| :- | -: |\n| 1 | 2 |\nafter\n", cx);
         editor.set_mode(MarkdownEditorMode::Rendered, cx);
         editor
     });
@@ -427,6 +428,18 @@ fn rendered_table_rows_use_structured_layout_when_inactive(cx: &mut gpui::TestAp
                 .map(|cell| cell.text.as_str())
                 .collect::<Vec<_>>(),
             vec!["a", "b"]
+        );
+        assert!(
+            table_layout.cells[0]
+                .segments
+                .iter()
+                .any(|segment| segment.style.font_weight == Some(FontWeight::BOLD))
+        );
+        assert!(
+            table_layout.cells[1]
+                .segments
+                .iter()
+                .any(|segment| segment.style.underline)
         );
         assert_eq!(
             table_layout.cells[0].alignment,

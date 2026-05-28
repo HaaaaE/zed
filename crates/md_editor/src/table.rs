@@ -10,7 +10,10 @@ use md_theme::{editor_palette, gutter_width};
 
 use super::{
     MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, VisualLineBoundary, clip_cursor,
-    display_model::DisplayRow, rendered_element_source_range_is_active, visual_horizontal_goal,
+    display_model::{DisplayRow, DisplayTextStyle, StyledDisplaySegment},
+    layout::inline_style,
+    range_contains, render_text_piece, rendered_element_source_range_is_active,
+    visual_horizontal_goal,
 };
 
 const TABLE_CELL_HORIZONTAL_PADDING: gpui::Pixels = px(8.);
@@ -50,6 +53,7 @@ pub(super) struct DisplayTableCellLayout {
     pub(super) source_range: Range<usize>,
     pub(super) content_range: Range<usize>,
     pub(super) text: String,
+    pub(super) segments: Vec<StyledDisplaySegment>,
     pub(super) x: gpui::Pixels,
     pub(super) width: gpui::Pixels,
     pub(super) alignment: MarkdownTableAlignment,
@@ -125,10 +129,12 @@ impl DisplayTableRowLayout {
                     .get(column)
                     .copied()
                     .unwrap_or(TABLE_MIN_CELL_WIDTH);
+                let (text, segments) = table_cell_display(snapshot, cell);
                 let layout = DisplayTableCellLayout {
                     source_range: cell.source_range.clone(),
                     content_range: cell.content_range.clone(),
-                    text: table_cell_text(snapshot, cell),
+                    text,
+                    segments,
                     x,
                     width,
                     alignment: table.alignments.get(column).copied().unwrap_or_default(),
@@ -348,8 +354,19 @@ fn render_table_cell(
         } else {
             palette.pipe_table_background
         })
-        .child(content.child(SharedString::from(cell.text.clone())))
+        .child(content.children(render_table_cell_segments(cell)))
         .into_any_element()
+}
+
+fn render_table_cell_segments(cell: &DisplayTableCellLayout) -> Vec<gpui::AnyElement> {
+    if cell.segments.is_empty() {
+        return vec![SharedString::from(String::new()).into_any_element()];
+    }
+
+    cell.segments
+        .iter()
+        .map(|segment| render_text_piece(segment.text.clone(), &segment.style))
+        .collect()
 }
 
 fn table_column_widths<'a>(
@@ -361,7 +378,7 @@ fn table_column_widths<'a>(
     let mut widths: Vec<gpui::Pixels> = Vec::new();
     for row in rows {
         for (column, cell) in row.cells.iter().enumerate() {
-            let text = table_cell_text(snapshot, cell);
+            let text = table_cell_display_text(snapshot, cell);
             let preferred = px(text.chars().count() as f32 * f32::from(row_style.text_size) * 0.55)
                 + TABLE_CELL_HORIZONTAL_PADDING * 2.
                 + TABLE_BORDER_WIDTH;
@@ -383,9 +400,97 @@ fn table_column_widths<'a>(
     widths
 }
 
-fn table_cell_text(snapshot: &BufferSnapshot, cell: &MarkdownTableCell) -> String {
-    snapshot
-        .as_text_snapshot()
-        .text_for_range(cell.content_range.clone())
-        .collect()
+fn table_cell_display_text(snapshot: &BufferSnapshot, cell: &MarkdownTableCell) -> String {
+    table_cell_display(snapshot, cell).0
+}
+
+fn table_cell_display(
+    snapshot: &BufferSnapshot,
+    cell: &MarkdownTableCell,
+) -> (String, Vec<StyledDisplaySegment>) {
+    if cell.content_range.is_empty() {
+        return (String::new(), Vec::new());
+    }
+
+    let syntax_tree = snapshot.syntax_tree();
+    let inline_spans = syntax_tree
+        .inline_spans_in_source_range(cell.content_range.clone())
+        .collect::<Vec<_>>();
+    let mut hidden_ranges = Vec::new();
+    let mut style_ranges = Vec::new();
+    let mut breakpoints = vec![cell.content_range.start, cell.content_range.end];
+
+    for span in inline_spans {
+        for marker_range in &span.marker_ranges {
+            let clipped = clipped_range(marker_range.clone(), cell.content_range.clone());
+            if !clipped.is_empty() {
+                breakpoints.push(clipped.start);
+                breakpoints.push(clipped.end);
+                hidden_ranges.push(clipped);
+            }
+        }
+
+        let style = inline_style(span.kind);
+        for content_range in &span.content_ranges {
+            let clipped = clipped_range(content_range.clone(), cell.content_range.clone());
+            if !clipped.is_empty() {
+                breakpoints.push(clipped.start);
+                breakpoints.push(clipped.end);
+                style_ranges.push((clipped, style.clone()));
+            }
+        }
+    }
+
+    breakpoints.sort_unstable();
+    breakpoints.dedup();
+
+    let mut display_text = String::new();
+    let mut segments = Vec::new();
+    for window in breakpoints.windows(2) {
+        let source_range = window[0]..window[1];
+        if source_range.is_empty()
+            || hidden_ranges
+                .iter()
+                .any(|hidden_range| range_contains(hidden_range, &source_range))
+        {
+            continue;
+        }
+
+        let text = snapshot
+            .as_text_snapshot()
+            .text_for_range(source_range.clone())
+            .collect::<String>();
+        if text.is_empty() {
+            continue;
+        }
+
+        let display_start = display_text.len();
+        display_text.push_str(&text);
+        let display_end = display_text.len();
+        let style = table_cell_style_for_range(&style_ranges, &source_range);
+        segments.push(StyledDisplaySegment {
+            display_range: display_start..display_end,
+            text,
+            style,
+        });
+    }
+
+    (display_text, segments)
+}
+
+fn table_cell_style_for_range(
+    style_ranges: &[(Range<usize>, DisplayTextStyle)],
+    source_range: &Range<usize>,
+) -> DisplayTextStyle {
+    let mut style = DisplayTextStyle::default();
+    for (style_range, range_style) in style_ranges {
+        if range_contains(style_range, source_range) {
+            style = style.merge(range_style);
+        }
+    }
+    style
+}
+
+fn clipped_range(range: Range<usize>, bounds: Range<usize>) -> Range<usize> {
+    range.start.max(bounds.start)..range.end.min(bounds.end)
 }
