@@ -245,6 +245,18 @@ work, while table structure and column widths are cached at table level.
 - Validation run: `cargo check -p updraft_editor` passed, with pre-existing
   dead-code warnings in `md_editor`.
 
+### 2026-05-28, table cell clipping fix
+
+- Matched table cell preferred width and wrap width to the bordered render box
+  so short headers like `Column A` do not wrap from a one-pixel inset mismatch.
+- Rendered measured table visual lines as nowrap flex rows so GPUI does not
+  apply a second text wrap inside an already measured line.
+- Added regression coverage for the exact `Column A` / `Column B` table source.
+- Validation runs:
+  - `cargo test -p md_editor rendered_table_` passed.
+  - `cargo check -p updraft_editor` passed, with pre-existing dead-code warnings
+    in `md_editor`.
+
 ## Assumptions
 
 - First version is "structured rendering plus source editing", not full

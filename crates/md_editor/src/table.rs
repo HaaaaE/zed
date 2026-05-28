@@ -129,7 +129,7 @@ impl DisplayTableRowLayout {
                 .unwrap_or(1);
             row_style.line_height * line_count as f32
                 + TABLE_CELL_VERTICAL_PADDING * 2.
-                + TABLE_BORDER_WIDTH
+                + TABLE_BORDER_WIDTH * 2.
         };
 
         Self {
@@ -325,7 +325,11 @@ fn render_table_cell(
     let mut content = div()
         .h_full()
         .w_full()
+        .flex()
+        .flex_col()
+        .overflow_hidden()
         .px(TABLE_CELL_HORIZONTAL_PADDING)
+        .py(TABLE_CELL_VERTICAL_PADDING)
         .line_height(row_style.line_height)
         .text_color(palette.text);
     content = match cell.alignment {
@@ -356,18 +360,27 @@ fn render_table_cell_lines(
     cell: &DisplayTableCellLayout,
     row_style: RowDisplayStyle,
 ) -> Vec<gpui::AnyElement> {
-    if cell.segments.is_empty() {
-        return vec![SharedString::from(String::new()).into_any_element()];
-    }
-
     cell.visual_lines
         .iter()
         .map(|line_range| {
-            div()
+            let mut children = render_table_cell_segments(cell, line_range);
+            if children.is_empty() {
+                children.push(SharedString::from(String::new()).into_any_element());
+            }
+
+            let mut line = div()
                 .w_full()
                 .h(row_style.line_height)
-                .children(render_table_cell_segments(cell, line_range))
-                .into_any_element()
+                .flex()
+                .items_center()
+                .overflow_hidden()
+                .whitespace_nowrap();
+            line = match cell.alignment {
+                MarkdownTableAlignment::Left => line,
+                MarkdownTableAlignment::Center => line.justify_center(),
+                MarkdownTableAlignment::Right => line.justify_end(),
+            };
+            line.children(children).into_any_element()
         })
         .collect()
 }
@@ -450,7 +463,7 @@ fn table_cell_preferred_width(
         &text_runs,
         None,
     );
-    shaped_line.width + TABLE_CELL_HORIZONTAL_PADDING * 2. + TABLE_BORDER_WIDTH
+    shaped_line.width + table_cell_horizontal_inset()
 }
 
 fn table_cell_visual_lines(
@@ -464,8 +477,18 @@ fn table_cell_visual_lines(
         return vec![0..0];
     }
 
-    let content_width = (width - TABLE_CELL_HORIZONTAL_PADDING * 2.).max(px(1.));
+    let content_width = table_cell_content_width(width);
     let text_runs = text_runs_for_segments(segments);
+    let shaped_line = window.text_system().shape_line(
+        SharedString::from(text.to_string()),
+        row_style.text_size,
+        &text_runs,
+        None,
+    );
+    if shaped_line.width <= content_width {
+        return vec![0..text.len()];
+    }
+
     let Some(wrapped_line) = window
         .text_system()
         .shape_text(
@@ -499,6 +522,14 @@ fn table_cell_visual_lines(
     }
     ranges.push(start..text.len());
     ranges
+}
+
+fn table_cell_content_width(width: gpui::Pixels) -> gpui::Pixels {
+    (width - table_cell_horizontal_inset()).max(px(1.))
+}
+
+fn table_cell_horizontal_inset() -> gpui::Pixels {
+    TABLE_CELL_HORIZONTAL_PADDING * 2. + TABLE_BORDER_WIDTH * 2.
 }
 
 fn table_cell_display(

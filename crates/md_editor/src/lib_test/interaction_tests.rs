@@ -519,6 +519,57 @@ fn rendered_table_cells_wrap_to_available_width(cx: &mut gpui::TestAppContext) {
 }
 
 #[gpui::test]
+fn rendered_table_header_cells_fit_preferred_width(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(
+            "| Column A | Column B |\n|----------|----------|\n| Cell 1   | Cell 2   |\n",
+            cx,
+        );
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(2, 0));
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
+            .expect("display row should exist");
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            text_wrap_width(window),
+            false,
+            window,
+            cx,
+        );
+
+        let DisplayRowLayout::TableRow(table_layout) = row_layout else {
+            panic!("expected structured table row layout");
+        };
+        assert_eq!(table_layout.cells[0].text, "Column A");
+        assert_eq!(table_layout.cells[1].text, "Column B");
+        assert_eq!(
+            table_layout.cells[0].visual_lines,
+            vec![0.."Column A".len()]
+        );
+        assert_eq!(
+            table_layout.cells[1].visual_lines,
+            vec![0.."Column B".len()]
+        );
+    });
+}
+
+#[gpui::test]
 fn rendered_table_wrapping_uses_text_measurement_for_words(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     cx.simulate_resize(gpui::size(px(720.), px(300.)));
@@ -655,7 +706,7 @@ fn rendered_table_click_reveals_only_clicked_source_row(cx: &mut gpui::TestAppCo
     cx.simulate_mouse_down(click, MouseButton::Left, gpui::Modifiers::none());
     cx.simulate_mouse_up(click, MouseButton::Left, gpui::Modifiers::none());
 
-    editor.read_with(cx, |editor, _| {
+    editor.update(cx, |editor, _| {
         assert_eq!(editor.cursor().row, 0);
         let snapshot = editor.buffer.snapshot();
         let rows = display_rows_in_mode(
@@ -1581,6 +1632,7 @@ fn inline_atom_deferred_remeasure_only_clears_affected_row(cx: &mut gpui::TestAp
     });
 
     editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(2, 0));
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
             DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
