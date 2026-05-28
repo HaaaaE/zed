@@ -1,8 +1,8 @@
 use std::{ops::Range, path::Path};
 
-use markdown_wysiwyg::{MarkdownInlineKind, MarkdownInlineSpan};
+use markdown_wysiwyg::{MarkdownInlineKind, MarkdownInlineSpan, MarkdownProjectionOperation};
 use md_buffer::BufferSnapshot;
-use md_text::{Point, Selection};
+use md_text::{Point, Selection, SelectionGoal};
 
 use super::{
     clip_cursor, clip_selection, markdown_image::MarkdownImageSource, range_contains,
@@ -137,6 +137,48 @@ pub(super) fn rendered_element_range_at_cursor(
                 _ => None,
             }
         })
+}
+
+pub(super) fn projection_replacement_range_at_cursor(
+    snapshot: &BufferSnapshot,
+    cursor: Point,
+    direction: HorizontalDirection,
+) -> Option<Range<usize>> {
+    let cursor = clip_cursor(snapshot, cursor);
+    let source_offset = snapshot.as_text_snapshot().point_to_offset(cursor);
+    let row_source_range = row_source_range(snapshot, cursor.row);
+    if source_offset < row_source_range.start || source_offset > row_source_range.end {
+        return None;
+    }
+
+    let active_source_range = active_source_range_for_selection(
+        snapshot,
+        &Selection {
+            id: 0,
+            start: cursor,
+            end: cursor,
+            reversed: false,
+            goal: SelectionGoal::None,
+        },
+    );
+    let projection = snapshot
+        .syntax_tree()
+        .projection_for_source_range(row_source_range, active_source_range);
+
+    projection.operations().iter().find_map(|operation| {
+        let MarkdownProjectionOperation::Replace { source_range, .. } = operation else {
+            return None;
+        };
+        match direction {
+            HorizontalDirection::Left if source_offset == source_range.end => {
+                Some(source_range.clone())
+            }
+            HorizontalDirection::Right if source_offset == source_range.start => {
+                Some(source_range.clone())
+            }
+            _ => None,
+        }
+    })
 }
 
 fn rendered_element_boundary_query_range(

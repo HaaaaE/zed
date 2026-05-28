@@ -1,7 +1,9 @@
 use md_buffer::{Buffer, BufferSnapshot};
 use md_text::{Point, Selection, SelectionGoal};
 
-use super::rendered_element::rendered_element_range_at_cursor;
+use super::rendered_element::{
+    projection_replacement_range_at_cursor, rendered_element_range_at_cursor,
+};
 use super::{
     MarkdownEditorMode,
     selection::{
@@ -43,9 +45,19 @@ pub(crate) fn backspace_selection_in_mode(
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
         let snapshot = buffer.snapshot();
-        if let Some(range) =
-            rendered_element_range_at_cursor(&snapshot, selection.head(), HorizontalDirection::Left)
-        {
+        let range = rendered_element_range_at_cursor(
+            &snapshot,
+            selection.head(),
+            HorizontalDirection::Left,
+        )
+        .or_else(|| {
+            projection_replacement_range_at_cursor(
+                &snapshot,
+                selection.head(),
+                HorizontalDirection::Left,
+            )
+        });
+        if let Some(range) = range {
             return replace_selection(
                 buffer,
                 &selection_for_source_range(&snapshot, selection.id, range),
@@ -96,11 +108,19 @@ pub(crate) fn delete_selection_in_mode(
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
         let snapshot = buffer.snapshot();
-        if let Some(range) = rendered_element_range_at_cursor(
+        let range = rendered_element_range_at_cursor(
             &snapshot,
             selection.head(),
             HorizontalDirection::Right,
-        ) {
+        )
+        .or_else(|| {
+            projection_replacement_range_at_cursor(
+                &snapshot,
+                selection.head(),
+                HorizontalDirection::Right,
+            )
+        });
+        if let Some(range) = range {
             return replace_selection(
                 buffer,
                 &selection_for_source_range(&snapshot, selection.id, range),

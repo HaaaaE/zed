@@ -6,7 +6,10 @@ use md_text::{Bias, BufferSnapshot as TextBufferSnapshot, Point, Selection, Sele
 
 use super::{
     MarkdownEditorMode, MdListState, TransactionSelectionState, merge_overlapping_row_ranges,
-    rendered_element_range_at_cursor, source_range_to_row_range,
+    rendered_element::{
+        projection_replacement_range_at_cursor, rendered_element_range_at_cursor,
+    },
+    source_range_to_row_range,
 };
 
 pub(crate) fn collapsed_selection(point: Point) -> Selection<Point> {
@@ -523,6 +526,11 @@ pub(crate) fn move_horizontal_in_mode(
     {
         return point;
     }
+    if mode == MarkdownEditorMode::Rendered
+        && let Some(point) = move_across_projection_replacement(snapshot, cursor, direction)
+    {
+        return point;
+    }
 
     match direction {
         HorizontalDirection::Left => move_left(snapshot, cursor),
@@ -537,6 +545,20 @@ pub(crate) fn move_across_rendered_element(
 ) -> Option<Point> {
     let text_snapshot = snapshot.as_text_snapshot();
     let source_range = rendered_element_range_at_cursor(snapshot, cursor, direction)?;
+    let target_offset = match direction {
+        HorizontalDirection::Left => source_range.start,
+        HorizontalDirection::Right => source_range.end,
+    };
+    Some(text_snapshot.offset_to_point(target_offset))
+}
+
+fn move_across_projection_replacement(
+    snapshot: &BufferSnapshot,
+    cursor: Point,
+    direction: HorizontalDirection,
+) -> Option<Point> {
+    let text_snapshot = snapshot.as_text_snapshot();
+    let source_range = projection_replacement_range_at_cursor(snapshot, cursor, direction)?;
     let target_offset = match direction {
         HorizontalDirection::Left => source_range.start,
         HorizontalDirection::Right => source_range.end,

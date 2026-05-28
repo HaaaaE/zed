@@ -86,11 +86,12 @@ use rendered_element::RenderedElementKind;
 use rendered_element::RenderedElementPlacement;
 #[cfg(test)]
 use rendered_element::source_offset_is_rendered_element_boundary;
+#[cfg(test)]
+use rendered_element::rendered_element_range_at_cursor;
 use rendered_element::{
     RenderedElementDescriptor, active_source_range_for_selection,
     inactive_rendered_element_source_ranges_for_selection,
-    rendered_element_descriptor_for_inline_span_in_row, rendered_element_range_at_cursor,
-    rendered_element_source_range_is_active,
+    rendered_element_descriptor_for_inline_span_in_row, rendered_element_source_range_is_active,
 };
 #[cfg(test)]
 use selection::{HorizontalDirection, move_horizontal_in_mode, move_selection_left, move_vertical};

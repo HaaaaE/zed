@@ -2484,6 +2484,62 @@ fn rendered_delete_inside_inline_atom_uses_character_movement() {
 }
 
 #[test]
+fn rendered_backspace_deletes_previous_inactive_replacement() {
+    let source = "Escape \\* &amp;\n";
+    let escape_start = source.find("\\*").expect("expected escaped marker");
+    let escape_end = escape_start + "\\*".len();
+    let mut buffer = Buffer::local(source);
+    let selection = collapsed_selection(Point::new(0, escape_end as u32));
+
+    let (selection, transaction_id) =
+        backspace_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "Escape  &amp;\n");
+    assert_eq!(
+        selection,
+        collapsed_selection(Point::new(0, escape_start as u32))
+    );
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn rendered_backspace_deletes_previous_inactive_task_marker_replacement() {
+    let source = "- [ ] todo\n";
+    let marker_start = source.find("[ ]").expect("expected task marker");
+    let marker_end = marker_start + "[ ]".len();
+    let mut buffer = Buffer::local(source);
+    let selection = collapsed_selection(Point::new(0, marker_end as u32));
+
+    let (selection, transaction_id) =
+        backspace_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "-  todo\n");
+    assert_eq!(
+        selection,
+        collapsed_selection(Point::new(0, marker_start as u32))
+    );
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn rendered_delete_at_active_replacement_start_uses_source_character_movement() {
+    let source = "Escape \\* &amp;\n";
+    let escape_start = source.find("\\*").expect("expected escaped marker");
+    let mut buffer = Buffer::local(source);
+    let selection = collapsed_selection(Point::new(0, escape_start as u32));
+
+    let (selection, transaction_id) =
+        delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "Escape * &amp;\n");
+    assert_eq!(
+        selection,
+        collapsed_selection(Point::new(0, escape_start as u32))
+    );
+    assert!(transaction_id.is_some());
+}
+
+#[test]
 fn source_delete_keeps_inline_atom_source_character_movement() {
     let mut buffer = Buffer::local("Before $x + y$ after\n");
     let atom_start = "Before ".len();

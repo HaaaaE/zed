@@ -138,6 +138,29 @@
 - replacement projection 的 selection/deletion 交互回归。
 - task checkbox toggle 行为。
 
+### 2026-05-29：Replacement projection selection/deletion 交互回归
+
+已完成：
+
+- rendered mode 光标位于 inactive replacement 右边界时，horizontal move/select-left 会跨过整个 replacement source range，而不是落入隐藏的最后一个源码字符。
+- rendered mode 在 inactive escape/entity/task marker replacement 右边界 backspace 时，会删除完整 replacement source range。
+- replacement 起点仍保持 active source reveal 的逐字符编辑语义：delete 会编辑源码字符，而不是强制删除整个 replacement。
+- 新增 visual-row tests 覆盖 inactive escape/entity replacement 右边界移动与选择。
+- 新增 interaction tests 覆盖 inactive escape replacement、task marker replacement 的 backspace，以及 active replacement 起点 delete。
+
+验证：
+
+- `cargo test -p md_editor replacement`：5 passed。
+- `cargo test -p md_editor`：193 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
+- 未跑 perf：本批只改 rendered-mode selection/edit 边界处理和对应 tests，没有改 display row 构建、layout、parse 或 scroll/render 热路径。
+
+后续仍未完成：
+
+- 完整 HTML5 named character reference 表。
+- task checkbox toggle 行为。
+- 更多 GFM block/inline 覆盖。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：

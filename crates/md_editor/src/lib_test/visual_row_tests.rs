@@ -124,6 +124,60 @@ fn rendered_select_horizontal_extends_across_inactive_inline_atom() {
 }
 
 #[test]
+fn rendered_horizontal_movement_skips_inactive_replacement_at_right_boundary() {
+    let source = "Escape \\* &amp;\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+    let escape_start = source.find("\\*").expect("expected escaped marker");
+    let escape_end = escape_start + "\\*".len();
+    let entity_start = source.find("&amp;").expect("expected entity");
+    let entity_end = entity_start + "&amp;".len();
+
+    assert_eq!(
+        move_horizontal_in_mode(
+            &snapshot,
+            Point::new(0, escape_end as u32),
+            MarkdownEditorMode::Rendered,
+            HorizontalDirection::Left,
+        ),
+        Point::new(0, escape_start as u32)
+    );
+    assert_eq!(
+        move_horizontal_in_mode(
+            &snapshot,
+            Point::new(0, entity_end as u32),
+            MarkdownEditorMode::Rendered,
+            HorizontalDirection::Left,
+        ),
+        Point::new(0, entity_start as u32)
+    );
+}
+
+#[test]
+fn rendered_select_horizontal_extends_across_inactive_replacement_at_right_boundary() {
+    let source = "Escape \\* &amp;\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+    let escape_start = source.find("\\*").expect("expected escaped marker");
+    let escape_end = escape_start + "\\*".len();
+
+    assert_eq!(
+        select_left_in_mode(
+            &snapshot,
+            &collapsed_selection(Point::new(0, escape_end as u32)),
+            MarkdownEditorMode::Rendered,
+        ),
+        Selection {
+            id: 0,
+            start: Point::new(0, escape_start as u32),
+            end: Point::new(0, escape_end as u32),
+            reversed: true,
+            goal: SelectionGoal::None,
+        }
+    );
+}
+
+#[test]
 fn rendered_horizontal_movement_skips_inactive_image_block() {
     let image_source = "![alt](https://example.com/cat.png)";
     let mut buffer = Buffer::local(&format!("{image_source}\nnext\n"));
