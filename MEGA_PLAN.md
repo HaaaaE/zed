@@ -68,6 +68,31 @@
 - 为 replacement projection 增加 editor 级 cursor/selection/deletion 回归。
 - 继续拆分 `markdown_wysiwyg` 模块边界。
 
+### 2026-05-28：Escape/entity replacement projection 首批接入
+
+已完成：
+
+- 从 tree-sitter inline tree 收集 `backslash_escape`、`entity_reference`、`numeric_character_reference` projection replacements。
+- inactive rendered projection 将 backslash escape 显示为被 escape 的字符，将 `amp/apos/gt/lt/nbsp/quot` 和 decimal/hex numeric entity 显示为 decoded text。
+- active source reveal 覆盖 replacement range：光标进入 escape/entity source range 时不应用 replacement，并通过 active projection source ranges 触发行缓存区分。
+- projection marker dependency 索引纳入 replacement source ranges。
+- 新增 parser/projection tests 覆盖 escape、named entity、decimal entity、hex entity、active reveal。
+
+验证：
+
+- `cargo check -p updraft_editor`：passed，保留既有 dead_code warnings。
+- `cargo test -p markdown_wysiwyg`：28 passed。
+- `cargo test -p md_editor`：184 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo perf-test -p md_editor -- --quiet`：第一次 run passed，但 source scroll 部分 case 相比上一轮超过 5% 且 SD 偏大；按性能失败标准已复跑。
+- `cargo perf-test -p md_editor -- --quiet` 复跑：passed。复跑 mean：rendered draw large 2005.30ms，rendered cached redraw 1857.60ms，rendered resize 1878.50ms，rendered scroll large 2008.00ms，rendered cached-region scroll 2271.40ms，source draw large 1889.00ms，source cached redraw 1881.30ms，source scroll large 2042.90ms，source cached-region scroll 2217.60ms，source short scroll 266.80ms，source single-row edit large 1932.30ms，source single-row edit length-change 1924.80ms。
+- 复跑后未见 important case 相对上一条记录持续超过约 5% 的 median 回退。
+
+后续仍未完成：
+
+- 完整 HTML5 named character reference 表。
+- task checkbox replacement projection。
+- replacement projection 的 editor 级 cursor/selection/deletion tests。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：

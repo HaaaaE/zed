@@ -11,6 +11,8 @@ pub struct MarkdownSyntaxTree {
     tables: Vec<MarkdownTable>,
     inline_spans: Vec<MarkdownInlineSpan>,
     inline_span_prefix_maximum_ends: Vec<usize>,
+    projection_replacements: Vec<MarkdownProjectionReplacement>,
+    projection_replacement_prefix_maximum_ends: Vec<usize>,
     projection_marker_dependencies: Vec<ProjectionMarkerDependency>,
     projection_marker_prefix_maximum_ends: Vec<usize>,
 }
@@ -37,6 +39,7 @@ impl fmt::Debug for MarkdownSyntaxTree {
             .field("blocks", &self.blocks)
             .field("tables", &self.tables)
             .field("inline_spans", &self.inline_spans)
+            .field("projection_replacements", &self.projection_replacements)
             .finish_non_exhaustive()
     }
 }
@@ -149,6 +152,13 @@ pub struct MarkdownInlineSpan {
 struct ProjectionMarkerDependency {
     marker_range: Range<usize>,
     owner_source_range: Range<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MarkdownProjectionReplacement {
+    source_range: Range<usize>,
+    owner_source_range: Range<usize>,
+    display_text: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -301,6 +311,21 @@ impl MarkdownSyntaxTree {
             .filter(move |span| span.source_range.start < end && span.source_range.end > start)
     }
 
+    fn projection_replacements_in_source_range(
+        &self,
+        range: Range<usize>,
+    ) -> impl Iterator<Item = &MarkdownProjectionReplacement> {
+        let start = range.start;
+        let end = range.end;
+        let start_index = self.partition_projection_replacements_by_prefix_end(start);
+        self.projection_replacements[start_index..]
+            .iter()
+            .take_while(move |replacement| replacement.source_range.start < end)
+            .filter(move |replacement| {
+                replacement.source_range.start < end && replacement.source_range.end > start
+            })
+    }
+
     pub fn blocks_in_source_range(
         &self,
         range: Range<usize>,
@@ -425,7 +450,7 @@ impl MarkdownSyntaxTree {
         blocks: impl IntoIterator<Item = &'a MarkdownBlock>,
         inline_spans: impl IntoIterator<Item = &'a MarkdownInlineSpan>,
     ) -> MarkdownProjectionMap {
-        let mut hidden_ranges = Vec::new();
+        let mut operations = Vec::new();
         for block in blocks {
             let block_is_active = if block.kind == MarkdownBlockKind::PipeTable {
                 table_row_source_range_is_active(
@@ -449,7 +474,9 @@ impl MarkdownSyntaxTree {
                 let start = marker_range.start.max(visible_source_range.start);
                 let end = marker_range.end.min(visible_source_range.end);
                 if start < end {
-                    hidden_ranges.push(start..end);
+                    operations.push(MarkdownProjectionOperation::Hide {
+                        source_range: start..end,
+                    });
                 }
             }
         }
@@ -480,12 +507,43 @@ impl MarkdownSyntaxTree {
                 let start = marker_range.start.max(visible_source_range.start);
                 let end = marker_range.end.min(visible_source_range.end);
                 if start < end {
-                    hidden_ranges.push(start..end);
+                    operations.push(MarkdownProjectionOperation::Hide {
+                        source_range: start..end,
+                    });
                 }
             }
         }
 
-        MarkdownProjectionMap::new(self.source_len, visible_source_range, hidden_ranges)
+        for replacement in
+            self.projection_replacements_in_source_range(visible_source_range.clone())
+        {
+            let replacement_is_active = if active_table_row {
+                ranges_overlap(&replacement.source_range, &visible_source_range)
+            } else {
+                source_range_is_active(
+                    &replacement.owner_source_range,
+                    active_source_range,
+                    inactive_source_ranges,
+                )
+            };
+            if replacement_is_active {
+                continue;
+            }
+
+            let start = replacement
+                .source_range
+                .start
+                .max(visible_source_range.start);
+            let end = replacement.source_range.end.min(visible_source_range.end);
+            if start < end {
+                operations.push(MarkdownProjectionOperation::Replace {
+                    source_range: start..end,
+                    display_text: replacement.display_text.clone(),
+                });
+            }
+        }
+
+        MarkdownProjectionMap::with_operations(self.source_len, visible_source_range, operations)
     }
 
     pub fn active_projection_source_ranges_for_source_range(
@@ -526,7 +584,11 @@ impl MarkdownSyntaxTree {
         let tables = collect_tables(source, &line_starts, &blocks);
         let inline_spans = collect_inline_spans(source, &tree);
         let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
-        let projection_marker_dependencies = projection_marker_dependencies(&blocks, &inline_spans);
+        let projection_replacements = collect_projection_replacements(source, &tree);
+        let projection_replacement_prefix_maximum_ends =
+            projection_replacement_prefix_maximum_ends(&projection_replacements);
+        let projection_marker_dependencies =
+            projection_marker_dependencies(&blocks, &inline_spans, &projection_replacements);
         let projection_marker_prefix_maximum_ends =
             projection_marker_prefix_maximum_ends(&projection_marker_dependencies);
 
@@ -538,6 +600,8 @@ impl MarkdownSyntaxTree {
             tables,
             inline_spans,
             inline_span_prefix_maximum_ends,
+            projection_replacements,
+            projection_replacement_prefix_maximum_ends,
             projection_marker_dependencies,
             projection_marker_prefix_maximum_ends,
         }
@@ -555,6 +619,11 @@ impl MarkdownSyntaxTree {
 
     fn partition_projection_marker_dependencies_by_prefix_end(&self, offset: usize) -> usize {
         self.projection_marker_prefix_maximum_ends
+            .partition_point(|end| *end <= offset)
+    }
+
+    fn partition_projection_replacements_by_prefix_end(&self, offset: usize) -> usize {
+        self.projection_replacement_prefix_maximum_ends
             .partition_point(|end| *end <= offset)
     }
 }
@@ -698,7 +767,15 @@ impl MarkdownProjectionMap {
 
             let operation_display_len = operation.display_len();
             if display_offset <= display_cursor + operation_display_len {
-                return end;
+                return match operation {
+                    MarkdownProjectionOperation::Hide { .. } => end,
+                    MarkdownProjectionOperation::Replace { .. }
+                        if display_offset == display_cursor =>
+                    {
+                        start
+                    }
+                    MarkdownProjectionOperation::Replace { .. } => end,
+                };
             }
             display_cursor += operation_display_len;
             source_cursor = end;
@@ -1088,9 +1165,46 @@ fn inline_span_prefix_maximum_ends(inline_spans: &[MarkdownInlineSpan]) -> Vec<u
         .collect()
 }
 
+fn collect_projection_replacements(
+    source: &str,
+    parse_tree: &MarkdownParseTree,
+) -> Vec<MarkdownProjectionReplacement> {
+    let mut replacements = Vec::new();
+    for inline_tree in parse_tree.inline_trees() {
+        collect_projection_replacement_nodes(
+            source,
+            inline_tree.tree().root_node(),
+            &mut replacements,
+        );
+    }
+    replacements.sort_by_key(|replacement| {
+        (
+            replacement.source_range.start,
+            replacement.source_range.end,
+            replacement.owner_source_range.start,
+            replacement.owner_source_range.end,
+        )
+    });
+    replacements
+}
+
+fn projection_replacement_prefix_maximum_ends(
+    replacements: &[MarkdownProjectionReplacement],
+) -> Vec<usize> {
+    let mut maximum_end = 0;
+    replacements
+        .iter()
+        .map(|replacement| {
+            maximum_end = maximum_end.max(replacement.source_range.end);
+            maximum_end
+        })
+        .collect()
+}
+
 fn projection_marker_dependencies(
     blocks: &[MarkdownBlock],
     inline_spans: &[MarkdownInlineSpan],
+    replacements: &[MarkdownProjectionReplacement],
 ) -> Vec<ProjectionMarkerDependency> {
     let mut dependencies = Vec::new();
     for block in blocks {
@@ -1109,6 +1223,14 @@ fn projection_marker_dependencies(
             }
         }));
     }
+    dependencies.extend(
+        replacements
+            .iter()
+            .map(|replacement| ProjectionMarkerDependency {
+                marker_range: replacement.source_range.clone(),
+                owner_source_range: replacement.owner_source_range.clone(),
+            }),
+    );
     dependencies.sort_by_key(|dependency| {
         (
             dependency.marker_range.start,
@@ -1131,6 +1253,68 @@ fn projection_marker_prefix_maximum_ends(
             maximum_end
         })
         .collect()
+}
+
+fn collect_projection_replacement_nodes(
+    source: &str,
+    node: Node<'_>,
+    replacements: &mut Vec<MarkdownProjectionReplacement>,
+) {
+    if let Some(replacement) = projection_replacement_from_node(source, node) {
+        replacements.push(replacement);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_projection_replacement_nodes(source, child, replacements);
+    }
+}
+
+fn projection_replacement_from_node(
+    source: &str,
+    node: Node<'_>,
+) -> Option<MarkdownProjectionReplacement> {
+    let source_range = node.byte_range();
+    let display_text = match node.kind() {
+        "backslash_escape" => source
+            .get(source_range.start + 1..source_range.end)?
+            .to_string(),
+        "entity_reference" | "numeric_character_reference" => {
+            decode_markdown_entity(source.get(source_range.clone())?)?
+        }
+        _ => return None,
+    };
+
+    Some(MarkdownProjectionReplacement {
+        source_range: source_range.clone(),
+        owner_source_range: source_range,
+        display_text,
+    })
+}
+
+fn decode_markdown_entity(entity: &str) -> Option<String> {
+    let entity = entity.strip_prefix('&')?.strip_suffix(';')?;
+    if let Some(decimal) = entity.strip_prefix('#') {
+        let codepoint = if let Some(hex) = decimal
+            .strip_prefix('x')
+            .or_else(|| decimal.strip_prefix('X'))
+        {
+            u32::from_str_radix(hex, 16).ok()?
+        } else {
+            decimal.parse::<u32>().ok()?
+        };
+        return char::from_u32(codepoint).map(|character| character.to_string());
+    }
+
+    match entity {
+        "amp" => Some("&".to_string()),
+        "apos" => Some("'".to_string()),
+        "gt" => Some(">".to_string()),
+        "lt" => Some("<".to_string()),
+        "nbsp" => Some("\u{00a0}".to_string()),
+        "quot" => Some("\"".to_string()),
+        _ => None,
+    }
 }
 
 fn collect_inline_span_nodes(source: &str, node: Node<'_>, spans: &mut Vec<MarkdownInlineSpan>) {
@@ -1711,9 +1895,51 @@ mod tests {
         assert_eq!(projection.source_to_display(8), 4);
         assert_eq!(projection.source_to_display(10), 6);
         assert_eq!(projection.display_to_source(0), 2);
-        assert_eq!(projection.display_to_source(3), 8);
+        assert_eq!(projection.display_to_source(3), 5);
         assert_eq!(projection.display_to_source(4), 8);
         assert_eq!(projection.display_to_source(6), 10);
+    }
+
+    #[test]
+    fn projection_replaces_inactive_escapes_and_entities() {
+        let source = "Escape \\* &amp; &#42; &#x2A;\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let escaped = source.find("\\*").expect("expected escape");
+        let amp = source.find("&amp;").expect("expected entity");
+        let decimal = source.find("&#42;").expect("expected decimal entity");
+        let hex = source.find("&#x2A;").expect("expected hex entity");
+
+        let projection = tree.projection_for_visible_rows(0..1, None);
+
+        assert_eq!(
+            projection.hidden_ranges(),
+            &[
+                escaped..escaped + 2,
+                amp..amp + 5,
+                decimal..decimal + 5,
+                hex..hex + 6
+            ]
+        );
+        assert_eq!(projection.project_source_text(source), "Escape * & * *\n");
+        assert_eq!(projection.display_len(), "Escape * & * *\n".len());
+    }
+
+    #[test]
+    fn active_escape_reveals_source_projection() {
+        let source = "Escape \\* &amp;\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let escaped = source.find("\\*").expect("expected escape");
+        let projection = tree.projection_for_visible_rows(0..1, Some(escaped + 1..escaped + 2));
+
+        assert_eq!(projection.project_source_text(source), "Escape \\* &\n");
+        assert_eq!(
+            tree.active_projection_source_ranges_for_source_range(
+                0..source.len(),
+                Some(escaped + 1..escaped + 2),
+                &[],
+            ),
+            vec![escaped..escaped + 2]
+        );
     }
 
     #[test]
