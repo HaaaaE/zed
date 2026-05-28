@@ -2183,34 +2183,7 @@ fn project_display_row_text(
 }
 
 fn project_row_text(source_text: &str, projection: &MarkdownProjectionMap) -> String {
-    if projection.hidden_ranges().is_empty() {
-        return source_text.to_string();
-    }
-
-    let visible_source_range = projection.visible_source_range();
-    let mut rendered_text = String::new();
-    let mut cursor = visible_source_range.start;
-
-    for hidden_range in projection.hidden_ranges() {
-        let start = hidden_range.start.max(visible_source_range.start);
-        let end = hidden_range.end.min(visible_source_range.end);
-        if cursor < start {
-            rendered_text.push_str(
-                &source_text
-                    [(cursor - visible_source_range.start)..(start - visible_source_range.start)],
-            );
-        }
-        cursor = cursor.max(end);
-    }
-
-    if cursor < visible_source_range.end {
-        rendered_text.push_str(
-            &source_text[(cursor - visible_source_range.start)
-                ..(visible_source_range.end - visible_source_range.start)],
-        );
-    }
-
-    rendered_text
+    projection.project_source_text(source_text)
 }
 
 fn buffer_byte_delta(before_len: usize, after_len: usize) -> Option<isize> {

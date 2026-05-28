@@ -44,6 +44,30 @@
 - 300KB mixed GFM perf fixture。
 - 每个主要 GFM 批次后的 perf 对比与回归判定。
 
+### 2026-05-28：Projection operations 兼容层
+
+已完成：
+
+- `MarkdownProjectionMap` 改为 operation-backed，新增 `MarkdownProjectionOperation::{Hide, Replace}`。
+- 保留 `hidden_ranges()`，并从 operations 生成兼容 ranges，现有 marker hiding 调用不需要迁移。
+- 新增 `operations()`、`with_operations()`、`project_source_text()`，`source_to_display` 和 `display_to_source` 已按 operation 语义处理 hide/replace。
+- `md_editor` 的 row text projection 改为委托 `MarkdownProjectionMap::project_source_text`，为 entity、escape、task checkbox 等后续 replacement 投影铺路。
+- 新增 hide+replace 映射测试，覆盖 display text、display length、source->display、display->source 和 hidden range 兼容行为。
+
+验证：
+
+- `cargo check -p updraft_editor`：passed，保留既有 dead_code warnings。
+- `cargo test -p markdown_wysiwyg`：26 passed。
+- `cargo test -p md_editor`：184 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo perf-test -p md_editor -- --quiet`：passed。当前 mean：rendered draw large 1940.80ms，rendered cached redraw 1997.20ms，rendered resize 1899.10ms，rendered scroll large 2096.00ms，rendered cached-region scroll 2222.60ms，source draw large 1899.90ms，source cached redraw 1859.30ms，source single-row edit large 1914.10ms，source single-row edit length-change 1908.60ms。
+- 与上一条进度记录中的 perf run 相比，important case 未见超过约 5% 的 median 回退；最大可疑项是 rendered cached redraw 约 +4.2%，低于当前失败阈值，后续大批次仍需复跑确认。
+
+后续仍未完成：
+
+- 将实际 inline escape/entity/task checkbox 等语义改为生成 `Replace` operation。
+- 为 replacement projection 增加 editor 级 cursor/selection/deletion 回归。
+- 继续拆分 `markdown_wysiwyg` 模块边界。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：

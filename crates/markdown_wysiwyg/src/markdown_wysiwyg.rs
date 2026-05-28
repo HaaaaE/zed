@@ -172,7 +172,19 @@ impl MarkdownInlineKind {
 pub struct MarkdownProjectionMap {
     source_len: usize,
     visible_source_range: Range<usize>,
+    operations: Vec<MarkdownProjectionOperation>,
     hidden_ranges: Vec<Range<usize>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MarkdownProjectionOperation {
+    Hide {
+        source_range: Range<usize>,
+    },
+    Replace {
+        source_range: Range<usize>,
+        display_text: String,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -551,26 +563,30 @@ impl MarkdownProjectionMap {
     pub fn new(
         source_len: usize,
         visible_source_range: Range<usize>,
-        mut hidden_ranges: Vec<Range<usize>>,
+        hidden_ranges: Vec<Range<usize>>,
     ) -> Self {
-        hidden_ranges.sort_by_key(|range| (range.start, range.end));
-        hidden_ranges.retain(|range| range.start < range.end);
+        Self::with_operations(
+            source_len,
+            visible_source_range,
+            hidden_ranges
+                .into_iter()
+                .map(|source_range| MarkdownProjectionOperation::Hide { source_range }),
+        )
+    }
 
-        let mut merged_ranges: Vec<Range<usize>> = Vec::with_capacity(hidden_ranges.len());
-        for range in hidden_ranges {
-            if let Some(previous) = merged_ranges.last_mut() {
-                if previous.end >= range.start {
-                    previous.end = previous.end.max(range.end);
-                    continue;
-                }
-            }
-            merged_ranges.push(range);
-        }
+    pub fn with_operations(
+        source_len: usize,
+        visible_source_range: Range<usize>,
+        operations: impl IntoIterator<Item = MarkdownProjectionOperation>,
+    ) -> Self {
+        let operations = normalize_projection_operations(operations);
+        let hidden_ranges = projection_hidden_ranges(&operations);
 
         Self {
             source_len,
             visible_source_range,
-            hidden_ranges: merged_ranges,
+            operations,
+            hidden_ranges,
         }
     }
 
@@ -582,6 +598,10 @@ impl MarkdownProjectionMap {
         self.visible_source_range.clone()
     }
 
+    pub fn operations(&self) -> &[MarkdownProjectionOperation] {
+        &self.operations
+    }
+
     pub fn hidden_ranges(&self) -> &[Range<usize>] {
         &self.hidden_ranges
     }
@@ -590,37 +610,165 @@ impl MarkdownProjectionMap {
         self.source_to_display(self.visible_source_range.end)
     }
 
+    pub fn project_source_text(&self, source_text: &str) -> String {
+        if self.operations.is_empty() {
+            return source_text.to_string();
+        }
+
+        let mut rendered_text = String::new();
+        let mut cursor = self.visible_source_range.start;
+        for operation in &self.operations {
+            let operation_range = operation.source_range();
+            let start = operation_range.start.max(self.visible_source_range.start);
+            let end = operation_range.end.min(self.visible_source_range.end);
+            if start >= end {
+                continue;
+            }
+
+            if cursor < start {
+                rendered_text.push_str(
+                    &source_text[(cursor - self.visible_source_range.start)
+                        ..(start - self.visible_source_range.start)],
+                );
+            }
+            if let MarkdownProjectionOperation::Replace { display_text, .. } = operation {
+                rendered_text.push_str(display_text);
+            }
+            cursor = cursor.max(end);
+        }
+
+        if cursor < self.visible_source_range.end {
+            rendered_text.push_str(
+                &source_text[(cursor - self.visible_source_range.start)
+                    ..(self.visible_source_range.end - self.visible_source_range.start)],
+            );
+        }
+
+        rendered_text
+    }
+
     pub fn source_to_display(&self, source_offset: usize) -> usize {
         let clipped_offset = source_offset.clamp(
             self.visible_source_range.start,
             self.visible_source_range.end,
         );
-        let mut display_offset = clipped_offset - self.visible_source_range.start;
+        let mut display_offset = 0;
+        let mut source_cursor = self.visible_source_range.start;
 
-        for hidden_range in &self.hidden_ranges {
-            if hidden_range.start >= clipped_offset {
+        for operation in &self.operations {
+            let operation_range = operation.source_range();
+            let start = operation_range.start.max(self.visible_source_range.start);
+            let end = operation_range.end.min(self.visible_source_range.end);
+            if start >= end {
+                continue;
+            }
+            if start >= clipped_offset {
                 break;
             }
-            let hidden_start = hidden_range.start.max(self.visible_source_range.start);
-            let hidden_end = hidden_range.end.min(clipped_offset);
-            display_offset = display_offset.saturating_sub(hidden_end.saturating_sub(hidden_start));
+
+            display_offset += start.saturating_sub(source_cursor);
+            if clipped_offset < end {
+                return display_offset;
+            }
+
+            display_offset += operation.display_len();
+            source_cursor = end;
         }
 
-        display_offset
+        display_offset + clipped_offset.saturating_sub(source_cursor)
     }
 
     pub fn display_to_source(&self, display_offset: usize) -> usize {
-        let mut source_offset = self.visible_source_range.start + display_offset;
+        let mut display_cursor = 0;
+        let mut source_cursor = self.visible_source_range.start;
 
-        for hidden_range in &self.hidden_ranges {
-            if source_offset < hidden_range.start {
-                break;
+        for operation in &self.operations {
+            let operation_range = operation.source_range();
+            let start = operation_range.start.max(self.visible_source_range.start);
+            let end = operation_range.end.min(self.visible_source_range.end);
+            if start >= end {
+                continue;
             }
-            source_offset += hidden_range.end - hidden_range.start;
+
+            let visible_source_len = start.saturating_sub(source_cursor);
+            if display_offset < display_cursor + visible_source_len {
+                return source_cursor + (display_offset - display_cursor);
+            }
+            display_cursor += visible_source_len;
+
+            let operation_display_len = operation.display_len();
+            if display_offset <= display_cursor + operation_display_len {
+                return end;
+            }
+            display_cursor += operation_display_len;
+            source_cursor = end;
         }
 
-        source_offset.min(self.visible_source_range.end)
+        (source_cursor + display_offset.saturating_sub(display_cursor))
+            .min(self.visible_source_range.end)
     }
+}
+
+impl MarkdownProjectionOperation {
+    pub fn source_range(&self) -> &Range<usize> {
+        match self {
+            Self::Hide { source_range } | Self::Replace { source_range, .. } => source_range,
+        }
+    }
+
+    pub fn display_len(&self) -> usize {
+        match self {
+            Self::Hide { .. } => 0,
+            Self::Replace { display_text, .. } => display_text.len(),
+        }
+    }
+}
+
+fn normalize_projection_operations(
+    operations: impl IntoIterator<Item = MarkdownProjectionOperation>,
+) -> Vec<MarkdownProjectionOperation> {
+    let mut operations = operations
+        .into_iter()
+        .filter(|operation| operation.source_range().start < operation.source_range().end)
+        .collect::<Vec<_>>();
+    operations
+        .sort_by_key(|operation| (operation.source_range().start, operation.source_range().end));
+
+    let mut normalized = Vec::with_capacity(operations.len());
+    for operation in operations {
+        if let Some(MarkdownProjectionOperation::Hide { source_range }) = normalized.last_mut()
+            && let MarkdownProjectionOperation::Hide {
+                source_range: next_range,
+            } = &operation
+            && source_range.end >= next_range.start
+        {
+            source_range.end = source_range.end.max(next_range.end);
+            continue;
+        }
+        normalized.push(operation);
+    }
+
+    normalized
+}
+
+fn projection_hidden_ranges(operations: &[MarkdownProjectionOperation]) -> Vec<Range<usize>> {
+    let hidden_ranges = operations
+        .iter()
+        .map(|operation| operation.source_range().clone())
+        .collect::<Vec<_>>();
+
+    let mut merged_ranges: Vec<Range<usize>> = Vec::with_capacity(hidden_ranges.len());
+    for range in hidden_ranges {
+        if let Some(previous) = merged_ranges.last_mut() {
+            if previous.end >= range.start {
+                previous.end = previous.end.max(range.end);
+                continue;
+            }
+        }
+        merged_ranges.push(range);
+    }
+
+    merged_ranges
 }
 
 fn parse_markdown(source: &str, old_tree: Option<&MarkdownParseTree>) -> MarkdownParseTree {
@@ -1527,6 +1675,45 @@ mod tests {
         let projection = tree.projection_for_visible_rows(0..1, None);
         assert_eq!(projection.hidden_ranges(), &[7..9, 13..15]);
         assert_eq!(projection.display_len(), "Before bold after\n".len());
+    }
+
+    #[test]
+    fn projection_operations_support_hide_and_replace_mappings() {
+        let projection = MarkdownProjectionMap::with_operations(
+            10,
+            0..10,
+            [
+                MarkdownProjectionOperation::Hide { source_range: 0..2 },
+                MarkdownProjectionOperation::Replace {
+                    source_range: 5..8,
+                    display_text: "X".to_string(),
+                },
+            ],
+        );
+
+        assert_eq!(projection.hidden_ranges(), &[0..2, 5..8]);
+        assert_eq!(
+            projection.operations(),
+            &[
+                MarkdownProjectionOperation::Hide { source_range: 0..2 },
+                MarkdownProjectionOperation::Replace {
+                    source_range: 5..8,
+                    display_text: "X".to_string()
+                }
+            ]
+        );
+        assert_eq!(projection.project_source_text("0123456789"), "234X89");
+        assert_eq!(projection.display_len(), 6);
+        assert_eq!(projection.source_to_display(0), 0);
+        assert_eq!(projection.source_to_display(2), 0);
+        assert_eq!(projection.source_to_display(5), 3);
+        assert_eq!(projection.source_to_display(6), 3);
+        assert_eq!(projection.source_to_display(8), 4);
+        assert_eq!(projection.source_to_display(10), 6);
+        assert_eq!(projection.display_to_source(0), 2);
+        assert_eq!(projection.display_to_source(3), 8);
+        assert_eq!(projection.display_to_source(4), 8);
+        assert_eq!(projection.display_to_source(6), 10);
     }
 
     #[test]
