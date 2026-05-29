@@ -64,10 +64,16 @@ pub(super) fn render_display_row_layout(
             row_style,
             cx,
         ),
-        DisplayRowLayout::Block(block_layout) => {
-            block_layout.render(snapshot, selection, row_style, cx)
+        DisplayRowLayout::Block(block_layout) => block_layout.render(
+            snapshot,
+            selection,
+            row_style,
+            display_row.rendered_indent_width(),
+            cx,
+        ),
+        DisplayRowLayout::TableRow(table_layout) => {
+            table_layout.render(row_style, display_row.rendered_indent_width(), cx)
         }
-        DisplayRowLayout::TableRow(table_layout) => table_layout.render(row_style, cx),
     }
 }
 
@@ -134,6 +140,7 @@ fn render_visual_text_row(
     row_style: RowDisplayStyle,
     cx: &mut Context<MarkdownEditor>,
 ) -> gpui::AnyElement {
+    let indent_width = display_row.rendered_indent_width();
     let mouse_down_row = display_row.clone();
     let mouse_down_visual_row_index = visual_row_index;
     let mouse_down_visual_row = visual_row.clone();
@@ -177,7 +184,9 @@ fn render_visual_text_row(
             text_layout,
             selected_range,
             &visual_row,
+            indent_width,
         ))
+        .child(div().flex_none().w(indent_width).h_full())
         .children(render_fragments_for_visual_row(
             &display_row.text,
             &text_layout.fragments,
@@ -194,7 +203,7 @@ fn render_visual_text_row(
                 visual_row_index,
                 &visual_row,
             ),
-            |this, caret_x| this.child(caret_element(caret_x, row_style)),
+            |this, caret_x| this.child(caret_element(caret_x + indent_width, row_style)),
         )
         .into_any_element()
 }
@@ -203,6 +212,7 @@ fn selection_elements_for_visual_row(
     text_layout: &DisplayRowTextLayout,
     selected_range: Option<&Range<usize>>,
     visual_row: &VisualDisplayRow,
+    indent_width: gpui::Pixels,
 ) -> Vec<gpui::AnyElement> {
     let Some((start_x, width)) =
         selection_bounds_for_visual_row(text_layout, selected_range, visual_row)
@@ -215,7 +225,7 @@ fn selection_elements_for_visual_row(
     vec![
         div()
             .absolute()
-            .left(start_x)
+            .left(indent_width + start_x)
             .top_0()
             .h(visual_row.height)
             .w(width)

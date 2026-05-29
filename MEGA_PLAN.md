@@ -454,6 +454,39 @@
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 
+### 2026-05-30：rendered blockquote/list indentation
+
+已完成：
+
+- nested list item 的 `source_range` 现在从 marker 前的有效缩进开始，inactive projection 会隐藏 `  - ` 这类带缩进 marker，rendered row 显示为内容文本。
+- `DisplayRow` 增加 `rendered_indent_level`，按当前 row 所在的 `BlockQuote` / `ListItem` container 层数计算；source mode 固定为 0。
+- rendered layout 的有效 wrap width 会扣除 `rendered_indent_width()`，避免缩进后的文本、表格、图片/公式块仍按整行宽度布局。
+- row layout cache key 使用扣除缩进后的 content wrap width，并且 `DisplayRow::PartialEq` 纳入 `rendered_indent_level`，避免视觉缩进变化复用旧布局。
+- text row、image/formula block、table row 渲染都增加缩进 spacer；selection highlight、caret x、mouse hit-test、task checkbox hit-test、table/block hit-test 都按同一个缩进宽度修正。
+- 新增/更新测试覆盖 nested blockquote/list indent level、nested list projection、task checkbox click x、image block hit-test、table hit-test、wrapped row mouse goal。
+- 已核对 `NOTICE` / license metadata：本批没有跨 crate/license 移动代码，只在 GPL crate 内部调整，不需要修改 `NOTICE`。
+
+验证：
+
+- `cargo test -p md_editor rendered_display_rows -- --nocapture`：20 passed。
+- `cargo test -p md_editor rendered_task_checkbox_click -- --nocapture`：3 passed。
+- `cargo test -p md_editor image_block_mouse_target_accounts_for_rendered_indent -- --nocapture`：1 passed。
+- `cargo test -p md_editor rendered_table_mouse_target_accounts_for_rendered_indent -- --nocapture`：1 passed。
+- `cargo test -p markdown_wysiwyg`：38 passed。
+- `cargo test -p md_editor`：205 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
+- `git diff --check`：passed，仅有 Windows line-ending 提示。
+- `cargo perf-test -p md_editor -- --quiet --json=20260530-rendered-indent`：passed，使用 Windows Kits `D:\Windows Kits\10\bin\10.0.26100.0\x64` 加入 `PATH`。
+- `.perf-runs/20260530-rendered-indent.md_editor.json` 与当前正式 baseline 一样是 2 个 session、每个 34 段 timeline。
+- command-level mean：large `9950.12ms` / SD `246.69ms`，small `5736.64ms` / SD `90.74ms`。
+- `cargo perf-compare 20260530-rendered-indent 20260530-scroll-segments`：important category max/mean/min 为 up `28.7%` / `23.1%` / `17.4%`。这里 `up` 表示 iter/sec 上升、耗时下降；由于 source/setup 等无关 segment 也整体变快，本次只能判定没有同口径 perf 回归，不能把全局变快归因于本批缩进代码。
+
+后续仍未完成：
+
+- task list item 更完整语义与 editor 级行为回归。
+- `markdown_wysiwyg` 模块拆分。
+- 300KB mixed GFM fixture 与最终验证。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：

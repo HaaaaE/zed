@@ -1710,8 +1710,12 @@ fn list_block(source: &str, node: Node<'_>) -> MarkdownBlock {
 }
 
 fn list_item_block(source: &str, node: Node<'_>) -> MarkdownBlock {
-    let source_range = node.byte_range();
-    let marker_range = list_item_marker_range(source, source_range.clone());
+    let node_range = node.byte_range();
+    let marker_range = list_item_marker_range(source, node_range.clone());
+    let source_start = marker_range
+        .as_ref()
+        .map_or(node_range.start, |range| range.start);
+    let source_range = source_start..node_range.end;
     let content_start = marker_range
         .as_ref()
         .map_or(source_range.start, |range| range.end);
@@ -1780,13 +1784,13 @@ fn block_quote_marker_ranges(source: &str, source_range: Range<usize>) -> Vec<Ra
 
 fn list_item_marker_range(source: &str, source_range: Range<usize>) -> Option<Range<usize>> {
     let bytes = source.as_bytes();
-    let mut cursor = source_range.start;
+    let marker_start = list_item_marker_start(source, source_range.start);
+    let mut cursor = marker_start;
 
     while cursor < source_range.end && matches!(bytes[cursor], b' ' | b'\t') {
         cursor += 1;
     }
 
-    let marker_start = cursor;
     if cursor < source_range.end && matches!(bytes[cursor], b'-' | b'+' | b'*') {
         cursor += 1;
     } else {
@@ -1808,6 +1812,32 @@ fn list_item_marker_range(source: &str, source_range: Range<usize>) -> Option<Ra
     }
 
     (marker_start < cursor).then_some(marker_start..cursor)
+}
+
+fn list_item_marker_start(source: &str, node_start: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut cursor = source[..node_start]
+        .rfind('\n')
+        .map_or(0, |offset| offset + 1);
+
+    loop {
+        let marker_start = cursor;
+        let mut leading_spaces = 0;
+        while cursor < node_start && bytes[cursor] == b' ' && leading_spaces < 4 {
+            cursor += 1;
+            leading_spaces += 1;
+        }
+
+        if cursor < node_start && bytes[cursor] == b'>' {
+            cursor += 1;
+            if cursor < node_start && bytes[cursor] == b' ' {
+                cursor += 1;
+            }
+            continue;
+        }
+
+        return marker_start;
+    }
 }
 
 fn setext_heading_block(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
@@ -2261,6 +2291,11 @@ mod tests {
         assert!(
             list_item_marker_sources
                 .iter()
+                .any(|markers| markers == &vec!["  - "])
+        );
+        assert!(
+            list_item_marker_sources
+                .iter()
                 .any(|markers| markers == &vec!["1. "])
         );
         assert!(
@@ -2507,22 +2542,22 @@ mod tests {
 
     #[test]
     fn hides_inactive_blockquote_and_list_item_markers_in_projection() {
-        let source = "> quote\n- [ ] todo\n1) ordered\n";
+        let source = "> quote\n- [ ] todo\n  - nested\n1) ordered\n";
         let tree = MarkdownSyntaxTree::parse(source);
-        let projection = tree.projection_for_visible_rows(0..3, None);
+        let projection = tree.projection_for_visible_rows(0..4, None);
 
         assert_eq!(
             projection.project_source_text(source),
-            "quote\n☐ todo\nordered\n"
+            "quote\n☐ todo\nnested\nordered\n"
         );
 
         let active_quote = source.find("quote").expect("expected quote text");
         let projection =
-            tree.projection_for_visible_rows(0..3, Some(active_quote..active_quote + 1));
+            tree.projection_for_visible_rows(0..4, Some(active_quote..active_quote + 1));
 
         assert_eq!(
             projection.project_source_text(source),
-            "> quote\n☐ todo\nordered\n"
+            "> quote\n☐ todo\nnested\nordered\n"
         );
     }
 

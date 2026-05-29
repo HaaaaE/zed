@@ -161,6 +161,13 @@ pub(super) fn text_wrap_width(window: &Window) -> gpui::Pixels {
     (window.bounds().size.width - gutter_width()).max(px(1.))
 }
 
+pub(super) fn effective_text_wrap_width(
+    display_row: &DisplayRow,
+    wrap_width: gpui::Pixels,
+) -> gpui::Pixels {
+    (wrap_width - display_row.rendered_indent_width()).max(px(1.))
+}
+
 pub(super) fn display_row_layout_inputs(
     snapshot: &BufferSnapshot,
     display_row: &DisplayRow,

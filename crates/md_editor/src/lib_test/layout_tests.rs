@@ -265,6 +265,9 @@ fn rendered_display_rows_hide_inactive_blockquote_and_list_markers() {
     assert_eq!(rows[0].text, "quote");
     assert_eq!(rows[1].text, "item");
     assert_eq!(rows[2].text, "ordered");
+    assert_eq!(rows[0].rendered_indent_level, 1);
+    assert_eq!(rows[1].rendered_indent_level, 1);
+    assert_eq!(rows[2].rendered_indent_level, 1);
 }
 
 #[test]
@@ -290,6 +293,64 @@ fn rendered_display_rows_reveal_active_blockquote_and_list_markers() {
     assert_eq!(quote_rows[1].text, "item");
     assert_eq!(list_rows[0].text, "quote");
     assert_eq!(list_rows[1].text, "- item");
+}
+
+#[test]
+fn rendered_display_rows_track_nested_blockquote_indent() {
+    let source = "> quote\n> > nested\n\nbody\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+
+    let rows = display_rows_in_mode(
+        &snapshot,
+        0..4,
+        Some(&collapsed_selection(Point::new(3, 0))),
+        MarkdownEditorMode::Rendered,
+    );
+
+    assert_eq!(
+        rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
+        vec!["quote", "nested", "", "body"]
+    );
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.rendered_indent_level)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 0, 0]
+    );
+    assert_eq!(rows[0].rendered_indent_width(), px(24.));
+    assert_eq!(rows[1].rendered_indent_width(), px(48.));
+    assert_eq!(rows[2].rendered_indent_width(), px(0.));
+    assert_eq!(rows[3].rendered_indent_width(), px(0.));
+}
+
+#[test]
+fn rendered_display_rows_track_nested_list_indent() {
+    let source = "- outer\n  - nested\n\nbody\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+
+    let rows = display_rows_in_mode(
+        &snapshot,
+        0..4,
+        Some(&collapsed_selection(Point::new(3, 0))),
+        MarkdownEditorMode::Rendered,
+    );
+
+    assert_eq!(
+        rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
+        vec!["outer", "nested", "", "body"]
+    );
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.rendered_indent_level)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 1, 0]
+    );
+    assert_eq!(rows[0].rendered_indent_width(), px(24.));
+    assert_eq!(rows[1].rendered_indent_width(), px(48.));
+    assert_eq!(rows[2].rendered_indent_width(), px(24.));
+    assert_eq!(rows[3].rendered_indent_width(), px(0.));
 }
 
 #[test]
@@ -1525,6 +1586,31 @@ fn image_block_mouse_target_tracks_visible_caret_goal() {
     );
     assert_eq!(
         block_layout.mouse_target_for_x(&snapshot, gutter_width() + px(260.)),
+        (Point::new(0, 35), visual_horizontal_goal(0, px(200.)))
+    );
+}
+
+#[test]
+fn image_block_mouse_target_accounts_for_rendered_indent() {
+    let mut buffer = Buffer::local("![alt](https://example.com/cat.png)\n");
+    let snapshot = buffer.snapshot();
+    let block_layout = image_block_layout(0..35, px(200.));
+    let indent_width = px(48.);
+
+    assert_eq!(
+        block_layout.mouse_target_for_x_with_indent(
+            &snapshot,
+            gutter_width() + indent_width,
+            indent_width
+        ),
+        (Point::new(0, 0), visual_horizontal_goal(0, px(0.)))
+    );
+    assert_eq!(
+        block_layout.mouse_target_for_x_with_indent(
+            &snapshot,
+            gutter_width() + indent_width + px(260.),
+            indent_width
+        ),
         (Point::new(0, 35), visual_horizontal_goal(0, px(200.)))
     );
 }

@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use gpui::FontWeight;
+use gpui::{FontWeight, Pixels, px};
 use markdown_wysiwyg::{MarkdownBlock, MarkdownInlineSpan, MarkdownProjectionMap};
 
 use crate::rendered_element::RenderedElementDescriptor;
@@ -14,6 +14,7 @@ pub struct DisplayRow {
     pub(crate) active_projection_source_ranges: Vec<Range<usize>>,
     pub(crate) markdown_blocks: Vec<MarkdownBlock>,
     pub(crate) heading_level: Option<u8>,
+    pub(crate) rendered_indent_level: u16,
     pub(crate) inline_spans: Vec<MarkdownInlineSpan>,
     pub(crate) rendered_element_descriptors: Vec<RenderedElementDescriptor>,
     pub(crate) rendered_element_descriptors_have_document_path: bool,
@@ -23,13 +24,19 @@ pub struct DisplayRow {
 
 impl PartialEq for DisplayRow {
     fn eq(&self, other: &Self) -> bool {
-        self.row == other.row && self.text == other.text
+        self.row == other.row
+            && self.text == other.text
+            && self.rendered_indent_level == other.rendered_indent_level
     }
 }
 
 impl Eq for DisplayRow {}
 
 impl DisplayRow {
+    pub(crate) fn rendered_indent_width(&self) -> Pixels {
+        px(f32::from(self.rendered_indent_level) * 24.)
+    }
+
     pub(crate) fn source_to_display(&self, source_offset: usize) -> usize {
         let mut display_offset = self.projection.source_to_display(source_offset);
         for insertion in &self.insertions {

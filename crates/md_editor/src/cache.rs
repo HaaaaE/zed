@@ -18,7 +18,8 @@ use super::{
     source_display_row_in_text_snapshot,
 };
 use crate::layout::{
-    display_row_layout_inputs, source_display_row_layout_inputs, text_layout_for_display_row_inputs,
+    display_row_layout_inputs, effective_text_wrap_width, source_display_row_layout_inputs,
+    text_layout_for_display_row_inputs,
 };
 
 impl MarkdownEditor {
@@ -238,11 +239,12 @@ impl MarkdownEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> DisplayRowLayout {
+        let content_wrap_width = effective_text_wrap_width(display_row, wrap_width);
         let cache_key = RowLayoutCacheKey {
             row: display_row.row,
             mode,
             row_style,
-            wrap_width,
+            wrap_width: content_wrap_width,
             active_projection_source_ranges: display_row.active_projection_source_ranges.clone(),
         };
 
@@ -259,7 +261,7 @@ impl MarkdownEditor {
             display_row,
             selection,
             mode,
-            wrap_width,
+            content_wrap_width,
             row_style,
             window,
         ) {
@@ -270,7 +272,7 @@ impl MarkdownEditor {
             selection,
             mode,
             self.document_path(),
-            wrap_width,
+            content_wrap_width,
             row_style,
             measure_inline_atoms,
             window,
@@ -284,7 +286,7 @@ impl MarkdownEditor {
                 display_row.row as usize,
                 &inputs,
                 row_style,
-                wrap_width,
+                content_wrap_width,
                 measure_inline_atoms,
                 window,
                 cx,
@@ -297,7 +299,7 @@ impl MarkdownEditor {
                 &display_row.text,
                 &inputs,
                 row_style,
-                wrap_width,
+                content_wrap_width,
                 &atom_measurements,
                 window,
                 cx,

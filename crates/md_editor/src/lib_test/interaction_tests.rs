@@ -755,6 +755,62 @@ fn rendered_table_mouse_target_maps_to_cell_source(cx: &mut gpui::TestAppContext
 }
 
 #[gpui::test]
+fn rendered_table_mouse_target_accounts_for_rendered_indent(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor =
+            MarkdownEditor::for_text("> | a | b |\n> | - | - |\n> | 1 | 2 |\nafter\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(3, 0));
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
+            .expect("display row should exist");
+        assert_eq!(display_row.rendered_indent_width(), px(24.));
+
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            text_wrap_width(window),
+            false,
+            window,
+            cx,
+        );
+        let DisplayRowLayout::TableRow(table_layout) = row_layout else {
+            panic!("expected structured table row layout");
+        };
+
+        let second_cell_x = gutter_width()
+            + display_row.rendered_indent_width()
+            + table_layout.cells[1].x
+            + px(10.);
+        let (point, _) = table_layout.mouse_target_for_x_with_indent(
+            &snapshot,
+            second_cell_x,
+            display_row.rendered_indent_width(),
+        );
+        let source_offset = snapshot.as_text_snapshot().point_to_offset(point);
+        assert!(
+            (table_layout.cells[1].content_range.start..=table_layout.cells[1].content_range.end)
+                .contains(&source_offset),
+            "expected target inside indented second cell, got {point:?}"
+        );
+    });
+}
+
+#[gpui::test]
 fn rendered_table_vertical_movement_enters_neighboring_table_rows(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     cx.simulate_resize(gpui::size(px(320.), px(200.)));
@@ -1456,6 +1512,7 @@ fn rendered_task_checkbox_click_positions(
     let marker_start = source.find(marker).expect("expected task marker");
     let display_start = display_row.source_to_display(marker_start);
     let display_end = display_start + glyph.len();
+    let indent_width = display_row.rendered_indent_width();
     let x_start = display_x_for_offset(
         &text_layout.fragments,
         &text_layout.shaped_line,
@@ -1468,8 +1525,8 @@ fn rendered_task_checkbox_click_positions(
     );
 
     (
-        gutter_width() + x_start + (x_end - x_start) * 0.5,
-        gutter_width() + x_end + px(6.),
+        gutter_width() + indent_width + x_start + (x_end - x_start) * 0.5,
+        gutter_width() + indent_width + x_end + px(6.),
     )
 }
 

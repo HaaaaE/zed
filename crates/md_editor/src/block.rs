@@ -1,8 +1,8 @@
 use std::{ops::Range, path::Path};
 
 use gpui::{
-    App, Context, ImgResourceLoader, IntoElement, MouseButton, SharedString, Window, div, img,
-    prelude::*, px,
+    App, Context, ImgResourceLoader, IntoElement, MouseButton, Pixels, SharedString, Window, div,
+    img, prelude::*, px,
 };
 use md_assets::EDITOR_FONT_FAMILY;
 use md_buffer::BufferSnapshot;
@@ -154,16 +154,36 @@ impl DisplayBlockLayout {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn point_for_mouse_x(&self, snapshot: &BufferSnapshot, x: gpui::Pixels) -> Point {
-        self.point_for_x(snapshot, x - gutter_width())
+        self.point_for_mouse_x_with_indent(snapshot, x, px(0.))
     }
 
+    pub(super) fn point_for_mouse_x_with_indent(
+        &self,
+        snapshot: &BufferSnapshot,
+        x: gpui::Pixels,
+        indent_width: Pixels,
+    ) -> Point {
+        self.point_for_x(snapshot, x - gutter_width() - indent_width)
+    }
+
+    #[cfg(test)]
     pub(super) fn mouse_target_for_x(
         &self,
         snapshot: &BufferSnapshot,
         x: gpui::Pixels,
     ) -> (Point, SelectionGoal) {
-        let point = self.point_for_mouse_x(snapshot, x);
+        self.mouse_target_for_x_with_indent(snapshot, x, px(0.))
+    }
+
+    pub(super) fn mouse_target_for_x_with_indent(
+        &self,
+        snapshot: &BufferSnapshot,
+        x: gpui::Pixels,
+        indent_width: Pixels,
+    ) -> (Point, SelectionGoal) {
+        let point = self.point_for_mouse_x_with_indent(snapshot, x, indent_width);
         let source_offset = snapshot.as_text_snapshot().point_to_offset(point);
         (
             point,
@@ -225,6 +245,7 @@ impl DisplayBlockLayout {
         snapshot: &BufferSnapshot,
         selection: &Selection<Point>,
         row_style: RowDisplayStyle,
+        indent_width: Pixels,
         cx: &mut Context<MarkdownEditor>,
     ) -> Vec<gpui::AnyElement> {
         let selected = self.is_whole_selected(snapshot, selection);
@@ -236,6 +257,7 @@ impl DisplayBlockLayout {
                     selected,
                     caret_x,
                     row_style,
+                    indent_width,
                     cx,
                 )]
             }
@@ -245,6 +267,7 @@ impl DisplayBlockLayout {
                     selected,
                     caret_x,
                     row_style,
+                    indent_width,
                     cx,
                 )]
             }
@@ -465,12 +488,15 @@ fn render_image_block(
     selected: bool,
     caret_x: Option<gpui::Pixels>,
     row_style: RowDisplayStyle,
+    indent_width: Pixels,
     cx: &mut Context<MarkdownEditor>,
 ) -> gpui::AnyElement {
     let palette = editor_palette();
     let image_height = image_layout.image_height();
     let mouse_down_block_layout = DisplayBlockLayout::RemoteImage(image_layout.clone());
+    let mouse_down_indent_width = indent_width;
     let mouse_move_block_layout = mouse_down_block_layout.clone();
+    let mouse_move_indent_width = indent_width;
     let image_block = &image_layout.image_block;
     let fallback_label = image_block.image_source.fallback_label();
     let invalid_fallback_label = fallback_label.clone();
@@ -480,18 +506,32 @@ fn render_image_block(
         .w_full()
         .py(RENDERED_IMAGE_BLOCK_VERTICAL_PADDING)
         .relative()
+        .flex()
         .when(selected, |this| {
             this.bg(palette.selection_background.opacity(0.20))
         })
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event, window, cx| {
-                this.mouse_left_down_on_block(&mouse_down_block_layout, event, window, cx)
+                this.mouse_left_down_on_block(
+                    &mouse_down_block_layout,
+                    mouse_down_indent_width,
+                    event,
+                    window,
+                    cx,
+                )
             }),
         )
         .on_mouse_move(cx.listener(move |this, event, window, cx| {
-            this.mouse_move_on_block(&mouse_move_block_layout, event, window, cx)
+            this.mouse_move_on_block(
+                &mouse_move_block_layout,
+                mouse_move_indent_width,
+                event,
+                window,
+                cx,
+            )
         }))
+        .child(div().flex_none().w(indent_width).h_full())
         .child(
             div()
                 .w(image_layout.width)
@@ -537,7 +577,7 @@ fn render_image_block(
                 }),
         )
         .when_some(caret_x, |this, caret_x| {
-            this.child(caret_element(caret_x, row_style))
+            this.child(caret_element(caret_x + indent_width, row_style))
         })
         .into_any_element()
 }
@@ -547,33 +587,50 @@ fn render_formula_block(
     selected: bool,
     caret_x: Option<gpui::Pixels>,
     row_style: RowDisplayStyle,
+    indent_width: Pixels,
     cx: &mut Context<MarkdownEditor>,
 ) -> gpui::AnyElement {
     let mouse_down_block_layout = DisplayBlockLayout::Formula(formula_layout.clone());
+    let mouse_down_indent_width = indent_width;
     let mouse_move_block_layout = mouse_down_block_layout.clone();
+    let mouse_move_indent_width = indent_width;
 
     div()
         .w_full()
         .relative()
+        .flex()
         .when(selected, |this| {
             this.bg(editor_palette().selection_background.opacity(0.20))
         })
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, event, window, cx| {
-                this.mouse_left_down_on_block(&mouse_down_block_layout, event, window, cx)
+                this.mouse_left_down_on_block(
+                    &mouse_down_block_layout,
+                    mouse_down_indent_width,
+                    event,
+                    window,
+                    cx,
+                )
             }),
         )
         .on_mouse_move(cx.listener(move |this, event, window, cx| {
-            this.mouse_move_on_block(&mouse_move_block_layout, event, window, cx)
+            this.mouse_move_on_block(
+                &mouse_move_block_layout,
+                mouse_move_indent_width,
+                event,
+                window,
+                cx,
+            )
         }))
+        .child(div().flex_none().w(indent_width).h_full())
         .child(render_formula_block_inner(
             formula_layout,
             row_style,
             selected,
         ))
         .when_some(caret_x, |this, caret_x| {
-            this.child(caret_element(caret_x, row_style))
+            this.child(caret_element(caret_x + indent_width, row_style))
         })
         .into_any_element()
 }

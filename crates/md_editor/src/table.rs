@@ -1,7 +1,7 @@
 use std::{cmp::Ordering, ops::Range};
 
 use gpui::{
-    Context, IntoElement, MouseButton, SharedString, TextAlign, Window, div, prelude::*, px,
+    Context, IntoElement, MouseButton, Pixels, SharedString, TextAlign, Window, div, prelude::*, px,
 };
 use markdown_wysiwyg::{
     MarkdownTable, MarkdownTableAlignment, MarkdownTableCell, MarkdownTableRow,
@@ -198,12 +198,22 @@ impl DisplayTableRowLayout {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn mouse_target_for_x(
         &self,
         snapshot: &BufferSnapshot,
         x: gpui::Pixels,
     ) -> (Point, SelectionGoal) {
-        let point = self.point_for_x(snapshot, x - gutter_width());
+        self.mouse_target_for_x_with_indent(snapshot, x, px(0.))
+    }
+
+    pub(super) fn mouse_target_for_x_with_indent(
+        &self,
+        snapshot: &BufferSnapshot,
+        x: gpui::Pixels,
+        indent_width: Pixels,
+    ) -> (Point, SelectionGoal) {
+        let point = self.point_for_x(snapshot, x - gutter_width() - indent_width);
         let source_offset = snapshot.as_text_snapshot().point_to_offset(point);
         (
             point,
@@ -214,12 +224,15 @@ impl DisplayTableRowLayout {
     pub(super) fn render(
         &self,
         row_style: RowDisplayStyle,
+        indent_width: Pixels,
         cx: &mut Context<MarkdownEditor>,
     ) -> Vec<gpui::AnyElement> {
         let mouse_down_layout = self.clone();
+        let mouse_down_indent_width = indent_width;
         let mouse_move_layout = self.clone();
+        let mouse_move_indent_width = indent_width;
         let palette = editor_palette();
-        let mut row = div()
+        let row = div()
             .w_full()
             .h(self.height)
             .flex()
@@ -228,15 +241,28 @@ impl DisplayTableRowLayout {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event, window, cx| {
-                    this.mouse_left_down_on_table_row(&mouse_down_layout, event, window, cx)
+                    this.mouse_left_down_on_table_row(
+                        &mouse_down_layout,
+                        mouse_down_indent_width,
+                        event,
+                        window,
+                        cx,
+                    )
                 }),
             )
             .on_mouse_move(cx.listener(move |this, event, window, cx| {
-                this.mouse_move_on_table_row(&mouse_move_layout, event, window, cx)
+                this.mouse_move_on_table_row(
+                    &mouse_move_layout,
+                    mouse_move_indent_width,
+                    event,
+                    window,
+                    cx,
+                )
             }));
 
+        let mut content = div().relative().h(self.height).w(self.width).flex_none();
         if self.is_delimiter {
-            row = row.child(
+            content = content.child(
                 div()
                     .absolute()
                     .left(px(0.))
@@ -247,7 +273,7 @@ impl DisplayTableRowLayout {
             );
         } else {
             for cell in &self.cells {
-                row = row.child(render_table_cell(
+                content = content.child(render_table_cell(
                     cell,
                     self.is_header,
                     self.height,
@@ -256,7 +282,11 @@ impl DisplayTableRowLayout {
             }
         }
 
-        vec![row.into_any_element()]
+        vec![
+            row.child(div().flex_none().w(indent_width).h_full())
+                .child(content)
+                .into_any_element(),
+        ]
     }
 
     fn source_offset_for_x(&self, x: gpui::Pixels) -> usize {

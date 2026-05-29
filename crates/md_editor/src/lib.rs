@@ -1617,9 +1617,12 @@ impl MarkdownEditor {
                 clip_cursor(&snapshot, selection.head()),
                 SelectionGoal::None,
             ),
-            DisplayRowLayout::TableRow(table_layout) => {
-                table_layout.mouse_target_for_x(&snapshot, event.position.x)
-            }
+            DisplayRowLayout::TableRow(table_layout) => table_layout
+                .mouse_target_for_x_with_indent(
+                    &snapshot,
+                    event.position.x,
+                    display_row.rendered_indent_width(),
+                ),
         };
         let previous_selection = self.selection.clone();
         self.selection = if event.modifiers.shift {
@@ -1697,9 +1700,12 @@ impl MarkdownEditor {
                 clip_cursor(&snapshot, selection.head()),
                 SelectionGoal::None,
             ),
-            DisplayRowLayout::TableRow(table_layout) => {
-                table_layout.mouse_target_for_x(&snapshot, event.position.x)
-            }
+            DisplayRowLayout::TableRow(table_layout) => table_layout
+                .mouse_target_for_x_with_indent(
+                    &snapshot,
+                    event.position.x,
+                    display_row.rendered_indent_width(),
+                ),
         };
         let previous_selection = self.selection.clone();
         self.selection = select_to_point_with_goal(&snapshot, &self.selection, point, goal);
@@ -1709,6 +1715,7 @@ impl MarkdownEditor {
     fn mouse_left_down_on_block(
         &mut self,
         block_layout: &DisplayBlockLayout,
+        indent_width: gpui::Pixels,
         event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1717,7 +1724,8 @@ impl MarkdownEditor {
         self.is_selecting_with_mouse = true;
 
         let snapshot = self.buffer.snapshot();
-        let (point, goal) = block_layout.mouse_target_for_x(&snapshot, event.position.x);
+        let (point, goal) =
+            block_layout.mouse_target_for_x_with_indent(&snapshot, event.position.x, indent_width);
         let previous_selection = self.selection.clone();
         self.selection = if event.modifiers.shift {
             select_to_point_with_goal(&snapshot, &self.selection, point, goal)
@@ -1730,6 +1738,7 @@ impl MarkdownEditor {
     fn mouse_move_on_block(
         &mut self,
         block_layout: &DisplayBlockLayout,
+        indent_width: gpui::Pixels,
         event: &MouseMoveEvent,
         _: &mut Window,
         cx: &mut Context<Self>,
@@ -1739,7 +1748,8 @@ impl MarkdownEditor {
         }
 
         let snapshot = self.buffer.snapshot();
-        let (point, goal) = block_layout.mouse_target_for_x(&snapshot, event.position.x);
+        let (point, goal) =
+            block_layout.mouse_target_for_x_with_indent(&snapshot, event.position.x, indent_width);
         let previous_selection = self.selection.clone();
         self.selection = select_to_point_with_goal(&snapshot, &self.selection, point, goal);
         self.notify_after_selection_change(&previous_selection, cx);
@@ -1748,6 +1758,7 @@ impl MarkdownEditor {
     fn mouse_left_down_on_table_row(
         &mut self,
         table_layout: &DisplayTableRowLayout,
+        indent_width: gpui::Pixels,
         event: &MouseDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1756,7 +1767,8 @@ impl MarkdownEditor {
         self.is_selecting_with_mouse = true;
 
         let snapshot = self.buffer.snapshot();
-        let (point, goal) = table_layout.mouse_target_for_x(&snapshot, event.position.x);
+        let (point, goal) =
+            table_layout.mouse_target_for_x_with_indent(&snapshot, event.position.x, indent_width);
         let previous_selection = self.selection.clone();
         self.selection = if event.modifiers.shift {
             select_to_point_with_goal(&snapshot, &self.selection, point, goal)
@@ -1769,6 +1781,7 @@ impl MarkdownEditor {
     fn mouse_move_on_table_row(
         &mut self,
         table_layout: &DisplayTableRowLayout,
+        indent_width: gpui::Pixels,
         event: &MouseMoveEvent,
         _: &mut Window,
         cx: &mut Context<Self>,
@@ -1778,7 +1791,8 @@ impl MarkdownEditor {
         }
 
         let snapshot = self.buffer.snapshot();
-        let (point, goal) = table_layout.mouse_target_for_x(&snapshot, event.position.x);
+        let (point, goal) =
+            table_layout.mouse_target_for_x_with_indent(&snapshot, event.position.x, indent_width);
         let previous_selection = self.selection.clone();
         self.selection = select_to_point_with_goal(&snapshot, &self.selection, point, goal);
         self.notify_after_selection_change(&previous_selection, cx);
@@ -2091,6 +2105,7 @@ fn rendered_display_row(
         MarkdownEditorMode::Rendered,
     );
     let heading_level = heading_level_for_display_row(&markdown_blocks, row);
+    let rendered_indent_level = rendered_indent_level_for_display_row(&markdown_blocks, row);
     DisplayRow {
         row,
         text,
@@ -2099,6 +2114,7 @@ fn rendered_display_row(
         active_projection_source_ranges,
         markdown_blocks,
         heading_level,
+        rendered_indent_level,
         inline_spans,
         rendered_element_descriptors,
         rendered_element_descriptors_have_document_path: document_path.is_some(),
@@ -2133,12 +2149,27 @@ fn source_display_row_in_text_snapshot(snapshot: &TextBufferSnapshot, row: u32) 
         active_projection_source_ranges: Vec::new(),
         markdown_blocks: Vec::new(),
         heading_level: None,
+        rendered_indent_level: 0,
         inline_spans: Vec::new(),
         rendered_element_descriptors: Vec::new(),
         rendered_element_descriptors_have_document_path: false,
         projection,
         insertions: Vec::new(),
     }
+}
+
+fn rendered_indent_level_for_display_row(markdown_blocks: &[MarkdownBlock], row: u32) -> u16 {
+    markdown_blocks
+        .iter()
+        .filter(|block| {
+            matches!(
+                block.kind,
+                MarkdownBlockKind::BlockQuote | MarkdownBlockKind::ListItem
+            ) && block.row_range.contains(&(row as usize))
+        })
+        .count()
+        .try_into()
+        .unwrap_or(u16::MAX)
 }
 
 fn heading_level_for_display_row(markdown_blocks: &[MarkdownBlock], row: u32) -> Option<u8> {
