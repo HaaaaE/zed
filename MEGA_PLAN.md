@@ -267,6 +267,35 @@
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 
+### 2026-05-29：GFM blockquote/list 容器语义覆盖
+
+已完成：
+
+- `MarkdownBlockKind` 增加 blockquote、ordered list、unordered list、list item。
+- block collection 对 blockquote/list/list item 容器继续递归，确保新增容器 block 不吞掉内部 paragraph、nested list、ordered list 等子 block。
+- list block 根据源码 marker 区分 ordered/unordered，覆盖 `.` 和 `)` ordered marker 形式。
+- `md_editor` layout match 接入新增 block kind；本批先作为 no-op block style 处理，避免在正式 list/blockquote rendered indentation 尚未实现前隐藏 marker 或改变显示。
+- 新增 parser test 覆盖 blockquote、task list item 所在 unordered list、nested unordered list、nested ordered list、顶层 ordered list，以及 blockquote 内 paragraph 仍被收集。
+
+验证：
+
+- `rustfmt --edition 2024 crates/markdown_wysiwyg/src/markdown_wysiwyg.rs crates/md_editor/src/layout.rs`：完成。
+- `cargo test -p markdown_wysiwyg parses_blockquotes_and_list_containers_without_losing_nested_blocks -- --nocapture`：1 passed。
+- `cargo test -p markdown_wysiwyg`：36 passed。
+- `cargo test -p md_editor`：198 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
+- `git diff --check`：passed。
+- `cargo perf-test -p md_editor -- --quiet`：首跑 passed，但 rendered draw large mean/SD 明显偏高，按门禁规则复跑。首跑 mean：rendered draw large 2198.90ms，rendered cached redraw 1470.30ms，rendered resize 1517.90ms，rendered scroll large 1606.10ms，rendered cached-region scroll 1778.90ms，source draw large 1492.70ms，source cached redraw 1497.30ms，source scroll large 1571.00ms，source cached-region scroll 1735.20ms，source single-row edit large 1535.50ms，source single-row edit length-change 1535.40ms。
+- `cargo perf-test -p md_editor -- --quiet` 复跑：passed。复跑 mean：rendered draw large 1471.50ms，rendered cached redraw 1463.20ms，rendered resize 1512.30ms，rendered scroll large 1653.40ms，rendered cached-region scroll 1746.20ms，source draw large 1509.50ms，source cached redraw 1505.60ms，source scroll large 1630.30ms，source cached-region scroll 1699.20ms，source single-row edit large 1499.60ms，source single-row edit length-change 1491.60ms。
+
+后续仍未完成：
+
+- list/blockquote 的 rendered indentation、marker/source reveal、cursor/selection/editor 级行为回归。
+- task list item 更完整语义与 list item marker 级测试。
+- GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
+- `markdown_wysiwyg` 模块拆分。
+- 300KB mixed GFM fixture 与最终验证。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：

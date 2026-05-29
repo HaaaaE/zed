@@ -93,6 +93,10 @@ pub enum MarkdownBlockKind {
     AtxHeading { level: u8 },
     SetextHeading { level: u8 },
     ThematicBreak,
+    BlockQuote,
+    OrderedList,
+    UnorderedList,
+    ListItem,
     IndentedCodeBlock,
     FencedCodeBlock,
     HtmlBlock,
@@ -1513,8 +1517,11 @@ fn inline_content_ranges(
 
 fn collect_block_nodes(source: &str, node: Node<'_>, blocks: &mut Vec<MarkdownBlock>) {
     if let Some(block) = block_from_node(source, node) {
+        let recurse = block_node_has_children(node.kind());
         blocks.push(block);
-        return;
+        if !recurse {
+            return;
+        }
     }
 
     let mut cursor = node.walk();
@@ -1527,6 +1534,9 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
     match node.kind() {
         "atx_heading" => atx_heading_block(source, node),
         "setext_heading" => setext_heading_block(source, node),
+        "block_quote" => Some(simple_block(node, MarkdownBlockKind::BlockQuote, source)),
+        "list" => Some(list_block(source, node)),
+        "list_item" => Some(simple_block(node, MarkdownBlockKind::ListItem, source)),
         "paragraph" => Some(MarkdownBlock {
             id: node_id(node),
             kind: MarkdownBlockKind::Paragraph,
@@ -1589,6 +1599,51 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
         }
         _ => None,
     }
+}
+
+fn block_node_has_children(kind: &str) -> bool {
+    matches!(kind, "block_quote" | "list" | "list_item")
+}
+
+fn simple_block(node: Node<'_>, kind: MarkdownBlockKind, source: &str) -> MarkdownBlock {
+    MarkdownBlock {
+        id: node_id(node),
+        kind,
+        source_range: node.byte_range(),
+        content_range: trim_line_end(source, node.byte_range()),
+        marker_ranges: Vec::new(),
+        row_range: row_range_for_node(node),
+    }
+}
+
+fn list_block(source: &str, node: Node<'_>) -> MarkdownBlock {
+    let source_range = node.byte_range();
+    let content_range = trim_line_end(source, source_range.clone());
+    let kind = if list_source_starts_ordered_marker(source, content_range.clone()) {
+        MarkdownBlockKind::OrderedList
+    } else {
+        MarkdownBlockKind::UnorderedList
+    };
+
+    MarkdownBlock {
+        id: node_id(node),
+        kind,
+        source_range,
+        content_range,
+        marker_ranges: Vec::new(),
+        row_range: row_range_for_node(node),
+    }
+}
+
+fn list_source_starts_ordered_marker(source: &str, range: Range<usize>) -> bool {
+    let range = trim_ascii_whitespace(source, range);
+    let bytes = source.as_bytes();
+    let mut cursor = range.start;
+    while cursor < range.end && bytes[cursor].is_ascii_digit() {
+        cursor += 1;
+    }
+
+    cursor > range.start && cursor < range.end && matches!(bytes[cursor], b'.' | b')')
 }
 
 fn setext_heading_block(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
@@ -1958,6 +2013,94 @@ mod tests {
             &source[trim_line_end(source, link_reference.content_range.clone())],
             "[ref]: https://example.com"
         );
+    }
+
+    #[test]
+    fn parses_blockquotes_and_list_containers_without_losing_nested_blocks() {
+        let source = "> quote\n> - [ ] todo\n>   1. ordered\n\n- loose\n  - nested\n1. one\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let block_source =
+            |block: &MarkdownBlock| &source[trim_line_end(source, block.source_range.clone())];
+
+        let blockquote = tree
+            .blocks()
+            .iter()
+            .find(|block| block.kind == MarkdownBlockKind::BlockQuote)
+            .expect("expected block quote");
+        assert_eq!(blockquote.row_range, 0..3);
+        assert_eq!(
+            block_source(blockquote),
+            "> quote\n> - [ ] todo\n>   1. ordered"
+        );
+
+        let unordered_lists = tree
+            .blocks()
+            .iter()
+            .filter(|block| block.kind == MarkdownBlockKind::UnorderedList)
+            .collect::<Vec<_>>();
+        assert!(
+            unordered_lists
+                .iter()
+                .any(|block| block_source(block).contains("- [ ] todo"))
+        );
+        assert!(
+            unordered_lists
+                .iter()
+                .any(|block| block_source(block).contains("- nested"))
+        );
+
+        let ordered_lists = tree
+            .blocks()
+            .iter()
+            .filter(|block| block.kind == MarkdownBlockKind::OrderedList)
+            .collect::<Vec<_>>();
+        assert!(
+            ordered_lists
+                .iter()
+                .any(|block| block_source(block).contains("1. ordered"))
+        );
+        assert!(
+            ordered_lists
+                .iter()
+                .any(|block| block_source(block).contains("1. one"))
+        );
+
+        let list_item_sources = tree
+            .blocks()
+            .iter()
+            .filter(|block| block.kind == MarkdownBlockKind::ListItem)
+            .map(block_source)
+            .collect::<Vec<_>>();
+        assert!(
+            list_item_sources
+                .iter()
+                .any(|source| source.contains("[ ] todo"))
+        );
+        assert!(
+            list_item_sources
+                .iter()
+                .any(|source| source.contains("ordered"))
+        );
+        assert!(
+            list_item_sources
+                .iter()
+                .any(|source| source.contains("loose"))
+        );
+        assert!(
+            list_item_sources
+                .iter()
+                .any(|source| source.contains("nested"))
+        );
+        assert!(
+            list_item_sources
+                .iter()
+                .any(|source| source.contains("one"))
+        );
+        assert!(tree.blocks().iter().any(|block| {
+            block.kind == MarkdownBlockKind::Paragraph
+                && block.source_range.start >= blockquote.source_range.start
+                && block.source_range.end <= blockquote.source_range.end
+        }));
     }
 
     #[test]

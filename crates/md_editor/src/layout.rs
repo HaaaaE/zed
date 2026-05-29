@@ -862,6 +862,10 @@ fn collect_block_style_ranges_for_row(
             MarkdownBlockKind::Blank
             | MarkdownBlockKind::Paragraph
             | MarkdownBlockKind::ThematicBreak
+            | MarkdownBlockKind::BlockQuote
+            | MarkdownBlockKind::OrderedList
+            | MarkdownBlockKind::UnorderedList
+            | MarkdownBlockKind::ListItem
             | MarkdownBlockKind::HtmlBlock
             | MarkdownBlockKind::LinkReferenceDefinition => {}
         }
