@@ -173,6 +173,11 @@ pub enum MarkdownInlineKind {
     InlineCode,
     Link,
     Strikethrough,
+    Escape,
+    Entity,
+    HardBreak,
+    SoftBreak,
+    InlineHtml,
     Image,
     InlineMath,
 }
@@ -1154,9 +1159,52 @@ fn collect_inline_spans(source: &str, parse_tree: &MarkdownParseTree) -> Vec<Mar
     let mut spans = Vec::new();
     for inline_tree in parse_tree.inline_trees() {
         collect_inline_span_nodes(source, inline_tree.tree().root_node(), &mut spans);
+        collect_soft_break_spans(source, inline_tree.parent_range.clone(), &mut spans);
     }
     spans.sort_by_key(|span| (span.source_range.start, span.source_range.end));
     spans
+}
+
+fn collect_soft_break_spans(
+    source: &str,
+    parent_range: Range<usize>,
+    spans: &mut Vec<MarkdownInlineSpan>,
+) {
+    let mut cursor = parent_range.start;
+    while cursor < parent_range.end {
+        let Some(relative_newline) = source[cursor..parent_range.end].find('\n') else {
+            break;
+        };
+        let newline = cursor + relative_newline;
+        let next = newline + 1;
+        if next >= parent_range.end {
+            break;
+        }
+
+        let has_carriage_return =
+            newline > parent_range.start && source.as_bytes()[newline - 1] == b'\r';
+        let break_start = if has_carriage_return {
+            newline - 1
+        } else {
+            newline
+        };
+        let break_range = break_start..next;
+        let is_hard_break = spans.iter().any(|span| {
+            span.kind == MarkdownInlineKind::HardBreak
+                && ranges_overlap(&span.source_range, &break_range)
+        });
+        if !is_hard_break {
+            spans.push(MarkdownInlineSpan {
+                kind: MarkdownInlineKind::SoftBreak,
+                source_range: break_range.clone(),
+                content_ranges: vec![break_range],
+                marker_ranges: Vec::new(),
+                url: None,
+            });
+        }
+
+        cursor = next;
+    }
 }
 
 fn inline_span_prefix_maximum_ends(inline_spans: &[MarkdownInlineSpan]) -> Vec<usize> {
@@ -1358,6 +1406,11 @@ fn inline_span_from_node(source: &str, node: Node<'_>) -> Option<MarkdownInlineS
         | "uri_autolink"
         | "email_autolink" => MarkdownInlineKind::Link,
         "strikethrough" => MarkdownInlineKind::Strikethrough,
+        "backslash_escape" => MarkdownInlineKind::Escape,
+        "entity_reference" | "numeric_character_reference" => MarkdownInlineKind::Entity,
+        "hard_line_break" => MarkdownInlineKind::HardBreak,
+        "soft_line_break" => MarkdownInlineKind::SoftBreak,
+        "html_tag" => MarkdownInlineKind::InlineHtml,
         "image" => MarkdownInlineKind::Image,
         "latex_block" => MarkdownInlineKind::InlineMath,
         _ => return None,
@@ -1957,6 +2010,61 @@ mod tests {
     }
 
     #[test]
+    fn parses_gfm_inline_leaf_spans() {
+        let source = "one \\* &amp;  \ntwo <span>html</span>\nthree\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let spans = tree.inline_spans();
+
+        assert!(spans.iter().any(|span| {
+            span.kind == MarkdownInlineKind::Escape && &source[span.source_range.clone()] == "\\*"
+        }));
+        assert!(spans.iter().any(|span| {
+            span.kind == MarkdownInlineKind::Entity && &source[span.source_range.clone()] == "&amp;"
+        }));
+        assert!(
+            spans
+                .iter()
+                .any(|span| span.kind == MarkdownInlineKind::HardBreak)
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|span| span.kind == MarkdownInlineKind::SoftBreak)
+        );
+        assert_eq!(
+            spans
+                .iter()
+                .filter(|span| span.kind == MarkdownInlineKind::InlineHtml)
+                .map(|span| &source[span.source_range.clone()])
+                .collect::<Vec<_>>(),
+            vec!["<span>", "</span>"]
+        );
+    }
+
+    #[test]
+    fn parses_reference_and_autolink_inline_spans() {
+        let source = "See <https://example.com> <me@example.com> [full][ref] [ref][] [shortcut]\n\n[ref]: https://example.com\n[shortcut]: https://example.com\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let links = tree
+            .inline_spans()
+            .iter()
+            .filter(|span| span.kind == MarkdownInlineKind::Link)
+            .map(|span| &source[span.source_range.clone()])
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            links,
+            vec![
+                "<https://example.com>",
+                "<me@example.com>",
+                "[full][ref]",
+                "[ref][]",
+                "[shortcut]"
+            ]
+        );
+    }
+
+    #[test]
     fn inline_spans_in_source_range_returns_overlapping_spans() {
         let source = "before **bold**\nafter [link](url)\n";
         let tree = MarkdownSyntaxTree::parse(source);
@@ -1971,7 +2079,10 @@ mod tests {
             .map(|span| span.kind)
             .collect::<Vec<_>>();
 
-        assert_eq!(first_row_spans, vec![MarkdownInlineKind::Strong]);
+        assert_eq!(
+            first_row_spans,
+            vec![MarkdownInlineKind::Strong, MarkdownInlineKind::SoftBreak]
+        );
         assert_eq!(second_row_spans, vec![MarkdownInlineKind::Link]);
     }
 

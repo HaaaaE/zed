@@ -913,6 +913,11 @@ pub(super) fn inline_style(kind: MarkdownInlineKind) -> DisplayTextStyle {
             italic: true,
             ..Default::default()
         },
+        MarkdownInlineKind::Escape
+        | MarkdownInlineKind::Entity
+        | MarkdownInlineKind::HardBreak
+        | MarkdownInlineKind::SoftBreak
+        | MarkdownInlineKind::InlineHtml => DisplayTextStyle::default(),
     }
 }
 

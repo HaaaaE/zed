@@ -85,7 +85,12 @@ pub(super) fn rendered_element_descriptor_for_inline_span_in_row(
         | MarkdownInlineKind::Strong
         | MarkdownInlineKind::InlineCode
         | MarkdownInlineKind::Link
-        | MarkdownInlineKind::Strikethrough => None,
+        | MarkdownInlineKind::Strikethrough
+        | MarkdownInlineKind::Escape
+        | MarkdownInlineKind::Entity
+        | MarkdownInlineKind::HardBreak
+        | MarkdownInlineKind::SoftBreak
+        | MarkdownInlineKind::InlineHtml => None,
     }
 }
 

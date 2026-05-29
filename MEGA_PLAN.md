@@ -239,6 +239,34 @@
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 
+### 2026-05-29：GFM inline leaf 语义覆盖
+
+已完成：
+
+- `MarkdownInlineKind` 增加 escape、entity、hard break、soft break、inline HTML。
+- tree-sitter named nodes 覆盖 backslash escape、named/numeric entity、hard line break、inline HTML tag。
+- soft break 由 inline parent range 中的换行推断，并避开已由 tree-sitter 标记的 hard break range。
+- reference link variants、URI autolink、email autolink 继续归一为 `MarkdownInlineKind::Link`，并新增 parser tests 明确覆盖。
+- `md_editor` 对新增 inline kind 使用默认 inline style，且不把它们当成 rendered element。
+
+验证：
+
+- `rustfmt --edition 2024 crates/markdown_wysiwyg/src/markdown_wysiwyg.rs crates/md_editor/src/layout.rs crates/md_editor/src/rendered_element.rs`：完成。
+- `cargo test -p markdown_wysiwyg parses_`：14 passed。
+- `cargo test -p markdown_wysiwyg`：35 passed。
+- `cargo test -p md_editor`：198 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
+- `cargo perf-test -p md_editor -- --quiet`：首跑 passed，但 rendered scroll/cached-region mean 和 SD 偏高，按门禁规则复跑。
+- `cargo perf-test -p md_editor -- --quiet` 复跑：passed。复跑 mean：rendered draw large 1712.20ms，rendered cached redraw 1770.70ms，rendered resize 1756.50ms，rendered scroll large 1899.50ms，rendered cached-region scroll 2031.90ms，source draw large 1734.50ms，source cached redraw 1751.20ms，source scroll large 1892.50ms，source cached-region scroll 1754.30ms，source single-row edit large 1399.40ms，source single-row edit length-change 1552.90ms。
+- `git diff --check`：passed。
+
+后续仍未完成：
+
+- 剩余 GFM block 覆盖，尤其 blockquote、ordered/unordered/nested list、task list item 语义。
+- GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
+- `markdown_wysiwyg` 模块拆分。
+- 300KB mixed GFM fixture 与最终验证。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：
