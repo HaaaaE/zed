@@ -258,7 +258,6 @@
 后续仍未完成：
 
 - 剩余 GFM block 覆盖，尤其 blockquote、ordered/unordered/nested list、task list item 语义。
-- GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 
@@ -286,7 +285,6 @@
 
 - list/blockquote 的 rendered indentation、cursor/selection/editor 级行为回归。
 - task list item 更完整语义与 editor 级行为回归。
-- GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 
@@ -317,7 +315,6 @@
 - 用 2026-05-30 之后的新 segmented editor session baseline 作为后续 MEGA_PLAN 的唯一 perf 对比口径，必要时复跑以降低高 SD case 的噪声。
 - list/blockquote 的 rendered indentation、cursor/selection/editor 级行为回归。
 - task list item 更完整语义与 editor 级行为回归。
-- GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 
@@ -344,7 +341,6 @@
 - 之后所有 `md_editor` perf 回归判断只比较同一 session/segment 协议、同一 case 名、同一 segment occurrence 的结果。
 - 继续完成 list/blockquote rendered indentation、cursor/selection/editor 级行为回归。
 - task list item 更完整语义与 editor 级行为回归。
-- GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 
@@ -370,7 +366,6 @@
 - 如果后续修改 session case 内容、segment 顺序或 segment 语义，需要重新建立 baseline，并在本文件记录失效边界。
 - 继续完成 list/blockquote rendered indentation、cursor/selection/editor 级行为回归。
 - task list item 更完整语义与 editor 级行为回归。
-- GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 
@@ -399,7 +394,34 @@
 
 - list/blockquote 的 rendered indentation、cursor/selection/editor 级行为回归。
 - task list item 更完整语义与 editor 级行为回归。
-- GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
+- `markdown_wysiwyg` 模块拆分。
+- 300KB mixed GFM fixture 与最终验证。
+
+### 2026-05-30：GFM tagfilter/disallowed raw HTML 语义
+
+已完成：
+
+- `MarkdownBlock` 和 `MarkdownInlineSpan` 增加 `tagfilter_disallowed` 语义标记，用于显式区分 GFM tagfilter disallowed raw HTML。
+- 按 GFM tagfilter 列表识别 `title`、`textarea`、`style`、`xmp`、`iframe`、`noembed`、`noframes`、`script`、`plaintext`，匹配大小写不敏感，并要求 tag name 后是合法边界。
+- `html_block` 会根据首个 raw tag 标记 disallowed 状态；inline `html_tag` span 会标记 opening/closing disallowed tag。
+- inline HTML 不再生成 projection marker ranges，避免 rendered projection 把 `<`、`>`、引号等源码字符隐藏后把 raw HTML 拼坏；raw HTML 在 rendered rows 中保持文本显示。
+- 新增 `markdown_wysiwyg` parser tests 覆盖 disallowed/safe HTML block、inline `<IFRAME>`/`</IFRAME>`、以及 `<scripted>` 非 tagfilter 命中。
+- 新增 `md_editor` rendered display-row 回归，确认 `<script>` block 和 inline `<iframe>` 保持 raw text。
+
+验证：
+
+- `cargo fmt -p markdown_wysiwyg -p md_editor`：passed。
+- `cargo test -p markdown_wysiwyg`：38 passed。
+- `cargo test -p md_editor rendered_display_rows_keep_tagfilter_disallowed_raw_html_as_text -- --nocapture`：1 passed。
+- `cargo test -p md_editor`：201 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
+- `git diff --check`：passed。
+- 未跑 perf：本批只改 raw HTML parser metadata 和 inline HTML projection marker 行为，没有改 display row 构建、layout、scroll/render 热路径或 perf fixture 覆盖。
+
+后续仍未完成：
+
+- list/blockquote 的 rendered indentation、cursor/selection/editor 级行为回归。
+- task list item 更完整语义与 editor 级行为回归。
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 

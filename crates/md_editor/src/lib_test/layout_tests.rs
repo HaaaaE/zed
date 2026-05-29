@@ -174,6 +174,18 @@ fn rendered_display_rows_replace_full_html5_named_entities() {
 }
 
 #[test]
+fn rendered_display_rows_keep_tagfilter_disallowed_raw_html_as_text() {
+    let source = "<script>alert(1)</script>\nInline <iframe src=\"x\"></iframe>\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+
+    let rows = display_rows_in_mode(&snapshot, 0..2, None, MarkdownEditorMode::Rendered);
+
+    assert_eq!(rows[0].text, "<script>alert(1)</script>");
+    assert_eq!(rows[1].text, "Inline <iframe src=\"x\"></iframe>");
+}
+
+#[test]
 fn rendered_display_rows_reveal_active_escape_and_entity_source() {
     let source = "Escape \\* &amp; end\n";
     let mut buffer = Buffer::local(source);

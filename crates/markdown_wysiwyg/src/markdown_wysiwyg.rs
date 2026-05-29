@@ -81,6 +81,7 @@ pub struct MarkdownBlock {
     pub content_range: Range<usize>,
     pub marker_ranges: Vec<Range<usize>>,
     pub row_range: Range<usize>,
+    pub tagfilter_disallowed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -155,6 +156,7 @@ pub struct MarkdownInlineSpan {
     pub content_ranges: Vec<Range<usize>>,
     pub marker_ranges: Vec<Range<usize>>,
     pub url: Option<String>,
+    pub tagfilter_disallowed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1204,6 +1206,7 @@ fn collect_soft_break_spans(
                 content_ranges: vec![break_range],
                 marker_ranges: Vec::new(),
                 url: None,
+                tagfilter_disallowed: false,
             });
         }
 
@@ -1427,6 +1430,8 @@ fn inline_span_from_node(source: &str, node: Node<'_>) -> Option<MarkdownInlineS
         MarkdownInlineKind::Image | MarkdownInlineKind::Link => extract_link_url(source, &node),
         _ => None,
     };
+    let tagfilter_disallowed = kind == MarkdownInlineKind::InlineHtml
+        && raw_html_tagfilter_disallowed(source, source_range.clone());
 
     Some(MarkdownInlineSpan {
         kind,
@@ -1434,12 +1439,68 @@ fn inline_span_from_node(source: &str, node: Node<'_>) -> Option<MarkdownInlineS
         content_ranges,
         marker_ranges,
         url,
+        tagfilter_disallowed,
     })
+}
+
+fn raw_html_tagfilter_disallowed(source: &str, source_range: Range<usize>) -> bool {
+    const DISALLOWED_TAGS: [&str; 9] = [
+        "title",
+        "textarea",
+        "style",
+        "xmp",
+        "iframe",
+        "noembed",
+        "noframes",
+        "script",
+        "plaintext",
+    ];
+
+    let Some(text) = source.get(source_range) else {
+        return false;
+    };
+    let bytes = text.as_bytes();
+    let mut cursor = 0;
+
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    if bytes.get(cursor) != Some(&b'<') {
+        return false;
+    }
+    cursor += 1;
+    if bytes.get(cursor) == Some(&b'/') {
+        cursor += 1;
+    }
+
+    let tag_start = cursor;
+    while cursor < bytes.len() && bytes[cursor].is_ascii_alphanumeric() {
+        cursor += 1;
+    }
+    if cursor == tag_start {
+        return false;
+    }
+
+    let tag_name = &text[tag_start..cursor];
+    if !DISALLOWED_TAGS
+        .iter()
+        .any(|tag| tag_name.eq_ignore_ascii_case(tag))
+    {
+        return false;
+    }
+
+    matches!(
+        bytes.get(cursor).copied(),
+        None | Some(b'>') | Some(b'/') | Some(b' ' | b'\t' | b'\n' | b'\r' | 0x0c)
+    )
 }
 
 fn inline_marker_ranges(source: &str, node: Node<'_>) -> Vec<Range<usize>> {
     if node.kind() == "latex_block" {
         return latex_block_marker_ranges(source, node);
+    }
+    if node.kind() == "html_tag" {
+        return Vec::new();
     }
 
     let mut marker_ranges = Vec::new();
@@ -1544,6 +1605,7 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
             content_range: trim_line_end(source, node.byte_range()),
             marker_ranges: Vec::new(),
             row_range: row_range_for_node(node),
+            tagfilter_disallowed: false,
         }),
         "thematic_break" => Some(MarkdownBlock {
             id: node_id(node),
@@ -1552,6 +1614,7 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
             content_range: node.start_byte()..node.start_byte(),
             marker_ranges: Vec::new(),
             row_range: row_range_for_node(node),
+            tagfilter_disallowed: false,
         }),
         "indented_code_block" => Some(MarkdownBlock {
             id: node_id(node),
@@ -1560,6 +1623,7 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
             content_range: trim_line_end(source, node.byte_range()),
             marker_ranges: Vec::new(),
             row_range: row_range_for_node(node),
+            tagfilter_disallowed: false,
         }),
         "fenced_code_block" => Some(MarkdownBlock {
             id: node_id(node),
@@ -1568,6 +1632,7 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
             content_range: fenced_code_content_range(source, node),
             marker_ranges: fenced_code_marker_ranges(node),
             row_range: row_range_for_node(node),
+            tagfilter_disallowed: false,
         }),
         "html_block" => Some(MarkdownBlock {
             id: node_id(node),
@@ -1576,6 +1641,7 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
             content_range: trim_line_end(source, node.byte_range()),
             marker_ranges: Vec::new(),
             row_range: row_range_for_node(node),
+            tagfilter_disallowed: raw_html_tagfilter_disallowed(source, node.byte_range()),
         }),
         "link_reference_definition" => Some(MarkdownBlock {
             id: node_id(node),
@@ -1584,6 +1650,7 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
             content_range: trim_line_end(source, node.byte_range()),
             marker_ranges: Vec::new(),
             row_range: row_range_for_node(node),
+            tagfilter_disallowed: false,
         }),
         "pipe_table" => {
             let marker_ranges = pipe_table_marker_ranges(node);
@@ -1595,6 +1662,7 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
                 content_range,
                 marker_ranges,
                 row_range: row_range_for_node(node),
+                tagfilter_disallowed: false,
             })
         }
         _ => None,
@@ -1617,6 +1685,7 @@ fn block_quote_block(source: &str, node: Node<'_>) -> MarkdownBlock {
         content_range,
         marker_ranges,
         row_range: row_range_for_node(node),
+        tagfilter_disallowed: false,
     }
 }
 
@@ -1636,6 +1705,7 @@ fn list_block(source: &str, node: Node<'_>) -> MarkdownBlock {
         content_range,
         marker_ranges: Vec::new(),
         row_range: row_range_for_node(node),
+        tagfilter_disallowed: false,
     }
 }
 
@@ -1655,6 +1725,7 @@ fn list_item_block(source: &str, node: Node<'_>) -> MarkdownBlock {
         content_range,
         marker_ranges,
         row_range: row_range_for_node(node),
+        tagfilter_disallowed: false,
     }
 }
 
@@ -1757,6 +1828,7 @@ fn setext_heading_block(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
         content_range,
         marker_ranges: vec![marker_range],
         row_range: row_range_for_node(node),
+        tagfilter_disallowed: false,
     })
 }
 
@@ -1774,6 +1846,7 @@ fn atx_heading_block(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
         content_range: content_start..content_end,
         marker_ranges: vec![marker_range],
         row_range: row_range_for_node(node),
+        tagfilter_disallowed: false,
     })
 }
 
@@ -1888,6 +1961,7 @@ fn add_blank_blocks(source: &str, line_starts: &[usize], blocks: &mut Vec<Markdo
             content_range: range.start..range.start,
             marker_ranges: Vec::new(),
             row_range: row..row + 1,
+            tagfilter_disallowed: false,
         });
     }
 }
@@ -2096,6 +2170,7 @@ mod tests {
         let html_content = &source[trim_line_end(source, html.content_range.clone())];
         assert!(html_content.starts_with("<div>"));
         assert!(html_content.ends_with("</div>"));
+        assert!(!html.tagfilter_disallowed);
 
         let link_reference = tree
             .blocks()
@@ -2251,6 +2326,49 @@ mod tests {
     }
 
     #[test]
+    fn parses_gfm_tagfilter_disallowed_raw_html() {
+        let source = "<script>alert(1)</script>\n\n<div>safe</div>\n\nInline <IFRAME src=\"x\"></IFRAME> <scripted>ok</scripted>\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+
+        let html_blocks = tree
+            .blocks()
+            .iter()
+            .filter(|block| block.kind == MarkdownBlockKind::HtmlBlock)
+            .map(|block| {
+                (
+                    &source[trim_line_end(source, block.source_range.clone())],
+                    block.tagfilter_disallowed,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            html_blocks
+                .iter()
+                .any(|(text, disallowed)| text.starts_with("<script>") && *disallowed)
+        );
+        assert!(
+            html_blocks
+                .iter()
+                .any(|(text, disallowed)| text.starts_with("<div>") && !*disallowed)
+        );
+
+        let inline_html = tree
+            .inline_spans()
+            .iter()
+            .filter(|span| span.kind == MarkdownInlineKind::InlineHtml)
+            .map(|span| {
+                (
+                    &source[span.source_range.clone()],
+                    span.tagfilter_disallowed,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(inline_html.contains(&("<IFRAME src=\"x\">", true)));
+        assert!(inline_html.contains(&("</IFRAME>", true)));
+        assert!(inline_html.contains(&("<scripted>", false)));
+    }
+
+    #[test]
     fn parses_inline_trees_with_tree_sitter() {
         let tree = MarkdownSyntaxTree::parse("Text with **bold** and [link](https://zed.dev).\n");
 
@@ -2298,6 +2416,12 @@ mod tests {
                 .map(|span| &source[span.source_range.clone()])
                 .collect::<Vec<_>>(),
             vec!["<span>", "</span>"]
+        );
+        assert!(
+            spans
+                .iter()
+                .filter(|span| span.kind == MarkdownInlineKind::InlineHtml)
+                .all(|span| span.marker_ranges.is_empty() && !span.tagfilter_disallowed)
         );
     }
 
