@@ -168,6 +168,17 @@ fn record_segment<T>(
     value
 }
 
+fn record_scroll_segments(
+    segments: &mut Vec<(&'static str, Duration)>,
+    prepare_name: &'static str,
+    scroll_name: &'static str,
+    run: impl FnOnce() -> (Duration, Duration),
+) {
+    let (prepare_duration, scroll_duration) = run();
+    segments.push((prepare_name, prepare_duration));
+    segments.push((scroll_name, scroll_duration));
+}
+
 fn clear_editor_layout_caches(
     editor: &gpui::Entity<MarkdownEditor>,
     cx: &mut gpui::VisualTestContext,
@@ -193,32 +204,36 @@ fn measure_uncached_scroll_iteration(
     editor: &gpui::Entity<MarkdownEditor>,
     cx: &mut gpui::VisualTestContext,
     initial_offset: ListOffset,
-) -> Duration {
+) -> (Duration, Duration) {
+    let prepare_start = Instant::now();
     scroll_to(editor, cx, initial_offset);
     clear_editor_layout_caches(editor, cx);
     warm_draw(editor, cx);
     reset_layout_computation_counts(editor, cx);
+    let prepare_duration = prepare_start.elapsed();
 
     let start = Instant::now();
     scroll_and_draw(editor, cx, SCROLL_STEPS, SCROLL_STEP_PIXELS);
-    start.elapsed()
+    (prepare_duration, start.elapsed())
 }
 
 fn measure_cached_region_scroll_iteration(
     editor: &gpui::Entity<MarkdownEditor>,
     cx: &mut gpui::VisualTestContext,
     initial_offset: ListOffset,
-) -> Duration {
+) -> (Duration, Duration) {
+    let prepare_start = Instant::now();
     scroll_to(editor, cx, initial_offset);
     warm_draw(editor, cx);
     scroll_and_draw(editor, cx, SCROLL_STEPS, SCROLL_STEP_PIXELS);
     scroll_to(editor, cx, initial_offset);
     warm_draw(editor, cx);
     reset_layout_computation_counts(editor, cx);
+    let prepare_duration = prepare_start.elapsed();
 
     let start = Instant::now();
     scroll_and_draw(editor, cx, SCROLL_STEPS, SCROLL_STEP_PIXELS);
-    start.elapsed()
+    (prepare_duration, start.elapsed())
 }
 
 fn run_editor_session(target_bytes: usize) {
@@ -257,12 +272,18 @@ fn run_editor_session(target_bytes: usize) {
             reset_layout_computation_counts(&editor, cx);
             warm_draw(&editor, cx);
         });
-        record_segment(&mut segments, "source_scroll_cold", || {
-            measure_uncached_scroll_iteration(&editor, cx, initial_offset);
-        });
-        record_segment(&mut segments, "source_scroll_cached_region", || {
-            measure_cached_region_scroll_iteration(&editor, cx, initial_offset);
-        });
+        record_scroll_segments(
+            &mut segments,
+            "source_scroll_cold_prepare",
+            "source_scroll_cold",
+            || measure_uncached_scroll_iteration(&editor, cx, initial_offset),
+        );
+        record_scroll_segments(
+            &mut segments,
+            "source_scroll_cached_region_prepare",
+            "source_scroll_cached_region",
+            || measure_cached_region_scroll_iteration(&editor, cx, initial_offset),
+        );
         record_segment(&mut segments, "source_edit_equal_length", || {
             replace_middle_row_word(&editor, cx, target_row, "source-row", "source-raw");
             warm_draw(&editor, cx);
@@ -291,12 +312,18 @@ fn run_editor_session(target_bytes: usize) {
                 reset_layout_computation_counts(&editor, cx);
                 warm_draw(&editor, cx);
             });
-            record_segment(&mut segments, "rendered_scroll_cold", || {
-                measure_uncached_scroll_iteration(&editor, cx, initial_offset);
-            });
-            record_segment(&mut segments, "rendered_scroll_cached_region", || {
-                measure_cached_region_scroll_iteration(&editor, cx, initial_offset);
-            });
+            record_scroll_segments(
+                &mut segments,
+                "rendered_scroll_cold_prepare",
+                "rendered_scroll_cold",
+                || measure_uncached_scroll_iteration(&editor, cx, initial_offset),
+            );
+            record_scroll_segments(
+                &mut segments,
+                "rendered_scroll_cached_region_prepare",
+                "rendered_scroll_cached_region",
+                || measure_cached_region_scroll_iteration(&editor, cx, initial_offset),
+            );
             record_segment(&mut segments, "rendered_resize", || {
                 cx.simulate_resize(size(px(PERF_NARROW_WINDOW_WIDTH), px(PERF_WINDOW_HEIGHT)));
                 warm_draw(&editor, cx);
@@ -310,12 +337,11 @@ fn run_editor_session(target_bytes: usize) {
                 editor.set_mode(MarkdownEditorMode::Source, cx)
             });
         });
-        record_segment(
+        record_scroll_segments(
             &mut segments,
+            "source_scroll_cached_region_after_switch_prepare",
             "source_scroll_cached_region_after_switch",
-            || {
-                measure_cached_region_scroll_iteration(&editor, cx, initial_offset);
-            },
+            || measure_cached_region_scroll_iteration(&editor, cx, initial_offset),
         );
         record_segment(
             &mut segments,

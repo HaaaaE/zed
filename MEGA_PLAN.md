@@ -349,7 +349,7 @@
 已完成：
 
 - 使用 Windows Kits `D:\Windows Kits\10\bin\10.0.26100.0\x64` 加入 `PATH` 后运行 `cargo perf-test -p md_editor -- --quiet`。
-- 生成本地 ignored run 文件 `.perf-runs/20260530-014124-8bf8106989.md_editor.json`，作为当前 session/segment 协议的首个正式 baseline 标识。
+- 生成本地 ignored run 文件 `.perf-runs/20260530-014124-8bf8106989.md_editor.json`，作为当时 27 段 session/segment 协议的首个正式 baseline 标识；该 baseline 已在后续 scroll prepare 拆分后作废。
 - command-level baseline：
   - `perf_tests::large_document_session`：iterations 8，iter/sec 0.78，mean 10274.33ms，SD 104.61ms。
   - `perf_tests::small_document_session`：iterations 16，iter/sec 2.81，mean 5684.57ms，SD 75.92ms。
@@ -362,8 +362,8 @@
 
 后续仍未完成：
 
-- 未来 perf 对比用该 baseline 或更新后的同协议 baseline；不得拿旧 process-timed / 2026-05-29 hot-path self-timed log 横向比较。
-- 如果后续修改 session case 内容、segment 顺序或 segment 语义，需要重新建立 baseline，并在本文件记录失效边界。
+- 未来 perf 对比用同协议 baseline；不得拿旧 process-timed / 2026-05-29 hot-path self-timed log 横向比较。
+- 如果后续修改 session case 内容、segment 顺序或 segment 语义，需要重新建立 baseline，并在本文件记录失效边界；scroll prepare 拆分已触发一次新 baseline。
 - 继续完成 list/blockquote rendered indentation、cursor/selection/editor 级行为回归。
 - task list item 更完整语义与 editor 级行为回归。
 - `markdown_wysiwyg` 模块拆分。
@@ -425,6 +425,35 @@
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 
+### 2026-05-30：scroll segment prepare 计时边界修正
+
+已完成：
+
+- 修正 `md_editor` segmented perf 的 scroll segment 语义：`source_scroll_*` / `rendered_scroll_*` 不再把回到初始 offset、清 layout cache、cached-region 预热滚动、warm draw 等准备阶段混入 hot scroll segment。
+- `measure_uncached_scroll_iteration` 和 `measure_cached_region_scroll_iteration` 改为分别返回 prepare duration 与实际 scroll duration；`record_scroll_segments` 按固定顺序上报 `*_prepare` 和对应 `*_scroll_*`。
+- session timeline 从 27 个 segment 变为 34 个 segment；因此 `.perf-runs/20260530-014124-8bf8106989.md_editor.json`、`20260530-list-markers`、`20260530-list-markers-rerun`、`markeropt-20260530` 等旧 27 段 run 只保留为历史记录，不能继续作为后续 `md_editor` perf baseline。
+- 新 baseline 写入 `.perf-runs/20260530-scroll-segments.md_editor.json`，后续 `md_editor` perf 对比必须使用该 34 段 timeline 或之后同语义 baseline。
+- 新 baseline command-level：
+  - `perf_tests::large_document_session`：iterations 8，iter/sec 0.68，mean 11679.98ms，SD 480.21ms。
+  - `perf_tests::small_document_session`：iterations 16，iter/sec 2.17，mean 7385.02ms，SD 363.62ms。
+- prepare 成本确实不可忽略：large cached-region prepare 约 315.84-376.54ms，实际 scroll 约 288.31-327.97ms；small cached-region prepare 约 542.88-609.98ms，实际 scroll 约 496.64-561.54ms。后续判断 scroll hot path 必须看实际 scroll segment，不看 prepare+scroll 混合值。
+- 本次 run 的 SD 高于首个 segmented baseline；做回归结论前仍应复跑同一 34 段 baseline，结合 SD 判断是否是环境噪声。
+
+验证：
+
+- `rustfmt --edition 2024 crates/md_editor/src/lib_test/perf_tests.rs`：passed。
+- `cargo test -p perf`：7 passed。
+- `cargo test -p md_editor --profile release-fast --lib --no-run --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]'`：passed，保留既有 `md_text` 未使用 `FxHasher` 和 `md_editor` `move_selection_right` warnings。
+- `MD_PERF_ITER=1 cargo test -p md_editor perf_tests::small_document_session__MD_PERF_FN --profile release-fast --lib --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]' -- --exact --nocapture`：passed，确认输出 34 段 timeline 且包含 `*_prepare`。
+- `cargo perf-test -p md_editor -- --quiet --json=20260530-scroll-segments`：passed，使用 Windows Kits `D:\Windows Kits\10\bin\10.0.26100.0\x64` 加入 `PATH`。
+
+后续仍未完成：
+
+- list/blockquote 的 rendered indentation、cursor/selection/editor 级行为回归。
+- task list item 更完整语义与 editor 级行为回归。
+- `markdown_wysiwyg` 模块拆分。
+- 300KB mixed GFM fixture 与最终验证。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：
@@ -472,7 +501,7 @@
 - `md_editor` perf 必须使用 2026-05-30 之后的 self-timed segmented session 口径：每个样本必须有一个 `MD_PERF_SELF_TIMED_NS` total 和稳定有序的 `MD_PERF_SEGMENT_NS` timeline。
 - 旧 process-timed `md_editor` mean 和 2026-05-29 hot-path self-timed mean 已作废，不参与回归判断。
 - command-level mean 只代表合成 editor session 总成本；具体 draw、cached redraw、scroll、edit、resize、mode switch、setup 影响必须看 segment table。
-- 当前首个正式 segmented baseline 标识为 `.perf-runs/20260530-014124-8bf8106989.md_editor.json`；该文件在本地 `.perf-runs` 中 ignored，计划文档只记录关键摘要。
+- 当前正式 segmented baseline 标识为 `.perf-runs/20260530-scroll-segments.md_editor.json`；该文件在本地 `.perf-runs` 中 ignored，计划文档只记录关键摘要。此前 `.perf-runs/20260530-014124-8bf8106989.md_editor.json` 是旧 27 段 timeline 的首个 baseline，已被 scroll prepare 拆分后的 34 段 baseline 取代。
 - 以下节点必须跑 perf：
   - 重构前 baseline
   - semantic index 重构后

@@ -48,7 +48,9 @@
   - `source_editor_create`
   - `source_first_draw`
   - `source_cached_redraw`
+  - `source_scroll_cold_prepare`
   - `source_scroll_cold`
+  - `source_scroll_cached_region_prepare`
   - `source_scroll_cached_region`
   - `source_edit_equal_length`
   - `source_edit_length_change`
@@ -56,19 +58,26 @@
   - `switch_to_rendered`
   - `rendered_first_draw`
   - `rendered_cached_redraw`
+  - `rendered_scroll_cold_prepare`
   - `rendered_scroll_cold`
+  - `rendered_scroll_cached_region_prepare`
   - `rendered_scroll_cached_region`
   - `rendered_resize`
   - `rendered_cached_redraw`
+  - `rendered_scroll_cold_prepare`
   - `rendered_scroll_cold`
+  - `rendered_scroll_cached_region_prepare`
   - `rendered_scroll_cached_region`
   - `rendered_resize`
   - `switch_to_source`
+  - `source_scroll_cached_region_after_switch_prepare`
   - `source_scroll_cached_region_after_switch`
   - `source_edit_equal_length_after_switch`
   - `source_edit_length_change_after_switch`
   - `switch_to_rendered_again`
   - `rendered_cached_redraw_after_second_switch`
+- Scroll prepare segments are explicit so scroll hot-path segments do not hide
+  cache clearing, region prewarming, or re-anchoring setup.
 - Repeated segment names are intentional. The report must distinguish occurrences by timeline index.
 
 ## Implementation Steps
