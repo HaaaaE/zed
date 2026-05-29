@@ -1,6 +1,7 @@
-//! Perf profiler for Zed tests. Outputs timings of tests marked with the `#[perf]`
-//! attribute to stdout in Markdown and saves run history to `.perf-runs`. See the
-//! documentation of `util_macros::perf` for usage details on the actual attribute.
+//! Perf profiler for Markdown Editor tests. Outputs timings of tests marked with
+//! the `#[perf]` attribute to stdout in Markdown and saves run history to
+//! `.perf-runs`. See the documentation of `util_macros::perf` for usage details
+//! on the actual attribute.
 //!
 //! # Usage
 //! Calling this tool rebuilds the targeted crate(s) with some cfg flags set for the
@@ -26,7 +27,7 @@
 //! Similarly, to skip outputting progress to the command line, pass `-- --quiet`.
 //! These flags can be combined.
 //!
-//! Each perf test must print `ZED_PERF_SELF_TIMED_NS <nanoseconds>` from its
+//! Each perf test must print `MD_PERF_SELF_TIMED_NS <nanoseconds>` from its
 //! measured region. The profiler samples that self-reported duration directly so
 //! setup code is not counted.
 //!

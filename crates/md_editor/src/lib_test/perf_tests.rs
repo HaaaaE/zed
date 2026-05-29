@@ -190,13 +190,13 @@ const PERF_CACHED_DRAW_ITERATIONS: usize = 128;
 const PERF_SCROLL_ITERATIONS: usize = 8;
 const PERF_EDIT_ITERATIONS: usize = 64;
 const PERF_RESIZE_ITERATIONS: usize = 32;
-const PERF_SELF_TIMED_LINE_PREFIX: &str = "ZED_PERF_SELF_TIMED_NS";
+const PERF_SELF_TIMED_LINE_PREFIX: &str = "MD_PERF_SELF_TIMED_NS";
 
 fn perf_iter_count() -> usize {
-    std::env::var("ZED_PERF_ITER")
-        .expect("perf harness should set ZED_PERF_ITER")
+    std::env::var("MD_PERF_ITER")
+        .expect("perf harness should set MD_PERF_ITER")
         .parse::<usize>()
-        .expect("ZED_PERF_ITER should be a usize")
+        .expect("MD_PERF_ITER should be a usize")
 }
 
 fn report_self_timed_duration(duration: std::time::Duration) {

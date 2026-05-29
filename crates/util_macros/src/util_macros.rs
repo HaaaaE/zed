@@ -145,15 +145,15 @@ impl PerfArgs {
 /// relevant within its importance category.
 ///
 /// If `iterations = n` is supplied, the profiler passes that value through
-/// `ZED_PERF_ITER`. Otherwise it passes a small default count. Explicit iterations
+/// `MD_PERF_ITER`. Otherwise it passes a small default count. Explicit iterations
 /// are recommended so setup and measurement costs stay intentional.
 ///
 /// This attribute should probably not be applied to tests that do any significant
 /// disk IO, as locks on files may not be released in time when repeating a test many
 /// times. This might lead to spurious failures.
 ///
-/// The test body is responsible for reading `ZED_PERF_ITER`, timing only the
-/// measured region, and printing `ZED_PERF_SELF_TIMED_NS <nanoseconds>`.
+/// The test body is responsible for reading `MD_PERF_ITER`, timing only the
+/// measured region, and printing `MD_PERF_SELF_TIMED_NS <nanoseconds>`.
 ///
 /// # Examples
 /// ```rust
@@ -161,7 +161,7 @@ impl PerfArgs {
 ///
 /// #[perf(iterations = 30)]
 /// fn generic_test() {
-///     let iter_count = std::env::var("ZED_PERF_ITER")
+///     let iter_count = std::env::var("MD_PERF_ITER")
 ///         .unwrap()
 ///         .parse::<usize>()
 ///         .unwrap();
@@ -171,12 +171,12 @@ impl PerfArgs {
 ///         // Measured operation goes here.
 ///         measured += start.elapsed();
 ///     }
-///     println!("ZED_PERF_SELF_TIMED_NS {}", measured.as_nanos());
+///     println!("MD_PERF_SELF_TIMED_NS {}", measured.as_nanos());
 /// }
 ///
 /// #[perf(fluff, weight = 30, iterations = 10)]
 /// fn cold_path_test() {
-///     let iter_count = std::env::var("ZED_PERF_ITER")
+///     let iter_count = std::env::var("MD_PERF_ITER")
 ///         .unwrap()
 ///         .parse::<usize>()
 ///         .unwrap();
@@ -184,7 +184,7 @@ impl PerfArgs {
 ///     for _ in 0..iter_count {
 ///         // Measured operation goes here.
 ///     }
-///     println!("ZED_PERF_SELF_TIMED_NS {}", start.elapsed().as_nanos());
+///     println!("MD_PERF_SELF_TIMED_NS {}", start.elapsed().as_nanos());
 /// }
 /// ```
 ///
@@ -197,7 +197,7 @@ impl PerfArgs {
 /// fn oneshot_test(_cx: &mut gpui::TestAppContext) {
 ///     let start = std::time::Instant::now();
 ///     // Measured operation goes here.
-///     println!("ZED_PERF_SELF_TIMED_NS {}", start.elapsed().as_nanos());
+///     println!("MD_PERF_SELF_TIMED_NS {}", start.elapsed().as_nanos());
 /// }
 /// ```
 #[proc_macro_attribute]
