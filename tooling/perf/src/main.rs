@@ -2,9 +2,6 @@
 //! attribute to stdout in Markdown and saves run history to `.perf-runs`. See the
 //! documentation of `util_macros::perf` for usage details on the actual attribute.
 //!
-//! # Setup
-//! Make sure `hyperfine` is installed and in the shell path.
-//!
 //! # Usage
 //! Calling this tool rebuilds the targeted crate(s) with some cfg flags set for the
 //! perf proc macro *and* enables optimisations (`release-fast` profile), so expect
@@ -29,9 +26,9 @@
 //! Similarly, to skip outputting progress to the command line, pass `-- --quiet`.
 //! These flags can be combined.
 //!
-//! Tests with expensive setup may use `#[perf(self_timed)]` and print
-//! `ZED_PERF_SELF_TIMED_NS <nanoseconds>` from their measured region. Those tests
-//! are sampled directly instead of being timed as whole processes by Hyperfine.
+//! Each perf test must print `ZED_PERF_SELF_TIMED_NS <nanoseconds>` from its
+//! measured region. The profiler samples that self-reported duration directly so
+//! setup code is not counted.
 //!
 //! For a large crate such as `md_editor`, it can be useful to prebuild the perf
 //! test binary before invoking the profiler:
@@ -69,13 +66,11 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::atomic::{AtomicBool, Ordering},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
-/// How many iterations to attempt the first time a test is run.
+/// How many iterations to pass to tests that don't specify a fixed count.
 const DEFAULT_ITER_COUNT: NonZero<usize> = NonZero::new(3).unwrap();
-/// Multiplier for the iteration count when a test doesn't pass the noise cutoff.
-const ITER_COUNT_MUL: NonZero<usize> = NonZero::new(4).unwrap();
 /// Number of measured samples to collect for benchmarks that report their own
 /// measured duration.
 const SELF_TIMED_SAMPLES: usize = 8;
@@ -185,7 +180,6 @@ fn parse_mdata(t_bin: &str, mdata_fn: &str) -> Result<TestMdata, FailKind> {
     let mut iterations = None;
     let mut importance = Importance::default();
     let mut weight = consts::WEIGHT_DEFAULT;
-    let mut self_timed = false;
     for line in stdout
         .lines()
         .filter_map(|l| l.strip_prefix(consts::MDATA_LINE_PREF))
@@ -226,12 +220,6 @@ fn parse_mdata(t_bin: &str, mdata_fn: &str) -> Result<TestMdata, FailKind> {
                     _ => return Err(FailKind::BadMetadata),
                 };
             }
-            consts::TIMING_MODE_LINE_NAME => match items.next().ok_or(FailKind::BadMetadata)? {
-                consts::TIMING_MODE_SELF_TIMED => {
-                    self_timed = true;
-                }
-                _ => return Err(FailKind::BadMetadata),
-            },
             consts::WEIGHT_LINE_NAME => {
                 weight = items
                     .next()
@@ -253,7 +241,6 @@ fn parse_mdata(t_bin: &str, mdata_fn: &str) -> Result<TestMdata, FailKind> {
         importance,
         // Same with weight.
         weight,
-        self_timed,
     })
 }
 
@@ -401,111 +388,6 @@ fn get_tests(t_bin: &str) -> impl ExactSizeIterator<Item = (String, String)> {
     out.into_iter()
 }
 
-/// Runs the specified test `count` times, returning the time taken if the test
-/// succeeded.
-#[inline]
-fn spawn_and_iterate(t_bin: &str, t_name: &str, count: NonZero<usize>) -> Option<Duration> {
-    let mut cmd = Command::new(t_bin);
-    cmd.args([t_name, "--exact"]);
-    cmd.env(consts::ITER_ENV_VAR, format!("{count}"));
-    // Don't let the child muck up our stdin/out/err.
-    cmd.stdin(Stdio::null());
-    cmd.stdout(Stdio::null());
-    cmd.stderr(Stdio::null());
-    let pre = Instant::now();
-    // Discard the output beyond ensuring success.
-    let out = cmd.spawn().unwrap().wait();
-    let post = Instant::now();
-    out.iter().find_map(|s| s.success().then_some(post - pre))
-}
-
-/// Triage a test to determine the correct number of iterations that it should run.
-/// Specifically, repeatedly runs the given test until its execution time exceeds
-/// `thresh`, calling `step(iterations)` after every failed run to determine the new
-/// iteration count. Returns `None` if the test errored or `step` returned `None`,
-/// else `Some(iterations)`.
-///
-/// # Panics
-/// This will panic if `step(usize)` is not monotonically increasing, or if the test
-/// binary is invalid.
-fn triage_test(
-    t_bin: &str,
-    t_name: &str,
-    thresh: Duration,
-    mut step: impl FnMut(NonZero<usize>) -> Option<NonZero<usize>>,
-) -> Option<NonZero<usize>> {
-    let mut iter_count = DEFAULT_ITER_COUNT;
-    // It's possible that the first loop of a test might be an outlier (e.g. it's
-    // doing some caching), in which case we want to skip it.
-    let duration_once = spawn_and_iterate(t_bin, t_name, NonZero::new(1).unwrap())?;
-    loop {
-        let duration = spawn_and_iterate(t_bin, t_name, iter_count)?;
-        if duration.saturating_sub(duration_once) > thresh {
-            break Some(iter_count);
-        }
-        let new = step(iter_count)?;
-        assert!(
-            new > iter_count,
-            "FATAL: step must be monotonically increasing"
-        );
-        iter_count = new;
-    }
-}
-
-/// Try to find the hyperfine binary the user has installed.
-fn hyp_binary() -> Option<Command> {
-    const HYP_PATH: &str = "hyperfine";
-    const HYP_HOME: &str = "~/.cargo/bin/hyperfine";
-    if Command::new(HYP_PATH).output().is_err() {
-        if Command::new(HYP_HOME).output().is_err() {
-            None
-        } else {
-            Some(Command::new(HYP_HOME))
-        }
-    } else {
-        Some(Command::new(HYP_PATH))
-    }
-}
-
-/// Profiles a given test with hyperfine, returning the mean and standard deviation
-/// for its runtime. If the test errors, returns `None` instead.
-fn hyp_profile(t_bin: &str, t_name: &str, iterations: NonZero<usize>) -> Option<Timings> {
-    const HYPERFINE_WARMUPS: &str = "1";
-
-    let mut perf_cmd = hyp_binary().expect("Couldn't find the Hyperfine binary on the system");
-
-    // Run one unrecorded warmup, then print markdown output to stdout, which we parse.
-    perf_cmd.args([
-        "--style",
-        "none",
-        "--warmup",
-        HYPERFINE_WARMUPS,
-        "--export-markdown",
-        "-",
-        // Parse json instead...
-        "--time-unit",
-        "millisecond",
-        &format!("{t_bin} --exact {t_name}"),
-    ]);
-    perf_cmd.env(consts::ITER_ENV_VAR, format!("{iterations}"));
-    let p_out = perf_cmd.output().unwrap();
-    if !p_out.status.success() {
-        return None;
-    }
-
-    let cmd_output = String::from_utf8_lossy(&p_out.stdout);
-    // Can't use .last() since we have a trailing newline. Sigh.
-    let results_line = cmd_output.lines().nth(3).unwrap();
-    // Grab the values out of the pretty-print.
-    // TODO: Parse json instead.
-    let mut res_iter = results_line.split_whitespace();
-    // Durations are given in milliseconds, so account for that.
-    let mean = Duration::from_secs_f64(res_iter.nth(5).unwrap().parse::<f64>().unwrap() / 1000.);
-    let stddev = Duration::from_secs_f64(res_iter.nth(1).unwrap().parse::<f64>().unwrap() / 1000.);
-
-    Some(Timings { mean, stddev })
-}
-
 fn self_timed_duration_from_output(output: &str) -> Option<Duration> {
     let mut durations = output.lines().filter_map(|line| {
         line.strip_prefix(consts::SELF_TIMED_LINE_PREF)
@@ -627,38 +509,8 @@ fn main() {
             fail!(output, t_name_pretty, t_mdata, FailKind::Skipped);
         }
 
-        // Time test execution to see how many iterations we need to do in order
-        // to account for random noise. This is skipped for tests with fixed
-        // iteration counts.
-        let final_iter_count = if t_mdata.self_timed {
-            Some(t_mdata.iterations.unwrap_or(DEFAULT_ITER_COUNT))
-        } else {
-            t_mdata.iterations.or_else(|| {
-                triage_test(t_bin, t_name, consts::NOISE_CUTOFF, |c| {
-                    if let Some(c) = c.checked_mul(ITER_COUNT_MUL) {
-                        Some(c)
-                    } else {
-                        // This should almost never happen, but maybe..?
-                        eprintln!(
-                            "WARNING: Ran nearly usize::MAX iterations of test {t_name_pretty}; skipping"
-                        );
-                        None
-                    }
-                })
-            })
-        };
-
-        // Don't profile failing tests.
-        let Some(final_iter_count) = final_iter_count else {
-            fail!(output, t_name_pretty, t_mdata, FailKind::Triage);
-        };
-
-        // Now profile!
-        let timings = if t_mdata.self_timed {
-            self_timed_profile(t_bin, t_name, final_iter_count)
-        } else {
-            hyp_profile(t_bin, t_name, final_iter_count)
-        };
+        let final_iter_count = t_mdata.iterations.unwrap_or(DEFAULT_ITER_COUNT);
+        let timings = self_timed_profile(t_bin, t_name, final_iter_count);
 
         if let Some(timings) = timings {
             output.success(t_name_pretty, t_mdata, final_iter_count, timings);

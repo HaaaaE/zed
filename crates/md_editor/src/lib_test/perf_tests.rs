@@ -264,7 +264,7 @@ fn measure_cached_region_scroll_iteration(
     start.elapsed()
 }
 
-#[perf(important, iterations = PERF_DRAW_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_DRAW_ITERATIONS)]
 fn source_mode_draw_large_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
@@ -284,7 +284,7 @@ fn source_mode_draw_large_markdown() {
     });
 }
 
-#[perf(important, iterations = PERF_DRAW_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_DRAW_ITERATIONS)]
 fn rendered_mode_draw_large_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
@@ -304,7 +304,7 @@ fn rendered_mode_draw_large_markdown() {
     });
 }
 
-#[perf(important, iterations = PERF_CACHED_DRAW_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_CACHED_DRAW_ITERATIONS)]
 fn source_mode_redraw_large_markdown_cached() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
@@ -324,7 +324,7 @@ fn source_mode_redraw_large_markdown_cached() {
     });
 }
 
-#[perf(important, iterations = PERF_CACHED_DRAW_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_CACHED_DRAW_ITERATIONS)]
 fn rendered_mode_redraw_large_markdown_cached() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
@@ -344,7 +344,7 @@ fn rendered_mode_redraw_large_markdown_cached() {
     });
 }
 
-#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS)]
 fn source_mode_scroll_short_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = short_plain_markdown_fixture();
@@ -363,7 +363,7 @@ fn source_mode_scroll_short_markdown() {
     });
 }
 
-#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS)]
 fn source_mode_scroll_large_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
@@ -382,7 +382,7 @@ fn source_mode_scroll_large_markdown() {
     });
 }
 
-#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS)]
 fn source_mode_scroll_short_markdown_cached_region() {
     let mut cx = gpui::TestAppContext::single();
     let text = short_plain_markdown_fixture();
@@ -401,7 +401,7 @@ fn source_mode_scroll_short_markdown_cached_region() {
     });
 }
 
-#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS)]
 fn source_mode_scroll_large_markdown_cached_region() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
@@ -420,7 +420,7 @@ fn source_mode_scroll_large_markdown_cached_region() {
     });
 }
 
-#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS)]
 fn rendered_mode_scroll_short_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = short_plain_markdown_fixture();
@@ -439,7 +439,7 @@ fn rendered_mode_scroll_short_markdown() {
     });
 }
 
-#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS)]
 fn rendered_mode_scroll_large_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
@@ -458,7 +458,7 @@ fn rendered_mode_scroll_large_markdown() {
     });
 }
 
-#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS)]
 fn rendered_mode_scroll_short_markdown_cached_region() {
     let mut cx = gpui::TestAppContext::single();
     let text = short_plain_markdown_fixture();
@@ -477,7 +477,7 @@ fn rendered_mode_scroll_short_markdown_cached_region() {
     });
 }
 
-#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS)]
 fn rendered_mode_scroll_large_markdown_cached_region() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
@@ -496,7 +496,7 @@ fn rendered_mode_scroll_large_markdown_cached_region() {
     });
 }
 
-#[perf(important, iterations = PERF_EDIT_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_EDIT_ITERATIONS)]
 fn source_mode_single_row_edit_large_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
@@ -526,7 +526,7 @@ fn source_mode_single_row_edit_large_markdown() {
     });
 }
 
-#[perf(important, iterations = PERF_EDIT_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_EDIT_ITERATIONS)]
 fn source_mode_single_row_edit_large_markdown_length_change() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
@@ -556,7 +556,7 @@ fn source_mode_single_row_edit_large_markdown_length_change() {
     });
 }
 
-#[perf(important, iterations = PERF_RESIZE_ITERATIONS, self_timed)]
+#[perf(important, iterations = PERF_RESIZE_ITERATIONS)]
 fn rendered_mode_resize_large_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();

@@ -296,16 +296,16 @@
 
 - 临时分段测量确认现有 md_editor perf 的 setup 污染很大：300KB fixture 生成约 0.147ms，但 source/rendered `open_*_perf_window` 分别约 426.311ms / 435.694ms；首帧 draw 约 3.315ms / 4.184ms，cached redraw 约 1.155ms / 2.279ms，scroll 约 51.267ms / 49.527ms。
 - 因此旧 `draw/cached redraw/scroll/edit/resize` mean 主要受 editor/document/window 创建支配，不能代表热路径性能，旧 1.5-2.2s process-timed 数字对热路径回归判断没有价值，已作废。
-- `#[perf]` 新增 `self_timed` 模式：metadata 标出 `timing self_timed`，测试函数自行读取 `ZED_PERF_ITER`，只对测量区间计时并打印 `ZED_PERF_SELF_TIMED_NS <nanoseconds>`。
-- `tooling/perf` runner 对 self-timed case 不再用 Hyperfine 量整个进程，而是直接采样测试上报的测量区间耗时，保留 mean/stddev/iterations 输出和 JSON 格式。
-- md_editor important perf case 改为 self-timed：fixture、`TestAppContext`、window/editor 创建、初始 warm draw、滚动预热等 setup 不计入热路径；draw case 通过清 layout cache 测 uncached draw，cached redraw 测缓存命中 redraw，scroll/edit/resize 只包住实际操作区间。
+- `#[perf]` 改为只支持 self-reported measured-region timing：测试函数自行读取 `ZED_PERF_ITER`，只对测量区间计时并打印 `ZED_PERF_SELF_TIMED_NS <nanoseconds>`。
+- `tooling/perf` runner 删除旧 Hyperfine/process-timed 分支，只直接采样测试上报的测量区间耗时，保留 mean/stddev/iterations 输出和 JSON 格式。
+- md_editor important perf case 全部改为 self-reported timing：fixture、`TestAppContext`、window/editor 创建、初始 warm draw、滚动预热等 setup 不计入热路径；draw case 通过清 layout cache 测 uncached draw，cached redraw 测缓存命中 redraw，scroll/edit/resize 只包住实际操作区间。
 
 验证：
 
 - `cargo check -p perf -p util_macros`：passed。
-- `cargo test -p md_editor source_mode_redraw_large_markdown_cached --profile release-fast --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]' -- --nocapture`：passed，确认 self-timed case 输出 `ZED_PERF_SELF_TIMED_NS`。
-- `cargo perf-test -p md_editor source_mode_redraw_large_markdown_cached -- --quiet`：passed；当前 runner 对额外 test filter 不筛选 perf list，因此实际输出全量 md_editor important self-timed case。当前 self-timed mean：rendered draw large 250.50ms，rendered cached redraw 427.71ms，rendered resize 125.98ms，rendered scroll large 590.55ms，rendered cached-region scroll 485.19ms，source draw large 160.70ms，source cached redraw 627.20ms，source scroll large 371.94ms，source cached-region scroll 392.49ms，source single-row edit large 133.98ms，source single-row edit length-change 177.93ms。
-- 该次 self-timed run 中 `source cached redraw` 和 `source short scroll` SD 偏高，后续用新基线判断回归时需要复跑确认，不按旧 process-timed 数字横向比较。
+- `cargo test -p md_editor source_mode_redraw_large_markdown_cached --profile release-fast --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]' -- --nocapture`：passed，确认 perf case 只输出 self-reported `ZED_PERF_SELF_TIMED_NS`，metadata 不再包含旧 timing mode 分支字段。
+- `cargo perf-test -p md_editor -- --quiet`：passed。当前 self-reported mean：rendered draw large 150.12ms，rendered cached redraw 158.51ms，rendered resize 78.61ms，rendered scroll large 305.70ms，rendered cached-region scroll 318.69ms，source draw large 124.21ms，source cached redraw 142.43ms，source scroll large 468.73ms，source cached-region scroll 227.68ms，source short scroll 255.72ms，source short cached-region scroll 272.50ms，source single-row edit large 116.73ms，source single-row edit length-change 124.30ms。
+- 该次 self-reported run 中 `source scroll large` SD 偏高，后续用新基线判断回归时需要复跑确认，不按旧 process-timed 数字横向比较。
 - `cargo test -p md_editor`：198 passed。
 - `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
 - `cargo test -p perf -p util_macros`：passed，均为 0 tests。

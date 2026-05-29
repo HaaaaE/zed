@@ -102,8 +102,6 @@ struct PerfArgs {
     /// How relevant a benchmark is to overall performance. See docs on the enum
     /// for details. If unspecified, `Average` is selected.
     importance: Importance,
-    /// Whether the test function reports the measured duration itself.
-    self_timed: bool,
 }
 
 #[warn(clippy::all, clippy::pedantic)]
@@ -125,8 +123,6 @@ impl PerfArgs {
             self.importance = Importance::Iffy;
         } else if meta.path.is_ident("fluff") {
             self.importance = Importance::Fluff;
-        } else if meta.path.is_ident("self_timed") {
-            self.self_timed = true;
         } else {
             return Err(syn::Error::new_spanned(meta.path, "unexpected identifier"));
         }
@@ -148,44 +144,60 @@ impl PerfArgs {
 /// pass `weight = n` as a parameter to override this. Note that this value is only
 /// relevant within its importance category.
 ///
-/// By default, the number of iterations when profiling this test is auto-determined.
-/// If this needs to be overwritten, pass the desired iteration count as a parameter
-/// (`#[perf(iterations = n)]`). Note that the actual profiler may still run the test
-/// an arbitrary number times; this flag just sets the number of executions before the
-/// process is restarted and global state is reset.
+/// If `iterations = n` is supplied, the profiler passes that value through
+/// `ZED_PERF_ITER`. Otherwise it passes a small default count. Explicit iterations
+/// are recommended so setup and measurement costs stay intentional.
 ///
 /// This attribute should probably not be applied to tests that do any significant
 /// disk IO, as locks on files may not be released in time when repeating a test many
 /// times. This might lead to spurious failures.
 ///
-/// Tests with expensive setup can pass `self_timed`; the test body is then
-/// responsible for reading `ZED_PERF_ITER`, timing only the measured region, and
-/// printing `ZED_PERF_SELF_TIMED_NS <nanoseconds>`.
+/// The test body is responsible for reading `ZED_PERF_ITER`, timing only the
+/// measured region, and printing `ZED_PERF_SELF_TIMED_NS <nanoseconds>`.
 ///
 /// # Examples
 /// ```rust
 /// use util_macros::perf;
 ///
-/// #[perf]
+/// #[perf(iterations = 30)]
 /// fn generic_test() {
-///     // Test goes here.
+///     let iter_count = std::env::var("ZED_PERF_ITER")
+///         .unwrap()
+///         .parse::<usize>()
+///         .unwrap();
+///     let mut measured = std::time::Duration::ZERO;
+///     for _ in 0..iter_count {
+///         let start = std::time::Instant::now();
+///         // Measured operation goes here.
+///         measured += start.elapsed();
+///     }
+///     println!("ZED_PERF_SELF_TIMED_NS {}", measured.as_nanos());
 /// }
 ///
-/// #[perf(fluff, weight = 30)]
+/// #[perf(fluff, weight = 30, iterations = 10)]
 /// fn cold_path_test() {
-///     // Test goes here.
+///     let iter_count = std::env::var("ZED_PERF_ITER")
+///         .unwrap()
+///         .parse::<usize>()
+///         .unwrap();
+///     let start = std::time::Instant::now();
+///     for _ in 0..iter_count {
+///         // Measured operation goes here.
+///     }
+///     println!("ZED_PERF_SELF_TIMED_NS {}", start.elapsed().as_nanos());
 /// }
 /// ```
 ///
-/// This also works with `#[gpui::test]`s, though in most cases it shouldn't
-/// be used with automatic iterations.
+/// This also works with `#[gpui::test]`s.
 /// ```rust,ignore
 /// use util_macros::perf;
 ///
 /// #[perf(iterations = 1, critical)]
 /// #[gpui::test]
 /// fn oneshot_test(_cx: &mut gpui::TestAppContext) {
-///     // Test goes here.
+///     let start = std::time::Instant::now();
+///     // Measured operation goes here.
+///     println!("ZED_PERF_SELF_TIMED_NS {}", start.elapsed().as_nanos());
 /// }
 /// ```
 #[proc_macro_attribute]
@@ -217,7 +229,6 @@ pub fn perf(our_attr: TokenStream, input: TokenStream) -> TokenStream {
         // Also set up values for the second metadata-returning "test".
         let mut new_ident_main = sig_main.ident.to_string();
         let mut new_ident_meta = new_ident_main.clone();
-        let self_timed = args.self_timed;
         new_ident_main.push_str(SUF_NORMAL);
         new_ident_meta.push_str(SUF_MDATA);
 
@@ -229,21 +240,9 @@ pub fn perf(our_attr: TokenStream, input: TokenStream) -> TokenStream {
         let sig_meta = parse_quote!(fn #new_ident_meta());
         let attrs_meta = parse_quote!(#[test] #[allow(non_snake_case)]);
 
-        // Make the test loop as the harness instructs it to.
-        let block_main = if self_timed {
-            parse_quote!({
-                #block
-            })
-        } else {
-            // The perf harness will pass us the value in an env var. Even if we
-            // have a preset value, just do this to keep the code paths unified.
-            parse_quote!({
-                let iter_count = std::env::var(#ITER_ENV_VAR).unwrap().parse::<usize>().unwrap();
-                for _ in 0..iter_count {
-                    #block
-                }
-            })
-        };
+        let block_main = parse_quote!({
+            #block
+        });
         let importance = format!("{}", args.importance);
         let block_meta = {
             // This function's job is to just print some relevant info to stdout,
@@ -257,24 +256,11 @@ pub fn perf(our_attr: TokenStream, input: TokenStream) -> TokenStream {
             } else {
                 quote! {}
             };
-            let q_self_timed = if self_timed {
-                quote! {
-                    println!(
-                        "{} {} {}",
-                        #MDATA_LINE_PREF,
-                        #TIMING_MODE_LINE_NAME,
-                        #TIMING_MODE_SELF_TIMED
-                    );
-                }
-            } else {
-                quote! {}
-            };
             let weight = args
                 .weight
                 .unwrap_or_else(|| parse_quote! { #WEIGHT_DEFAULT });
             parse_quote!({
                 #q_iter
-                #q_self_timed
                 println!("{} {} {}", #MDATA_LINE_PREF, #WEIGHT_LINE_NAME, #weight);
                 println!("{} {} {}", #MDATA_LINE_PREF, #IMPORTANCE_LINE_NAME, #importance);
                 println!("{} {} {}", #MDATA_LINE_PREF, #VERSION_LINE_NAME, #MDATA_VER);

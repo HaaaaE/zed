@@ -35,10 +35,6 @@ pub mod consts {
     pub const WEIGHT_LINE_NAME: &str = "weight";
     /// Identifier for importance in test metadata.
     pub const IMPORTANCE_LINE_NAME: &str = "importance";
-    /// Identifier for benchmarks that report their own measured duration.
-    pub const TIMING_MODE_LINE_NAME: &str = "timing";
-    /// Metadata value for benchmarks that report their own measured duration.
-    pub const TIMING_MODE_SELF_TIMED: &str = "self_timed";
     /// Identifier for the test metadata version.
     pub const VERSION_LINE_NAME: &str = "version";
 
@@ -127,13 +123,9 @@ pub struct TestMdata {
     /// The weight of this particular test within its importance category. Used
     /// when comparing across runs.
     pub weight: u8,
-    /// Whether this test prints the measured region duration itself instead of
-    /// using the whole process runtime measured by Hyperfine.
-    #[serde(default)]
-    pub self_timed: bool,
 }
 
-/// The actual timings of a test, as measured by Hyperfine.
+/// The actual timings of a test's self-reported measured region.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Timings {
     /// Mean runtime for `self.iter_total` runs of this test.
