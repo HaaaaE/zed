@@ -340,8 +340,34 @@
 
 后续仍未完成：
 
-- 跑一次干净的 `cargo perf-test -p md_editor -- --quiet`，生成 2026-05-30 segmented session 首个正式 baseline。
+- 使用 2026-05-30 segmented session 首个正式 baseline 作为后续同口径 perf 对比起点。
 - 之后所有 `md_editor` perf 回归判断只比较同一 session/segment 协议、同一 case 名、同一 segment occurrence 的结果。
+- 继续完成 list/blockquote rendered indentation、marker/source reveal、cursor/selection/editor 级行为回归。
+- task list item 更完整语义与 list item marker 级测试。
+- GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
+- `markdown_wysiwyg` 模块拆分。
+- 300KB mixed GFM fixture 与最终验证。
+
+### 2026-05-30：segmented editor session 首个 baseline
+
+已完成：
+
+- 使用 Windows Kits `D:\Windows Kits\10\bin\10.0.26100.0\x64` 加入 `PATH` 后运行 `cargo perf-test -p md_editor -- --quiet`。
+- 生成本地 ignored run 文件 `.perf-runs/20260530-014124-8bf8106989.md_editor.json`，作为当前 session/segment 协议的首个正式 baseline 标识。
+- command-level baseline：
+  - `perf_tests::large_document_session`：iterations 8，iter/sec 0.78，mean 10274.33ms，SD 104.61ms。
+  - `perf_tests::small_document_session`：iterations 16，iter/sec 2.81，mean 5684.57ms，SD 75.92ms。
+- large session 主要耗时段：`rendered_first_draw` 2584.07ms / 25.2%，`rendered_cached_redraw_after_second_switch` 2514.20ms / 24.5%，`source_editor_create` 2393.54ms / 23.3%，随后是 rendered/source cached-region scroll，约 398-443ms。
+- small session 主要耗时段：`rendered_scroll_cached_region` 两次分别 869.19ms / 15.3% 和 874.43ms / 15.4%，`source_scroll_cached_region_after_switch` 852.48ms / 15.0%，`source_scroll_cached_region` 805.91ms / 14.2%，cold scroll 约 475-506ms。
+
+验证：
+
+- `cargo perf-test -p md_editor -- --quiet`：passed。保留既有 warning：`md_text` 未使用 `FxHasher`，`md_editor` 未使用 `move_selection_right`。
+
+后续仍未完成：
+
+- 未来 perf 对比用该 baseline 或更新后的同协议 baseline；不得拿旧 process-timed / 2026-05-29 hot-path self-timed log 横向比较。
+- 如果后续修改 session case 内容、segment 顺序或 segment 语义，需要重新建立 baseline，并在本文件记录失效边界。
 - 继续完成 list/blockquote rendered indentation、marker/source reveal、cursor/selection/editor 级行为回归。
 - task list item 更完整语义与 list item marker 级测试。
 - GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
@@ -395,6 +421,7 @@
 - `md_editor` perf 必须使用 2026-05-30 之后的 self-timed segmented session 口径：每个样本必须有一个 `MD_PERF_SELF_TIMED_NS` total 和稳定有序的 `MD_PERF_SEGMENT_NS` timeline。
 - 旧 process-timed `md_editor` mean 和 2026-05-29 hot-path self-timed mean 已作废，不参与回归判断。
 - command-level mean 只代表合成 editor session 总成本；具体 draw、cached redraw、scroll、edit、resize、mode switch、setup 影响必须看 segment table。
+- 当前首个正式 segmented baseline 标识为 `.perf-runs/20260530-014124-8bf8106989.md_editor.json`；该文件在本地 `.perf-runs` 中 ignored，计划文档只记录关键摘要。
 - 以下节点必须跑 perf：
   - 重构前 baseline
   - semantic index 重构后
