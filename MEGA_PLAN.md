@@ -284,8 +284,8 @@
 
 后续仍未完成：
 
-- list/blockquote 的 rendered indentation、marker/source reveal、cursor/selection/editor 级行为回归。
-- task list item 更完整语义与 list item marker 级测试。
+- list/blockquote 的 rendered indentation、cursor/selection/editor 级行为回归。
+- task list item 更完整语义与 editor 级行为回归。
 - GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
@@ -315,8 +315,8 @@
 后续仍未完成：
 
 - 用 2026-05-30 之后的新 segmented editor session baseline 作为后续 MEGA_PLAN 的唯一 perf 对比口径，必要时复跑以降低高 SD case 的噪声。
-- list/blockquote 的 rendered indentation、marker/source reveal、cursor/selection/editor 级行为回归。
-- task list item 更完整语义与 list item marker 级测试。
+- list/blockquote 的 rendered indentation、cursor/selection/editor 级行为回归。
+- task list item 更完整语义与 editor 级行为回归。
 - GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
@@ -342,8 +342,8 @@
 
 - 使用 2026-05-30 segmented session 首个正式 baseline 作为后续同口径 perf 对比起点。
 - 之后所有 `md_editor` perf 回归判断只比较同一 session/segment 协议、同一 case 名、同一 segment occurrence 的结果。
-- 继续完成 list/blockquote rendered indentation、marker/source reveal、cursor/selection/editor 级行为回归。
-- task list item 更完整语义与 list item marker 级测试。
+- 继续完成 list/blockquote rendered indentation、cursor/selection/editor 级行为回归。
+- task list item 更完整语义与 editor 级行为回归。
 - GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
@@ -368,8 +368,37 @@
 
 - 未来 perf 对比用该 baseline 或更新后的同协议 baseline；不得拿旧 process-timed / 2026-05-29 hot-path self-timed log 横向比较。
 - 如果后续修改 session case 内容、segment 顺序或 segment 语义，需要重新建立 baseline，并在本文件记录失效边界。
-- 继续完成 list/blockquote rendered indentation、marker/source reveal、cursor/selection/editor 级行为回归。
-- task list item 更完整语义与 list item marker 级测试。
+- 继续完成 list/blockquote rendered indentation、cursor/selection/editor 级行为回归。
+- task list item 更完整语义与 editor 级行为回归。
+- GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
+- `markdown_wysiwyg` 模块拆分。
+- 300KB mixed GFM fixture 与最终验证。
+
+### 2026-05-30：Blockquote/list marker projection 与 source reveal
+
+已完成：
+
+- `MarkdownBlockKind::BlockQuote` 现在记录每个 quoted source row 的 `>` marker range，inactive rendered projection 会隐藏 blockquote marker，active source range 会 reveal 原始 marker。
+- `MarkdownBlockKind::ListItem` 现在记录 unordered marker（`- `、`+ `、`* `）和 ordered marker（`1. `、`1) `）range，并将 `content_range` 推进到 marker 之后。
+- list block ordered/unordered 判定改成只从 list source 起点扫描 marker，不再对整段 list source 做 trim；list item marker 提取也只扫描 marker 前缀，避免对每个 item 查找整行。
+- inactive task list item 会同时隐藏 list marker 并替换 task marker，因此 rendered row 从 `- ☐ todo` 变为 `☐ todo`；光标进入 task marker 时仍 reveal `- [ ] todo` 源码。
+- 新增 `markdown_wysiwyg` tests 覆盖 blockquote/list item marker ranges、inactive projection、active source reveal、task marker dependency。
+- 新增 `md_editor` rendered display-row tests 覆盖 inactive blockquote/list marker hiding、active blockquote/list marker reveal，并更新 task checkbox inactive row 期望。
+
+验证：
+
+- `cargo test -p markdown_wysiwyg`：37 passed。
+- `cargo test -p md_editor rendered_display_rows_ -- --nocapture`：17 passed。
+- `cargo test -p md_editor`：200 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
+- `git diff --check`：passed。
+- `cargo perf-test -p md_editor -- --quiet --json=20260530-list-markers`：passed；对比首个 segmented baseline 为 important category near down 3.3%，未超过 5% 门槛。
+- 复跑 `20260530-list-markers-rerun` 和优化后 `markeropt-20260530` 时出现全局性变慢，source-mode scroll、window/context、rendered scroll 等无关 segment 同步下滑，且 SD 明显变大；这些 run 记录为环境噪声，不更新 baseline，不作为本批回归判定依据。
+
+后续仍未完成：
+
+- list/blockquote 的 rendered indentation、cursor/selection/editor 级行为回归。
+- task list item 更完整语义与 editor 级行为回归。
 - GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。

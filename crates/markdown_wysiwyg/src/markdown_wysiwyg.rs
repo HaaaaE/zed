@@ -1534,9 +1534,9 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
     match node.kind() {
         "atx_heading" => atx_heading_block(source, node),
         "setext_heading" => setext_heading_block(source, node),
-        "block_quote" => Some(simple_block(node, MarkdownBlockKind::BlockQuote, source)),
+        "block_quote" => Some(block_quote_block(source, node)),
         "list" => Some(list_block(source, node)),
-        "list_item" => Some(simple_block(node, MarkdownBlockKind::ListItem, source)),
+        "list_item" => Some(list_item_block(source, node)),
         "paragraph" => Some(MarkdownBlock {
             id: node_id(node),
             kind: MarkdownBlockKind::Paragraph,
@@ -1605,13 +1605,17 @@ fn block_node_has_children(kind: &str) -> bool {
     matches!(kind, "block_quote" | "list" | "list_item")
 }
 
-fn simple_block(node: Node<'_>, kind: MarkdownBlockKind, source: &str) -> MarkdownBlock {
+fn block_quote_block(source: &str, node: Node<'_>) -> MarkdownBlock {
+    let source_range = node.byte_range();
+    let content_range = trim_line_end(source, source_range.clone());
+    let marker_ranges = block_quote_marker_ranges(source, source_range.clone());
+
     MarkdownBlock {
         id: node_id(node),
-        kind,
-        source_range: node.byte_range(),
-        content_range: trim_line_end(source, node.byte_range()),
-        marker_ranges: Vec::new(),
+        kind: MarkdownBlockKind::BlockQuote,
+        source_range,
+        content_range,
+        marker_ranges,
         row_range: row_range_for_node(node),
     }
 }
@@ -1635,15 +1639,104 @@ fn list_block(source: &str, node: Node<'_>) -> MarkdownBlock {
     }
 }
 
+fn list_item_block(source: &str, node: Node<'_>) -> MarkdownBlock {
+    let source_range = node.byte_range();
+    let marker_range = list_item_marker_range(source, source_range.clone());
+    let content_start = marker_range
+        .as_ref()
+        .map_or(source_range.start, |range| range.end);
+    let content_range = trim_line_end(source, content_start..source_range.end);
+    let marker_ranges = marker_range.into_iter().collect();
+
+    MarkdownBlock {
+        id: node_id(node),
+        kind: MarkdownBlockKind::ListItem,
+        source_range,
+        content_range,
+        marker_ranges,
+        row_range: row_range_for_node(node),
+    }
+}
+
 fn list_source_starts_ordered_marker(source: &str, range: Range<usize>) -> bool {
-    let range = trim_ascii_whitespace(source, range);
     let bytes = source.as_bytes();
     let mut cursor = range.start;
+
+    while cursor < range.end && matches!(bytes[cursor], b' ' | b'\t') {
+        cursor += 1;
+    }
+
+    let digit_start = cursor;
     while cursor < range.end && bytes[cursor].is_ascii_digit() {
         cursor += 1;
     }
 
-    cursor > range.start && cursor < range.end && matches!(bytes[cursor], b'.' | b')')
+    cursor > digit_start && cursor < range.end && matches!(bytes[cursor], b'.' | b')')
+}
+
+fn block_quote_marker_ranges(source: &str, source_range: Range<usize>) -> Vec<Range<usize>> {
+    let bytes = source.as_bytes();
+    let mut ranges = Vec::new();
+    let mut line_start = source_range.start;
+
+    while line_start < source_range.end {
+        let line_end = source[line_start..source_range.end]
+            .find('\n')
+            .map_or(source_range.end, |offset| line_start + offset + 1);
+        let trimmed_line = trim_line_end(source, line_start..line_end);
+        let mut cursor = trimmed_line.start;
+        let mut leading_spaces = 0;
+
+        while cursor < trimmed_line.end && bytes[cursor] == b' ' && leading_spaces < 4 {
+            cursor += 1;
+            leading_spaces += 1;
+        }
+
+        if cursor < trimmed_line.end && bytes[cursor] == b'>' {
+            let marker_start = cursor;
+            cursor += 1;
+            if cursor < trimmed_line.end && bytes[cursor] == b' ' {
+                cursor += 1;
+            }
+            ranges.push(marker_start..cursor);
+        }
+
+        line_start = line_end;
+    }
+
+    ranges
+}
+
+fn list_item_marker_range(source: &str, source_range: Range<usize>) -> Option<Range<usize>> {
+    let bytes = source.as_bytes();
+    let mut cursor = source_range.start;
+
+    while cursor < source_range.end && matches!(bytes[cursor], b' ' | b'\t') {
+        cursor += 1;
+    }
+
+    let marker_start = cursor;
+    if cursor < source_range.end && matches!(bytes[cursor], b'-' | b'+' | b'*') {
+        cursor += 1;
+    } else {
+        let digit_start = cursor;
+        while cursor < source_range.end && bytes[cursor].is_ascii_digit() {
+            cursor += 1;
+        }
+        if cursor == digit_start
+            || cursor >= source_range.end
+            || !matches!(bytes[cursor], b'.' | b')')
+        {
+            return None;
+        }
+        cursor += 1;
+    }
+
+    while cursor < source_range.end && matches!(bytes[cursor], b' ' | b'\t') {
+        cursor += 1;
+    }
+
+    (marker_start < cursor).then_some(marker_start..cursor)
 }
 
 fn setext_heading_block(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
@@ -2027,11 +2120,19 @@ mod tests {
             .iter()
             .find(|block| block.kind == MarkdownBlockKind::BlockQuote)
             .expect("expected block quote");
+        let marker_sources = |block: &MarkdownBlock| {
+            block
+                .marker_ranges
+                .iter()
+                .map(|range| &source[range.clone()])
+                .collect::<Vec<_>>()
+        };
         assert_eq!(blockquote.row_range, 0..3);
         assert_eq!(
             block_source(blockquote),
             "> quote\n> - [ ] todo\n>   1. ordered"
         );
+        assert_eq!(marker_sources(blockquote), vec!["> ", "> ", "> "]);
 
         let unordered_lists = tree
             .blocks()
@@ -2071,6 +2172,22 @@ mod tests {
             .filter(|block| block.kind == MarkdownBlockKind::ListItem)
             .map(block_source)
             .collect::<Vec<_>>();
+        let list_item_marker_sources = tree
+            .blocks()
+            .iter()
+            .filter(|block| block.kind == MarkdownBlockKind::ListItem)
+            .map(marker_sources)
+            .collect::<Vec<_>>();
+        assert!(
+            list_item_marker_sources
+                .iter()
+                .any(|markers| markers == &vec!["- "])
+        );
+        assert!(
+            list_item_marker_sources
+                .iter()
+                .any(|markers| markers == &vec!["1. "])
+        );
         assert!(
             list_item_sources
                 .iter()
@@ -2265,6 +2382,27 @@ mod tests {
     }
 
     #[test]
+    fn hides_inactive_blockquote_and_list_item_markers_in_projection() {
+        let source = "> quote\n- [ ] todo\n1) ordered\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let projection = tree.projection_for_visible_rows(0..3, None);
+
+        assert_eq!(
+            projection.project_source_text(source),
+            "quote\n☐ todo\nordered\n"
+        );
+
+        let active_quote = source.find("quote").expect("expected quote text");
+        let projection =
+            tree.projection_for_visible_rows(0..3, Some(active_quote..active_quote + 1));
+
+        assert_eq!(
+            projection.project_source_text(source),
+            "> quote\n☐ todo\nordered\n"
+        );
+    }
+
+    #[test]
     fn hides_inactive_inline_markers_in_projection() {
         let tree = MarkdownSyntaxTree::parse("Before **bold** after\n");
         let projection = tree.projection_for_visible_rows(0..1, None);
@@ -2392,11 +2530,11 @@ mod tests {
 
         assert_eq!(
             projection.hidden_ranges(),
-            &[unchecked..unchecked + 3, checked..checked + 3]
+            &[0..unchecked + 3, 11..checked + 3]
         );
         assert_eq!(
             projection.project_source_text(source),
-            "- \u{2610} todo\n- \u{2611} done\n"
+            "\u{2610} todo\n\u{2611} done\n"
         );
     }
 
@@ -2414,7 +2552,7 @@ mod tests {
                 Some(marker..marker + 1),
                 &[],
             ),
-            vec![marker..marker + 3]
+            vec![0..source.len(), marker..marker + 3]
         );
     }
 

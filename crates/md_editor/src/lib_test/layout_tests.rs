@@ -170,10 +170,7 @@ fn rendered_display_rows_replace_full_html5_named_entities() {
     )
     .remove(0);
 
-    assert_eq!(
-        row.text,
-        "Entities \u{2233} \u{1D538} \u{2242}\u{0338}"
-    );
+    assert_eq!(row.text, "Entities \u{2233} \u{1D538} \u{2242}\u{0338}");
 }
 
 #[test]
@@ -205,19 +202,19 @@ fn rendered_display_rows_reveal_active_escape_and_entity_source() {
 
 #[test]
 fn rendered_display_rows_replace_inactive_task_list_markers() {
-    let source = "- [ ] todo\n- [x] done\n";
+    let source = "- [ ] todo\n- [x] done\n\nbody\n";
     let mut buffer = Buffer::local(source);
     let snapshot = buffer.snapshot();
 
     let rows = display_rows_in_mode(
         &snapshot,
         0..2,
-        Some(&collapsed_selection(Point::new(0, 0))),
+        Some(&collapsed_selection(Point::new(3, 0))),
         MarkdownEditorMode::Rendered,
     );
 
-    assert_eq!(rows[0].text, "- \u{2610} todo");
-    assert_eq!(rows[1].text, "- \u{2611} done");
+    assert_eq!(rows[0].text, "\u{2610} todo");
+    assert_eq!(rows[1].text, "\u{2611} done");
 }
 
 #[test]
@@ -238,6 +235,49 @@ fn rendered_display_rows_reveal_active_task_list_marker_source() {
     assert_eq!(row.text, "- [ ] todo");
     assert_eq!(row.source_to_display(marker), marker);
     assert_eq!(row.display_to_source(marker), marker);
+}
+
+#[test]
+fn rendered_display_rows_hide_inactive_blockquote_and_list_markers() {
+    let source = "> quote\n- item\n1) ordered\n\nbody\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+
+    let rows = display_rows_in_mode(
+        &snapshot,
+        0..3,
+        Some(&collapsed_selection(Point::new(4, 0))),
+        MarkdownEditorMode::Rendered,
+    );
+
+    assert_eq!(rows[0].text, "quote");
+    assert_eq!(rows[1].text, "item");
+    assert_eq!(rows[2].text, "ordered");
+}
+
+#[test]
+fn rendered_display_rows_reveal_active_blockquote_and_list_markers() {
+    let source = "> quote\n- item\n\nbody\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+
+    let quote_rows = display_rows_in_mode(
+        &snapshot,
+        0..2,
+        Some(&collapsed_selection(Point::new(0, 3))),
+        MarkdownEditorMode::Rendered,
+    );
+    let list_rows = display_rows_in_mode(
+        &snapshot,
+        0..2,
+        Some(&collapsed_selection(Point::new(1, 2))),
+        MarkdownEditorMode::Rendered,
+    );
+
+    assert_eq!(quote_rows[0].text, "> quote");
+    assert_eq!(quote_rows[1].text, "item");
+    assert_eq!(list_rows[0].text, "quote");
+    assert_eq!(list_rows[1].text, "- item");
 }
 
 #[test]
