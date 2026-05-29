@@ -58,7 +58,7 @@
 
 mod implementation;
 
-use implementation::{FailKind, Importance, Output, TestMdata, Timings, consts};
+use implementation::{FailKind, Importance, Output, Sample, TestMdata, Timings, consts};
 
 use std::{
     fs::OpenOptions,
@@ -67,7 +67,6 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::atomic::{AtomicBool, Ordering},
-    time::Duration,
 };
 
 /// How many iterations to pass to tests that don't specify a fixed count.
@@ -389,17 +388,11 @@ fn get_tests(t_bin: &str) -> impl ExactSizeIterator<Item = (String, String)> {
     out.into_iter()
 }
 
-fn self_timed_duration_from_output(output: &str) -> Option<Duration> {
-    let mut durations = output.lines().filter_map(|line| {
-        line.strip_prefix(consts::SELF_TIMED_LINE_PREF)
-            .and_then(|value| value.trim().parse::<u64>().ok())
-            .map(Duration::from_nanos)
-    });
-    let duration = durations.next()?;
-    durations.next().is_none().then_some(duration)
+fn self_timed_sample_from_output(output: &str) -> Option<Sample> {
+    implementation::parse_sample_output(output).ok()
 }
 
-fn run_self_timed_once(t_bin: &str, t_name: &str, iterations: NonZero<usize>) -> Option<Duration> {
+fn run_self_timed_once(t_bin: &str, t_name: &str, iterations: NonZero<usize>) -> Option<Sample> {
     let mut cmd = Command::new(t_bin);
     cmd.args([t_name, "--exact", "--nocapture"]);
     cmd.env(consts::ITER_ENV_VAR, format!("{iterations}"));
@@ -411,7 +404,7 @@ fn run_self_timed_once(t_bin: &str, t_name: &str, iterations: NonZero<usize>) ->
 
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    self_timed_duration_from_output(&stdout).or_else(|| self_timed_duration_from_output(&stderr))
+    self_timed_sample_from_output(&stdout).or_else(|| self_timed_sample_from_output(&stderr))
 }
 
 fn self_timed_profile(t_bin: &str, t_name: &str, iterations: NonZero<usize>) -> Option<Timings> {
@@ -420,26 +413,7 @@ fn self_timed_profile(t_bin: &str, t_name: &str, iterations: NonZero<usize>) -> 
         .map(|_| run_self_timed_once(t_bin, t_name, iterations))
         .collect::<Option<Vec<_>>>()?;
 
-    let sample_count = samples.len() as f64;
-    let mean_secs = samples
-        .iter()
-        .map(std::time::Duration::as_secs_f64)
-        .sum::<f64>()
-        / sample_count;
-    let stddev_secs = (samples
-        .iter()
-        .map(|sample| {
-            let delta = sample.as_secs_f64() - mean_secs;
-            delta * delta
-        })
-        .sum::<f64>()
-        / sample_count)
-        .sqrt();
-
-    Some(Timings {
-        mean: Duration::from_secs_f64(mean_secs),
-        stddev: Duration::from_secs_f64(stddev_secs),
-    })
+    Timings::from_samples(samples).ok()
 }
 
 fn main() {

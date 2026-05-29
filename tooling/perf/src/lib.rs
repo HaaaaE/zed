@@ -4,4 +4,6 @@
 //! For usage documentation, see the docs on this crate's binary.
 
 mod implementation;
+#[cfg(test)]
+mod implementation_tests;
 pub use implementation::*;

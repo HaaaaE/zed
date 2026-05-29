@@ -21,6 +21,9 @@ pub mod consts {
     /// The prefix printed by self-timed benchmarks before their measured duration in
     /// nanoseconds.
     pub const SELF_TIMED_LINE_PREF: &str = "MD_PERF_SELF_TIMED_NS";
+    /// The prefix printed by self-timed benchmarks before a measured segment in
+    /// nanoseconds.
+    pub const SEGMENT_LINE_PREF: &str = "MD_PERF_SEGMENT_NS";
     /// The version number for the data returned from the test metadata function.
     /// Increment on non-backwards-compatible changes.
     pub const MDATA_VER: u32 = 0;
@@ -125,6 +128,44 @@ pub struct TestMdata {
     pub weight: u8,
 }
 
+/// One named segment reported by a benchmark sample.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SegmentSample {
+    /// Stable lowercase segment identifier.
+    pub name: String,
+    /// Time spent in this segment.
+    pub duration: Duration,
+}
+
+/// One self-timed sample reported by a benchmark.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Sample {
+    /// Total measured time for the sample.
+    pub total: Duration,
+    /// Ordered segment timeline for the sample.
+    pub segments: Vec<SegmentSample>,
+}
+
+/// Aggregate statistics for a duration series.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SampleSummary {
+    /// Mean runtime.
+    pub mean: Duration,
+    /// Standard deviation for the runtime.
+    pub stddev: Duration,
+}
+
+/// Aggregate statistics for one segment occurrence in the timeline.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SegmentSummary {
+    /// Zero-based occurrence index in the timeline.
+    pub index: usize,
+    /// Stable lowercase segment identifier.
+    pub name: String,
+    /// Mean and standard deviation for this occurrence.
+    pub timings: SampleSummary,
+}
+
 /// The actual timings of a test's self-reported measured region.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Timings {
@@ -132,6 +173,10 @@ pub struct Timings {
     pub mean: Duration,
     /// Standard deviation for the above.
     pub stddev: Duration,
+    /// Raw self-timed samples collected for this test.
+    pub samples: Vec<Sample>,
+    /// Aggregated segment timeline, grouped by occurrence.
+    pub segments: Vec<SegmentSummary>,
 }
 
 impl Timings {
@@ -144,11 +189,140 @@ impl Timings {
     pub fn iters_per_sec(&self, total_iters: NonZero<usize>) -> f64 {
         (1000. / self.mean.as_millis() as f64) * total_iters.get() as f64
     }
+
+    /// Builds aggregate timings from raw samples.
+    ///
+    /// # Errors
+    /// Returns `FailKind::Profile` when samples are empty or segment timelines differ.
+    pub fn from_samples(samples: Vec<Sample>) -> Result<Self, FailKind> {
+        if samples.is_empty() || samples[0].segments.is_empty() {
+            return Err(FailKind::Profile);
+        }
+
+        let first_timeline = samples[0]
+            .segments
+            .iter()
+            .map(|segment| segment.name.as_str())
+            .collect::<Vec<_>>();
+        for sample in &samples[1..] {
+            let timeline = sample
+                .segments
+                .iter()
+                .map(|segment| segment.name.as_str())
+                .collect::<Vec<_>>();
+            if timeline != first_timeline {
+                return Err(FailKind::Profile);
+            }
+        }
+
+        let total = summarize(samples.iter().map(|sample| sample.total));
+        let segments = first_timeline
+            .iter()
+            .enumerate()
+            .map(|(index, name)| SegmentSummary {
+                index,
+                name: (*name).to_string(),
+                timings: summarize(samples.iter().map(|sample| sample.segments[index].duration)),
+            })
+            .collect();
+
+        Ok(Self {
+            mean: total.mean,
+            stddev: total.stddev,
+            samples,
+            segments,
+        })
+    }
+}
+
+/// Parses one benchmark sample from test process output.
+///
+/// # Errors
+/// Returns `FailKind::Profile` for missing totals, repeated totals, illegal segment
+/// names, or invalid durations.
+pub fn parse_sample_output(output: &str) -> Result<Sample, FailKind> {
+    let mut total = None;
+    let mut segments = Vec::new();
+
+    for line in output.lines() {
+        if let Some(value) = line.strip_prefix(consts::SELF_TIMED_LINE_PREF) {
+            if total.is_some() {
+                return Err(FailKind::Profile);
+            }
+            let value = value.trim().parse::<u64>().map_err(|_| FailKind::Profile)?;
+            total = Some(Duration::from_nanos(value));
+        } else if let Some(rest) = line.strip_prefix(consts::SEGMENT_LINE_PREF) {
+            let mut fields = rest.split_whitespace();
+            let name = fields.next().ok_or(FailKind::Profile)?;
+            let duration = fields
+                .next()
+                .ok_or(FailKind::Profile)?
+                .parse::<u64>()
+                .map_err(|_| FailKind::Profile)?;
+            if fields.next().is_some() || !is_valid_segment_name(name) {
+                return Err(FailKind::Profile);
+            }
+            segments.push(SegmentSample {
+                name: name.to_string(),
+                duration: Duration::from_nanos(duration),
+            });
+        }
+    }
+
+    if segments.is_empty() {
+        return Err(FailKind::Profile);
+    }
+
+    Ok(Sample {
+        total: total.ok_or(FailKind::Profile)?,
+        segments,
+    })
+}
+
+/// Validates a segment identifier.
+fn is_valid_segment_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+/// Summarizes a duration series.
+fn summarize(samples: impl IntoIterator<Item = Duration>) -> SampleSummary {
+    let samples = samples.into_iter().collect::<Vec<_>>();
+    let sample_count = samples.len() as f64;
+    let mean_secs = samples.iter().map(Duration::as_secs_f64).sum::<f64>() / sample_count;
+    let stddev_secs = (samples
+        .iter()
+        .map(|sample| {
+            let delta = sample.as_secs_f64() - mean_secs;
+            delta * delta
+        })
+        .sum::<f64>()
+        / sample_count)
+        .sqrt();
+
+    SampleSummary {
+        mean: Duration::from_secs_f64(mean_secs),
+        stddev: Duration::from_secs_f64(stddev_secs),
+    }
 }
 
 /// Aggregate results, meant to be used for a given importance category. Each
 /// test name corresponds to its benchmark results, iteration count, and weight.
 type CategoryInfo = HashMap<String, (Timings, NonZero<usize>, u8)>;
+
+/// Comparison row for one matching segment occurrence.
+struct SegmentDelta {
+    /// Test case name.
+    case: String,
+    /// Segment occurrence index.
+    index: usize,
+    /// Segment name.
+    name: String,
+    /// Relative timing shift.
+    shift: f64,
+}
 
 /// Aggregate output of all tests run by this handler.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -255,14 +429,14 @@ impl Output {
     /// `TestMdata`s set to `Some(_)` if the `TestMdata` is present itself.
     #[must_use]
     pub fn compare_perf(self, baseline: Self) -> PerfReport {
+        let segment_deltas = self.segment_deltas(&baseline);
         let self_categories = self.collapse();
         let mut other_categories = baseline.collapse();
 
         let deltas = self_categories
             .into_iter()
             .filter_map(|(cat, self_data)| {
-                // Only compare categories where both           meow
-                // runs have data.                              /
+                // Only compare categories where both runs have data.
                 let mut other_data = other_categories.remove(&cat)?;
                 let mut max = f64::MIN;
                 let mut min = f64::MAX;
@@ -277,7 +451,7 @@ impl Output {
                         continue;
                     };
                     let shift =
-                        (o_timings.iters_per_sec(o_iters) / s_timings.iters_per_sec(s_iters)) - 1.;
+                        (s_timings.iters_per_sec(s_iters) / o_timings.iters_per_sec(o_iters)) - 1.;
                     if shift > max {
                         max = shift;
                     }
@@ -299,7 +473,49 @@ impl Output {
             })
             .collect();
 
-        PerfReport { deltas }
+        PerfReport {
+            deltas,
+            segment_deltas,
+        }
+    }
+
+    /// Computes deltas for matching segment occurrences.
+    fn segment_deltas(&self, baseline: &Self) -> Vec<SegmentDelta> {
+        let mut baseline_cases = HashMap::<&str, &Timings>::default();
+        for (name, _, timings) in &baseline.tests {
+            if let Ok(timings) = timings {
+                baseline_cases.insert(name, timings);
+            }
+        }
+
+        let mut deltas = Vec::new();
+        for (case, _, timings) in &self.tests {
+            let Ok(timings) = timings else {
+                continue;
+            };
+            let Some(baseline_timings) = baseline_cases.get(case.as_str()) else {
+                continue;
+            };
+            for (segment, baseline_segment) in
+                timings.segments.iter().zip(&baseline_timings.segments)
+            {
+                if segment.index != baseline_segment.index || segment.name != baseline_segment.name
+                {
+                    continue;
+                }
+                let shift = (baseline_segment.timings.mean.as_secs_f64()
+                    / segment.timings.mean.as_secs_f64())
+                    - 1.;
+                deltas.push(SegmentDelta {
+                    case: case.clone(),
+                    index: segment.index,
+                    name: segment.name.clone(),
+                    shift,
+                });
+            }
+        }
+
+        deltas
     }
 
     /// Collapses the `PerfReport` into a `HashMap` over `Importance`, with
@@ -389,6 +605,36 @@ impl std::fmt::Display for Output {
                 )?,
             }
         }
+        let segment_rows = sorted
+            .tests
+            .iter()
+            .filter_map(|(name, _, timings)| timings.as_ref().ok().map(|timings| (name, timings)))
+            .flat_map(|(name, timings)| {
+                timings.segments.iter().map(move |segment| {
+                    let mean_ms = segment.timings.mean.as_secs_f64() * 1000.;
+                    let stddev_ms = segment.timings.stddev.as_secs_f64() * 1000.;
+                    let pct_total =
+                        segment.timings.mean.as_secs_f64() / timings.mean.as_secs_f64() * 100.;
+                    (name, segment, mean_ms, stddev_ms, pct_total)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        if !segment_rows.is_empty() {
+            writeln!(f)?;
+            writeln!(
+                f,
+                "| Command | # | Segment | Mean [ms] | SD [ms] | % total |"
+            )?;
+            writeln!(f, "|:---|---:|:---|---:|---:|---:|")?;
+            for (name, segment, mean_ms, stddev_ms, pct_total) in segment_rows {
+                writeln!(
+                    f,
+                    "| {} | {} | {} | {:.2} | {:.2} | {:.1}% |",
+                    name, segment.index, segment.name, mean_ms, stddev_ms, pct_total
+                )?;
+            }
+        }
         Ok(())
     }
 }
@@ -408,46 +654,65 @@ struct PerfDelta {
 pub struct PerfReport {
     /// Inner (group, diff) pairing.
     deltas: HashMap<Importance, PerfDelta>,
+    /// Matching segment occurrence deltas.
+    segment_deltas: Vec<SegmentDelta>,
 }
 
 impl std::fmt::Display for PerfReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.deltas.is_empty() {
+        if self.deltas.is_empty() && self.segment_deltas.is_empty() {
             return write!(f, "(no matching tests)");
         }
-        let sorted = self.deltas.iter().collect::<Vec<_>>();
-        writeln!(f, "| Category | Max | Mean | Min |")?;
-        // We don't want to print too many newlines at the end, so handle newlines
-        // a little jankily like this.
-        write!(f, "|:---|---:|---:|---:|")?;
-        for (cat, delta) in sorted.into_iter().rev() {
-            const SIGN_POS: &str = "↑";
-            const SIGN_NEG: &str = "↓";
-            const SIGN_NEUTRAL_POS: &str = "±↑";
-            const SIGN_NEUTRAL_NEG: &str = "±↓";
-
-            let prettify = |time: f64| {
-                let sign = if time > 0.05 {
-                    SIGN_POS
-                } else if time > 0. {
-                    SIGN_NEUTRAL_POS
-                } else if time > -0.05 {
-                    SIGN_NEUTRAL_NEG
-                } else {
-                    SIGN_NEG
-                };
-                format!("{} {:.1}%", sign, time.abs() * 100.)
-            };
-
-            // Pretty-print these instead of just using the float display impl.
-            write!(
-                f,
-                "\n| {cat} | {} | {} | {} |",
-                prettify(delta.max),
-                prettify(delta.mean),
-                prettify(delta.min)
-            )?;
+        if !self.deltas.is_empty() {
+            let sorted = self.deltas.iter().collect::<Vec<_>>();
+            writeln!(f, "| Category | Max | Mean | Min |")?;
+            write!(f, "|:---|---:|---:|---:|")?;
+            for (cat, delta) in sorted.into_iter().rev() {
+                write!(
+                    f,
+                    "\n| {cat} | {} | {} | {} |",
+                    prettify_delta(delta.max),
+                    prettify_delta(delta.mean),
+                    prettify_delta(delta.min)
+                )?;
+            }
+        }
+        if !self.segment_deltas.is_empty() {
+            if !self.deltas.is_empty() {
+                writeln!(f)?;
+            }
+            writeln!(f, "| Command | # | Segment | Delta |")?;
+            write!(f, "|:---|---:|:---|---:|")?;
+            for delta in &self.segment_deltas {
+                write!(
+                    f,
+                    "\n| {} | {} | {} | {} |",
+                    delta.case,
+                    delta.index,
+                    delta.name,
+                    prettify_delta(delta.shift)
+                )?;
+            }
         }
         Ok(())
     }
+}
+
+/// Pretty-prints a relative performance delta.
+fn prettify_delta(time: f64) -> String {
+    const SIGN_POS: &str = "up";
+    const SIGN_NEG: &str = "down";
+    const SIGN_NEUTRAL_POS: &str = "near up";
+    const SIGN_NEUTRAL_NEG: &str = "near down";
+
+    let sign = if time > 0.05 {
+        SIGN_POS
+    } else if time > 0. {
+        SIGN_NEUTRAL_POS
+    } else if time > -0.05 {
+        SIGN_NEUTRAL_NEG
+    } else {
+        SIGN_NEG
+    };
+    format!("{} {:.1}%", sign, time.abs() * 100.)
 }
