@@ -27,9 +27,11 @@
 //! Similarly, to skip outputting progress to the command line, pass `-- --quiet`.
 //! These flags can be combined.
 //!
-//! Each perf test must print `MD_PERF_SELF_TIMED_NS <nanoseconds>` from its
-//! measured region. The profiler samples that self-reported duration directly so
-//! setup code is not counted.
+//! Each perf test must print one `MD_PERF_SELF_TIMED_NS <nanoseconds>` total and
+//! one or more `MD_PERF_SEGMENT_NS <name> <nanoseconds>` segment lines from its
+//! measured region. The profiler samples those self-reported durations directly;
+//! setup code is counted only if the test includes it in the reported total and
+//! segment timeline.
 //!
 //! For a large crate such as `md_editor`, it can be useful to prebuild the perf
 //! test binary before invoking the profiler:

@@ -6,7 +6,7 @@
 
 语法目标以正式 GFM 规范为准：<https://github.github.com/gfm/>。本计划不实现独立 HTML 导出器。现有数学和图片能力作为产品扩展保留。
 
-重要更正：2026-05-29 之前记录的 `md_editor` perf mean 是旧 process-timed 数据，包含大量 editor/document/window 创建成本，对 draw、cached redraw、scroll、edit、resize 热路径回归判断没有价值，全部作废。后续 `md_editor` 性能判断只使用 2026-05-29 新增的 self-timed perf 口径和之后的复跑结果。
+重要更正：2026-05-30 `md_editor` perf 已完全重构为 segmented editor session。2026-05-29 之前的旧 process-timed 数据，以及 2026-05-29 的 hot-path self-timed 数据，测量语义都和新 session case 不一致，全部只保留为历史记录，不参与后续回归比较。后续 `md_editor` 性能判断只使用 2026-05-30 之后的新 session/segment 口径和同口径复跑结果。
 
 ## 进度记录
 
@@ -294,6 +294,7 @@
 
 已完成：
 
+- 本节记录的是中间态，已被 2026-05-30 segmented editor session perf 重构取代；其中的 hot-path self-timed mean 不再作为后续 baseline。
 - 临时分段测量确认现有 md_editor perf 的 setup 污染很大：300KB fixture 生成约 0.147ms，但 source/rendered `open_*_perf_window` 分别约 426.311ms / 435.694ms；首帧 draw 约 3.315ms / 4.184ms，cached redraw 约 1.155ms / 2.279ms，scroll 约 51.267ms / 49.527ms。
 - 因此旧 `draw/cached redraw/scroll/edit/resize` mean 主要受 editor/document/window 创建支配，不能代表热路径性能，旧 1.5-2.2s process-timed 数字对热路径回归判断没有价值，已作废。
 - `#[perf]` 改为只支持 self-reported measured-region timing：测试函数自行读取 `MD_PERF_ITER`，只对测量区间计时并打印 `MD_PERF_SELF_TIMED_NS <nanoseconds>`。
@@ -313,8 +314,35 @@
 
 后续仍未完成：
 
-- 用 self-reported measured-region baseline 作为后续 MEGA_PLAN 的唯一 perf 对比口径，必要时复跑以降低高 SD case 的噪声。
+- 用 2026-05-30 之后的新 segmented editor session baseline 作为后续 MEGA_PLAN 的唯一 perf 对比口径，必要时复跑以降低高 SD case 的噪声。
 - list/blockquote 的 rendered indentation、marker/source reveal、cursor/selection/editor 级行为回归。
+- task list item 更完整语义与 list item marker 级测试。
+- GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
+- `markdown_wysiwyg` 模块拆分。
+- 300KB mixed GFM fixture 与最终验证。
+
+### 2026-05-30：segmented editor session perf 重构
+
+已完成：
+
+- `md_editor` important perf case 收敛为 `small_document_session` 和 `large_document_session` 两个 session case，分别覆盖短文档和 300KB 大文档。
+- 每个 session 在固定 timeline 内覆盖 fixture 准备、`TestAppContext` 创建、window 创建、source editor 创建、source 首绘/cached redraw/cold scroll/cached-region scroll/编辑、source/rendered 模式切换、rendered 首绘/cached redraw/cold scroll/cached-region scroll/resize、切回 source 后的滚动与编辑、再次切 rendered 后的 cached redraw。
+- 每个 timeline step 都通过 `MD_PERF_SEGMENT_NS <name> <nanoseconds>` 上报；`MD_PERF_SELF_TIMED_NS` 是同一轮内部 iterations 中所有 segment duration 的总和。
+- setup 不再被伪装成 draw/scroll/edit 热路径，也不再完全隐藏；它作为 `fixture_prepare`、`context_create`、`window_create`、`source_editor_create` 等 segment 出现在 segment table 和 `% total` 中。command-level mean 代表整段合成编辑 session 成本，具体 hot path 判断看对应 segment。
+- `tooling/perf` 现在要求每个样本必须同时包含 total 和至少一个 segment；同一 case 的 8 个 measured samples 必须有完全一致的 segment timeline。
+- 重复 segment name 合法，通过 occurrence index 区分，例如两轮 `rendered_cached_redraw`、`rendered_scroll_cold`、`rendered_scroll_cached_region`、`rendered_resize`。
+- `perf-compare` 现在除了 importance category delta，还会对同名 case 中 index+name 都匹配的 segment 输出 delta。
+- 旧 process-timed log 和 2026-05-29 hot-path self-timed log 均不能和新 session log 横向比较；`.perf-runs` 中旧协议/旧语义文件只可作为历史证据。
+
+验证：
+
+- `cargo test -p perf`：7 passed。
+
+后续仍未完成：
+
+- 跑一次干净的 `cargo perf-test -p md_editor -- --quiet`，生成 2026-05-30 segmented session 首个正式 baseline。
+- 之后所有 `md_editor` perf 回归判断只比较同一 session/segment 协议、同一 case 名、同一 segment occurrence 的结果。
+- 继续完成 list/blockquote rendered indentation、marker/source reveal、cursor/selection/editor 级行为回归。
 - task list item 更完整语义与 list item marker 级测试。
 - GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
 - `markdown_wysiwyg` 模块拆分。
@@ -364,7 +392,9 @@
   - `cargo test -p md_editor`
   - `cargo perf-test -p md_editor -- --quiet`
 - perf 命令使用很长超时，通常 2 小时：`timeout_ms = 7200000`。
-- `md_editor` perf 必须使用 self-timed 口径；旧 process-timed `md_editor` mean 已作废，不参与回归判断。
+- `md_editor` perf 必须使用 2026-05-30 之后的 self-timed segmented session 口径：每个样本必须有一个 `MD_PERF_SELF_TIMED_NS` total 和稳定有序的 `MD_PERF_SEGMENT_NS` timeline。
+- 旧 process-timed `md_editor` mean 和 2026-05-29 hot-path self-timed mean 已作废，不参与回归判断。
+- command-level mean 只代表合成 editor session 总成本；具体 draw、cached redraw、scroll、edit、resize、mode switch、setup 影响必须看 segment table。
 - 以下节点必须跑 perf：
   - 重构前 baseline
   - semantic index 重构后
@@ -374,7 +404,7 @@
   - 每个主要 GFM block/inline 批次后
   - 最终完整验证
 - 性能失败标准：
-  - self-timed important perf case median 回退超过约 5%，复跑后仍成立。
+  - 同一 segmented session case 的 command mean 或匹配 segment occurrence mean 回退超过约 5%，复跑后仍成立，并结合 SD 判断不是噪声。
   - cached redraw/scroll 的 layout computation counts 明显增加，且没有合理功能原因。
 - 新增 300KB mixed GFM perf fixture，覆盖 heading、nested list、blockquote、table、task item、link、autolink、HTML、code fence、CJK。
 - 每类 GFM 语法新增 parser tests，验证 kind、source range、content range、marker ranges、nesting/depth，以及 invalid Markdown 不 panic。

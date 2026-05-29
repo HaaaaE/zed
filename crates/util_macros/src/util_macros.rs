@@ -152,8 +152,11 @@ impl PerfArgs {
 /// disk IO, as locks on files may not be released in time when repeating a test many
 /// times. This might lead to spurious failures.
 ///
-/// The test body is responsible for reading `MD_PERF_ITER`, timing only the
-/// measured region, and printing `MD_PERF_SELF_TIMED_NS <nanoseconds>`.
+/// The test body is responsible for reading `MD_PERF_ITER`, timing the measured
+/// region, and printing one `MD_PERF_SELF_TIMED_NS <nanoseconds>` total plus one
+/// or more `MD_PERF_SEGMENT_NS <name> <nanoseconds>` segment lines. Segment names
+/// must be stable lowercase identifiers using only ASCII letters, digits, and
+/// underscores, and the segment timeline must stay consistent across samples.
 ///
 /// # Examples
 /// ```rust
@@ -172,6 +175,7 @@ impl PerfArgs {
 ///         measured += start.elapsed();
 ///     }
 ///     println!("MD_PERF_SELF_TIMED_NS {}", measured.as_nanos());
+///     println!("MD_PERF_SEGMENT_NS generic_operation {}", measured.as_nanos());
 /// }
 ///
 /// #[perf(fluff, weight = 30, iterations = 10)]
@@ -184,7 +188,9 @@ impl PerfArgs {
 ///     for _ in 0..iter_count {
 ///         // Measured operation goes here.
 ///     }
-///     println!("MD_PERF_SELF_TIMED_NS {}", start.elapsed().as_nanos());
+///     let measured = start.elapsed();
+///     println!("MD_PERF_SELF_TIMED_NS {}", measured.as_nanos());
+///     println!("MD_PERF_SEGMENT_NS cold_operation {}", measured.as_nanos());
 /// }
 /// ```
 ///
@@ -197,7 +203,9 @@ impl PerfArgs {
 /// fn oneshot_test(_cx: &mut gpui::TestAppContext) {
 ///     let start = std::time::Instant::now();
 ///     // Measured operation goes here.
-///     println!("MD_PERF_SELF_TIMED_NS {}", start.elapsed().as_nanos());
+///     let measured = start.elapsed();
+///     println!("MD_PERF_SELF_TIMED_NS {}", measured.as_nanos());
+///     println!("MD_PERF_SEGMENT_NS oneshot_operation {}", measured.as_nanos());
 /// }
 /// ```
 #[proc_macro_attribute]
