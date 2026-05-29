@@ -86,6 +86,24 @@ fn rendered_display_rows_reveal_active_heading_markers() {
 }
 
 #[test]
+fn rendered_display_rows_hide_inactive_setext_heading_marker() {
+    let mut buffer = Buffer::local("Title\n=====\nBody\n");
+    let snapshot = buffer.snapshot();
+
+    let rows = display_rows_in_mode(
+        &snapshot,
+        0..3,
+        Some(&collapsed_selection(Point::new(2, 0))),
+        MarkdownEditorMode::Rendered,
+    );
+
+    assert_eq!(rows[0].text, "Title");
+    assert_eq!(rows[0].heading_level, Some(1));
+    assert_eq!(rows[1].text, "");
+    assert_eq!(rows[2].text, "Body");
+}
+
+#[test]
 fn rendered_display_rows_hide_inactive_inline_markers() {
     let mut buffer = Buffer::local("Before **bold** after\n");
     let snapshot = buffer.snapshot();

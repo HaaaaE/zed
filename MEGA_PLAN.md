@@ -211,6 +211,34 @@
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 
+### 2026-05-29：GFM leaf block 语义覆盖
+
+已完成：
+
+- `MarkdownBlockKind` 增加 setext heading、thematic break、indented code block、HTML block、link reference definition。
+- setext heading 记录 level、content range、underline marker range 和跨行 row range；inactive rendered projection 会隐藏 underline marker。
+- `md_editor` rendered styling 接入 setext heading 和 indented code：setext 复用 heading 样式/heading level，indented code 复用 fenced code 样式。
+- thematic break、HTML block、link reference definition 先作为语义 block 暴露，不新增隐藏 marker，避免在专门 rendered element 尚未实现前吞掉源码显示。
+- 新增 `markdown_wysiwyg` parser tests 覆盖 setext h1/h2 及 additional GFM leaf blocks。
+- 新增 `md_editor` rendered display-row test 覆盖 inactive setext underline marker 隐藏和 heading level。
+
+验证：
+
+- `rustfmt --edition 2024 crates/markdown_wysiwyg/src/markdown_wysiwyg.rs crates/md_editor/src/layout.rs crates/md_editor/src/lib.rs`：完成；无关格式化 diff 已清理。
+- `cargo test -p markdown_wysiwyg parses_`：12 passed。
+- `cargo test -p markdown_wysiwyg`：33 passed。
+- `cargo test -p md_editor rendered_display_rows_hide_inactive_setext_heading_marker`：1 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo test -p md_editor`：198 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
+- `cargo perf-test -p md_editor -- --quiet`：passed。mean：rendered draw large 1957.40ms，rendered cached redraw 1968.10ms，rendered resize 1952.10ms，rendered scroll large 2144.90ms，rendered cached-region scroll 2275.50ms，source draw large 1905.20ms，source cached redraw 1894.40ms，source scroll large 2067.90ms，source cached-region scroll 2206.60ms，source single-row edit large 1926.80ms，source single-row edit length-change 1905.10ms。
+- `git diff --check`：passed。
+
+后续仍未完成：
+
+- 剩余 GFM block/inline 覆盖，尤其 blockquote、ordered/unordered/nested list、task list item 语义、hard/soft break、inline HTML、reference variants、autolink extension/tagfilter。
+- `markdown_wysiwyg` 模块拆分。
+- 300KB mixed GFM fixture 与最终验证。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：

@@ -834,7 +834,8 @@ fn collect_block_style_ranges_for_row(
     let row_source_range = &display_row.source_range;
     for block in &display_row.markdown_blocks {
         match block.kind {
-            MarkdownBlockKind::AtxHeading { level } => {
+            MarkdownBlockKind::AtxHeading { level }
+            | MarkdownBlockKind::SetextHeading { level } => {
                 push_style_range(
                     style_ranges,
                     row_source_range.clone(),
@@ -842,7 +843,7 @@ fn collect_block_style_ranges_for_row(
                     heading_style(level),
                 );
             }
-            MarkdownBlockKind::FencedCodeBlock => {
+            MarkdownBlockKind::FencedCodeBlock | MarkdownBlockKind::IndentedCodeBlock => {
                 push_style_range(
                     style_ranges,
                     row_source_range.clone(),
@@ -858,7 +859,11 @@ fn collect_block_style_ranges_for_row(
                     pipe_table_style(),
                 );
             }
-            MarkdownBlockKind::Blank | MarkdownBlockKind::Paragraph => {}
+            MarkdownBlockKind::Blank
+            | MarkdownBlockKind::Paragraph
+            | MarkdownBlockKind::ThematicBreak
+            | MarkdownBlockKind::HtmlBlock
+            | MarkdownBlockKind::LinkReferenceDefinition => {}
         }
     }
 }

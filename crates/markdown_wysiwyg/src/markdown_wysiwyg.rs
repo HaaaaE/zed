@@ -91,7 +91,12 @@ pub enum MarkdownBlockKind {
     Blank,
     Paragraph,
     AtxHeading { level: u8 },
+    SetextHeading { level: u8 },
+    ThematicBreak,
+    IndentedCodeBlock,
     FencedCodeBlock,
+    HtmlBlock,
+    LinkReferenceDefinition,
     PipeTable,
 }
 
@@ -1468,9 +1473,26 @@ fn collect_block_nodes(source: &str, node: Node<'_>, blocks: &mut Vec<MarkdownBl
 fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
     match node.kind() {
         "atx_heading" => atx_heading_block(source, node),
+        "setext_heading" => setext_heading_block(source, node),
         "paragraph" => Some(MarkdownBlock {
             id: node_id(node),
             kind: MarkdownBlockKind::Paragraph,
+            source_range: node.byte_range(),
+            content_range: trim_line_end(source, node.byte_range()),
+            marker_ranges: Vec::new(),
+            row_range: row_range_for_node(node),
+        }),
+        "thematic_break" => Some(MarkdownBlock {
+            id: node_id(node),
+            kind: MarkdownBlockKind::ThematicBreak,
+            source_range: node.byte_range(),
+            content_range: node.start_byte()..node.start_byte(),
+            marker_ranges: Vec::new(),
+            row_range: row_range_for_node(node),
+        }),
+        "indented_code_block" => Some(MarkdownBlock {
+            id: node_id(node),
+            kind: MarkdownBlockKind::IndentedCodeBlock,
             source_range: node.byte_range(),
             content_range: trim_line_end(source, node.byte_range()),
             marker_ranges: Vec::new(),
@@ -1482,6 +1504,22 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
             source_range: node.byte_range(),
             content_range: fenced_code_content_range(source, node),
             marker_ranges: fenced_code_marker_ranges(node),
+            row_range: row_range_for_node(node),
+        }),
+        "html_block" => Some(MarkdownBlock {
+            id: node_id(node),
+            kind: MarkdownBlockKind::HtmlBlock,
+            source_range: node.byte_range(),
+            content_range: trim_line_end(source, node.byte_range()),
+            marker_ranges: Vec::new(),
+            row_range: row_range_for_node(node),
+        }),
+        "link_reference_definition" => Some(MarkdownBlock {
+            id: node_id(node),
+            kind: MarkdownBlockKind::LinkReferenceDefinition,
+            source_range: node.byte_range(),
+            content_range: trim_line_end(source, node.byte_range()),
+            marker_ranges: Vec::new(),
             row_range: row_range_for_node(node),
         }),
         "pipe_table" => {
@@ -1498,6 +1536,27 @@ fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
         }
         _ => None,
     }
+}
+
+fn setext_heading_block(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
+    let source_range = node.byte_range();
+    let marker_range = last_line_range(source, source_range.clone())?;
+    let marker_text = &source[trim_ascii_whitespace(source, marker_range.clone())];
+    let level = match marker_text.as_bytes().first().copied()? {
+        b'=' => 1,
+        b'-' => 2,
+        _ => return None,
+    };
+    let content_range = trim_line_end(source, source_range.start..marker_range.start);
+
+    Some(MarkdownBlock {
+        id: node_id(node),
+        kind: MarkdownBlockKind::SetextHeading { level },
+        source_range,
+        content_range,
+        marker_ranges: vec![marker_range],
+        row_range: row_range_for_node(node),
+    })
 }
 
 fn atx_heading_block(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
@@ -1675,6 +1734,19 @@ fn trim_line_end(source: &str, mut range: Range<usize>) -> Range<usize> {
     range
 }
 
+fn last_line_range(source: &str, range: Range<usize>) -> Option<Range<usize>> {
+    let trimmed = trim_line_end(source, range.clone());
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let start = source[range.start..trimmed.end]
+        .rfind('\n')
+        .map(|index| range.start + index + 1)
+        .unwrap_or(range.start);
+    Some(start..trimmed.end)
+}
+
 fn trim_ascii_whitespace(source: &str, mut range: Range<usize>) -> Range<usize> {
     while range.start < range.end && matches!(source.as_bytes()[range.start], b' ' | b'\t') {
         range.start += 1;
@@ -1761,6 +1833,78 @@ mod tests {
         assert_eq!(tree.blocks()[0].marker_ranges, vec![0..2]);
         assert_eq!(tree.blocks()[1].kind, MarkdownBlockKind::Blank);
         assert_eq!(tree.blocks()[2].kind, MarkdownBlockKind::Paragraph);
+    }
+
+    #[test]
+    fn parses_setext_headings_with_marker_ranges() {
+        let source = "Title\n=====\n\nSubtitle\n--------\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+
+        assert_eq!(tree.blocks().len(), 3);
+        assert_eq!(
+            tree.blocks()[0].kind,
+            MarkdownBlockKind::SetextHeading { level: 1 }
+        );
+        assert_eq!(&source[tree.blocks()[0].content_range.clone()], "Title");
+        assert_eq!(&source[tree.blocks()[0].marker_ranges[0].clone()], "=====");
+        assert_eq!(tree.blocks()[0].row_range, 0..2);
+        assert_eq!(tree.blocks()[1].kind, MarkdownBlockKind::Blank);
+        assert_eq!(
+            tree.blocks()[2].kind,
+            MarkdownBlockKind::SetextHeading { level: 2 }
+        );
+        assert_eq!(&source[tree.blocks()[2].content_range.clone()], "Subtitle");
+        assert_eq!(
+            &source[tree.blocks()[2].marker_ranges[0].clone()],
+            "--------"
+        );
+        assert_eq!(tree.blocks()[2].row_range, 3..5);
+    }
+
+    #[test]
+    fn parses_additional_gfm_leaf_blocks() {
+        let source = "---\n\n    code\n\n<div>\nhi\n</div>\n\n[ref]: https://example.com\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+
+        let thematic_break = tree
+            .blocks()
+            .iter()
+            .find(|block| block.kind == MarkdownBlockKind::ThematicBreak)
+            .expect("expected thematic break");
+        assert_eq!(
+            &source[trim_line_end(source, thematic_break.source_range.clone())],
+            "---"
+        );
+        assert!(thematic_break.content_range.is_empty());
+
+        let indented_code = tree
+            .blocks()
+            .iter()
+            .find(|block| block.kind == MarkdownBlockKind::IndentedCodeBlock)
+            .expect("expected indented code block");
+        assert_eq!(
+            &source[trim_line_end(source, indented_code.content_range.clone())],
+            "    code"
+        );
+
+        let html = tree
+            .blocks()
+            .iter()
+            .find(|block| block.kind == MarkdownBlockKind::HtmlBlock)
+            .expect("expected HTML block");
+        let html_content = &source[trim_line_end(source, html.content_range.clone())];
+        assert!(html_content.starts_with("<div>"));
+        assert!(html_content.ends_with("</div>"));
+
+        let link_reference = tree
+            .blocks()
+            .iter()
+            .find(|block| block.kind == MarkdownBlockKind::LinkReferenceDefinition)
+            .expect("expected link reference definition");
+        assert_eq!(
+            &source[trim_line_end(source, link_reference.content_range.clone())],
+            "[ref]: https://example.com"
+        );
     }
 
     #[test]

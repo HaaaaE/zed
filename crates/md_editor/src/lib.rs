@@ -2143,7 +2143,9 @@ fn source_display_row_in_text_snapshot(snapshot: &TextBufferSnapshot, row: u32) 
 
 fn heading_level_for_display_row(markdown_blocks: &[MarkdownBlock], row: u32) -> Option<u8> {
     markdown_blocks.iter().find_map(|block| match block.kind {
-        MarkdownBlockKind::AtxHeading { level } if block.row_range.start == row as usize => {
+        MarkdownBlockKind::AtxHeading { level } | MarkdownBlockKind::SetextHeading { level }
+            if block.row_range.start == row as usize =>
+        {
             Some(level)
         }
         _ => None,
