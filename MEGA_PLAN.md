@@ -6,6 +6,8 @@
 
 语法目标以正式 GFM 规范为准：<https://github.github.com/gfm/>。本计划不实现独立 HTML 导出器。现有数学和图片能力作为产品扩展保留。
 
+重要更正：2026-05-29 之前记录的 `md_editor` perf mean 是旧 process-timed 数据，包含大量 editor/document/window 创建成本，对 draw、cached redraw、scroll、edit、resize 热路径回归判断没有价值，全部作废。后续 `md_editor` 性能判断只使用 2026-05-29 新增的 self-timed perf 口径和之后的复跑结果。
+
 ## 进度记录
 
 ### 2026-05-28：合并语义查询与懒增量解析接入
@@ -34,7 +36,7 @@
   - `cargo test -p md_sum_tree`：10 passed。
   - `cargo test -p md_rope`：24 passed，doc-tests 0 passed。
   - `cargo test -p md_text`：37 passed。
-  - `cargo perf-test -p md_editor -- --quiet`：passed。当前 mean：rendered draw large 1908.80ms，rendered cached redraw 1916.50ms，rendered resize 2011.90ms，rendered scroll large 2152.50ms，source draw large 1921.50ms，source cached redraw 1888.10ms，source single-row edit large 1881.60ms，source single-row edit length-change 1932.60ms。
+  - `cargo perf-test -p md_editor -- --quiet`：旧 process-timed perf，当时 passed；耗时数值已作废并移除。
 
 后续仍未完成：
 
@@ -59,8 +61,7 @@
 - `cargo check -p updraft_editor`：passed，保留既有 dead_code warnings。
 - `cargo test -p markdown_wysiwyg`：26 passed。
 - `cargo test -p md_editor`：184 passed，保留既有 `move_selection_right` dead_code warning。
-- `cargo perf-test -p md_editor -- --quiet`：passed。当前 mean：rendered draw large 1940.80ms，rendered cached redraw 1997.20ms，rendered resize 1899.10ms，rendered scroll large 2096.00ms，rendered cached-region scroll 2222.60ms，source draw large 1899.90ms，source cached redraw 1859.30ms，source single-row edit large 1914.10ms，source single-row edit length-change 1908.60ms。
-- 与上一条进度记录中的 perf run 相比，important case 未见超过约 5% 的 median 回退；最大可疑项是 rendered cached redraw 约 +4.2%，低于当前失败阈值，后续大批次仍需复跑确认。
+- `cargo perf-test -p md_editor -- --quiet`：旧 process-timed perf，当时 passed；耗时数值和旧对比结论已作废并移除。
 
 后续仍未完成：
 
@@ -83,9 +84,7 @@
 - `cargo check -p updraft_editor`：passed，保留既有 dead_code warnings。
 - `cargo test -p markdown_wysiwyg`：28 passed。
 - `cargo test -p md_editor`：184 passed，保留既有 `move_selection_right` dead_code warning。
-- `cargo perf-test -p md_editor -- --quiet`：第一次 run passed，但 source scroll 部分 case 相比上一轮超过 5% 且 SD 偏大；按性能失败标准已复跑。
-- `cargo perf-test -p md_editor -- --quiet` 复跑：passed。复跑 mean：rendered draw large 2005.30ms，rendered cached redraw 1857.60ms，rendered resize 1878.50ms，rendered scroll large 2008.00ms，rendered cached-region scroll 2271.40ms，source draw large 1889.00ms，source cached redraw 1881.30ms，source scroll large 2042.90ms，source cached-region scroll 2217.60ms，source short scroll 266.80ms，source single-row edit large 1932.30ms，source single-row edit length-change 1924.80ms。
-- 复跑后未见 important case 相对上一条记录持续超过约 5% 的 median 回退。
+- `cargo perf-test -p md_editor -- --quiet`：旧 process-timed perf，首跑和复跑当时 passed；耗时数值和旧对比结论已作废并移除。
 
 后续仍未完成：
 
@@ -127,10 +126,7 @@
 - `cargo test -p md_editor rendered_display_rows_`：13 passed。
 - `cargo test -p md_editor`：188 passed，保留既有 `move_selection_right` dead_code warning。
 - `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
-- `cargo perf-test -p md_editor -- --quiet`：第一次 run passed。mean：rendered draw large 1890.90ms，rendered cached redraw 1970.00ms，rendered resize 1911.90ms，rendered scroll large 2074.50ms，rendered cached-region scroll 2281.80ms，source draw large 1947.80ms，source cached redraw 1860.70ms，source scroll large 2093.70ms，source cached-region scroll 2232.10ms，source single-row edit large 2007.50ms，source single-row edit length-change 1986.00ms。
-- 第一次 run 中 rendered cached redraw 相对上一条完整 perf 记录超过约 5%，按性能失败标准复跑。
-- `cargo perf-test -p md_editor -- --quiet` 复跑：passed。复跑 mean：rendered draw large 2019.30ms，rendered cached redraw 1936.80ms，rendered resize 1945.60ms，rendered scroll large 2113.60ms，rendered cached-region scroll 2246.60ms，source draw large 1931.50ms，source cached redraw 1952.10ms，source scroll large 2118.90ms，source cached-region scroll 2216.40ms，source single-row edit large 1925.70ms，source single-row edit length-change 1929.70ms。
-- 原可疑的 rendered cached redraw 复跑后低于 5%；rendered scroll large 仅在复跑中略过阈值、首跑未持续，未见同一 important case 连续超过约 5% 的回退。
+- `cargo perf-test -p md_editor -- --quiet`：旧 process-timed perf，首跑和复跑当时 passed；耗时数值和旧对比结论已作废并移除。
 
 后续仍未完成：
 
@@ -177,7 +173,7 @@
 - `cargo test -p md_editor rendered_display_rows_replace_full_html5_named_entities`：1 passed。
 - `cargo test -p md_editor`：194 passed，保留既有 `move_selection_right` dead_code warning。
 - `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
-- `cargo perf-test -p md_editor -- --quiet`：复跑一次，未见性能门禁失败。
+- `cargo perf-test -p md_editor -- --quiet`：旧 process-timed perf，当时复跑 passed；性能门禁结论已作废。
 
 后续仍未完成：
 
@@ -230,7 +226,7 @@
 - `cargo test -p md_editor rendered_display_rows_hide_inactive_setext_heading_marker`：1 passed，保留既有 `move_selection_right` dead_code warning。
 - `cargo test -p md_editor`：198 passed，保留既有 `move_selection_right` dead_code warning。
 - `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
-- `cargo perf-test -p md_editor -- --quiet`：passed。mean：rendered draw large 1957.40ms，rendered cached redraw 1968.10ms，rendered resize 1952.10ms，rendered scroll large 2144.90ms，rendered cached-region scroll 2275.50ms，source draw large 1905.20ms，source cached redraw 1894.40ms，source scroll large 2067.90ms，source cached-region scroll 2206.60ms，source single-row edit large 1926.80ms，source single-row edit length-change 1905.10ms。
+- `cargo perf-test -p md_editor -- --quiet`：旧 process-timed perf，当时 passed；耗时数值已作废并移除。
 - `git diff --check`：passed。
 
 后续仍未完成：
@@ -256,8 +252,7 @@
 - `cargo test -p markdown_wysiwyg`：35 passed。
 - `cargo test -p md_editor`：198 passed，保留既有 `move_selection_right` dead_code warning。
 - `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
-- `cargo perf-test -p md_editor -- --quiet`：首跑 passed，但 rendered scroll/cached-region mean 和 SD 偏高，按门禁规则复跑。
-- `cargo perf-test -p md_editor -- --quiet` 复跑：passed。复跑 mean：rendered draw large 1712.20ms，rendered cached redraw 1770.70ms，rendered resize 1756.50ms，rendered scroll large 1899.50ms，rendered cached-region scroll 2031.90ms，source draw large 1734.50ms，source cached redraw 1751.20ms，source scroll large 1892.50ms，source cached-region scroll 1754.30ms，source single-row edit large 1399.40ms，source single-row edit length-change 1552.90ms。
+- `cargo perf-test -p md_editor -- --quiet`：旧 process-timed perf，首跑和复跑当时 passed；耗时数值和旧对比结论已作废并移除。
 - `git diff --check`：passed。
 
 后续仍未完成：
@@ -285,8 +280,7 @@
 - `cargo test -p md_editor`：198 passed，保留既有 `move_selection_right` dead_code warning。
 - `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
 - `git diff --check`：passed。
-- `cargo perf-test -p md_editor -- --quiet`：首跑 passed，但 rendered draw large mean/SD 明显偏高，按门禁规则复跑。首跑 mean：rendered draw large 2198.90ms，rendered cached redraw 1470.30ms，rendered resize 1517.90ms，rendered scroll large 1606.10ms，rendered cached-region scroll 1778.90ms，source draw large 1492.70ms，source cached redraw 1497.30ms，source scroll large 1571.00ms，source cached-region scroll 1735.20ms，source single-row edit large 1535.50ms，source single-row edit length-change 1535.40ms。
-- `cargo perf-test -p md_editor -- --quiet` 复跑：passed。复跑 mean：rendered draw large 1471.50ms，rendered cached redraw 1463.20ms，rendered resize 1512.30ms，rendered scroll large 1653.40ms，rendered cached-region scroll 1746.20ms，source draw large 1509.50ms，source cached redraw 1505.60ms，source scroll large 1630.30ms，source cached-region scroll 1699.20ms，source single-row edit large 1499.60ms，source single-row edit length-change 1491.60ms。
+- `cargo perf-test -p md_editor -- --quiet`：旧 process-timed perf，首跑和复跑当时 passed；耗时数值和旧对比结论已作废并移除。
 
 后续仍未完成：
 
@@ -301,7 +295,7 @@
 已完成：
 
 - 临时分段测量确认现有 md_editor perf 的 setup 污染很大：300KB fixture 生成约 0.147ms，但 source/rendered `open_*_perf_window` 分别约 426.311ms / 435.694ms；首帧 draw 约 3.315ms / 4.184ms，cached redraw 约 1.155ms / 2.279ms，scroll 约 51.267ms / 49.527ms。
-- 因此旧 `draw/cached redraw/scroll/edit/resize` mean 主要受 editor/document/window 创建支配，不能代表热路径性能，旧 1.5-2.2s process-timed 数字不再作为后续 GFM 热路径对比基线。
+- 因此旧 `draw/cached redraw/scroll/edit/resize` mean 主要受 editor/document/window 创建支配，不能代表热路径性能，旧 1.5-2.2s process-timed 数字对热路径回归判断没有价值，已作废。
 - `#[perf]` 新增 `self_timed` 模式：metadata 标出 `timing self_timed`，测试函数自行读取 `ZED_PERF_ITER`，只对测量区间计时并打印 `ZED_PERF_SELF_TIMED_NS <nanoseconds>`。
 - `tooling/perf` runner 对 self-timed case 不再用 Hyperfine 量整个进程，而是直接采样测试上报的测量区间耗时，保留 mean/stddev/iterations 输出和 JSON 格式。
 - md_editor important perf case 改为 self-timed：fixture、`TestAppContext`、window/editor 创建、初始 warm draw、滚动预热等 setup 不计入热路径；draw case 通过清 layout cache 测 uncached draw，cached redraw 测缓存命中 redraw，scroll/edit/resize 只包住实际操作区间。
@@ -319,7 +313,7 @@
 
 后续仍未完成：
 
-- 用 self-timed baseline 替换后续 MEGA_PLAN 的 perf 对比口径，必要时复跑以降低高 SD case 的噪声。
+- 用 self-timed baseline 作为后续 MEGA_PLAN 的唯一 perf 对比口径，必要时复跑以降低高 SD case 的噪声。
 - list/blockquote 的 rendered indentation、marker/source reveal、cursor/selection/editor 级行为回归。
 - task list item 更完整语义与 list item marker 级测试。
 - GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
@@ -370,6 +364,7 @@
   - `cargo test -p md_editor`
   - `cargo perf-test -p md_editor -- --quiet`
 - perf 命令使用很长超时，通常 2 小时：`timeout_ms = 7200000`。
+- `md_editor` perf 必须使用 self-timed 口径；旧 process-timed `md_editor` mean 已作废，不参与回归判断。
 - 以下节点必须跑 perf：
   - 重构前 baseline
   - semantic index 重构后
@@ -379,7 +374,7 @@
   - 每个主要 GFM block/inline 批次后
   - 最终完整验证
 - 性能失败标准：
-  - 现有 important perf case median 回退超过约 5%，复跑后仍成立。
+  - self-timed important perf case median 回退超过约 5%，复跑后仍成立。
   - cached redraw/scroll 的 layout computation counts 明显增加，且没有合理功能原因。
 - 新增 300KB mixed GFM perf fixture，覆盖 heading、nested list、blockquote、table、task item、link、autolink、HTML、code fence、CJK。
 - 每类 GFM 语法新增 parser tests，验证 kind、source range、content range、marker ranges、nesting/depth，以及 invalid Markdown 不 panic。
