@@ -63,7 +63,7 @@ use inline_atom::{
     INLINE_IMAGE_ATOM_SIZE, INLINE_MATH_ATOM_EXTRA_HEIGHT, INLINE_MATH_ATOM_HORIZONTAL_PADDING,
     inline_image_atom_size_for_size,
 };
-use interaction::mouse_target_for_text_layout;
+use interaction::{mouse_target_for_text_layout, task_checkbox_source_range_for_text_layout_click};
 use layout::{
     DisplayRowCacheKey, DisplayRowLayout, DisplayRowLayoutInputs, DisplayRowProjectionState,
     DisplayRowTextLayout, RowLayoutCacheKey, RowLayoutInputCacheKey, VisualDisplayRow,
@@ -85,9 +85,9 @@ use render::{render_display_row_layout, render_row_text};
 use rendered_element::RenderedElementKind;
 use rendered_element::RenderedElementPlacement;
 #[cfg(test)]
-use rendered_element::source_offset_is_rendered_element_boundary;
-#[cfg(test)]
 use rendered_element::rendered_element_range_at_cursor;
+#[cfg(test)]
+use rendered_element::source_offset_is_rendered_element_boundary;
 use rendered_element::{
     RenderedElementDescriptor, active_source_range_for_selection,
     inactive_rendered_element_source_ranges_for_selection,
@@ -108,7 +108,7 @@ use selection::{
     select_right_in_text_snapshot, select_to_beginning_of_line_in_text_snapshot,
     select_to_end_of_line_in_text_snapshot, select_to_point_in_text_snapshot_with_goal,
     select_to_point_with_goal, select_vertical_in_text_snapshot,
-    selection_byte_range_in_text_snapshot, selection_without_goal,
+    selection_byte_range_in_text_snapshot, selection_for_source_range, selection_without_goal,
     source_rows_for_active_range_change, transaction_selection_state_without_goals,
 };
 pub use selection::{
@@ -1340,6 +1340,48 @@ impl MarkdownEditor {
         );
     }
 
+    fn toggle_task_checkbox_source_range(
+        &mut self,
+        source_range: Range<usize>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let (marker, marker_selection) = {
+            let snapshot = self.buffer.snapshot();
+            let text_snapshot = snapshot.as_text_snapshot();
+            let marker = text_snapshot
+                .text_for_range(source_range.clone())
+                .collect::<String>();
+            let marker_selection =
+                selection_for_source_range(&snapshot, self.selection.id, source_range);
+            (marker, marker_selection)
+        };
+
+        let replacement = match marker.as_str() {
+            "[ ]" => "[x]",
+            "[x]" | "[X]" => "[ ]",
+            _ => return false,
+        };
+
+        let selection_before = self.selection.clone();
+        let previous_selection = self.selection.clone();
+        let row_count_before = self.display_list_state.item_count();
+        let buffer_len_before = self.buffer.len();
+        let (_selection, transaction_id) =
+            replace_selection(&mut self.buffer, &marker_selection, replacement);
+        let changed = transaction_id.is_some();
+        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
+        self.selection = selection_before.clone();
+        self.record_selection_history(transaction_id, selection_before, self.selection.clone());
+        self.notify_after_edit(
+            changed,
+            row_count_before,
+            &previous_selection,
+            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+            cx,
+        );
+        changed
+    }
+
     fn record_selection_history(
         &mut self,
         transaction_id: Option<md_text::TransactionId>,
@@ -1548,14 +1590,29 @@ impl MarkdownEditor {
             window,
             cx,
         ) {
-            DisplayRowLayout::Text(text_layout) => mouse_target_for_text_layout(
-                snapshot.as_text_snapshot(),
-                display_row,
-                visual_row_index,
-                visual_row,
-                event.position.x,
-                &text_layout,
-            ),
+            DisplayRowLayout::Text(text_layout) => {
+                if !event.modifiers.shift
+                    && let Some(source_range) = task_checkbox_source_range_for_text_layout_click(
+                        display_row,
+                        visual_row,
+                        event.position.x,
+                        &text_layout,
+                    )
+                    && self.toggle_task_checkbox_source_range(source_range, cx)
+                {
+                    self.is_selecting_with_mouse = false;
+                    return;
+                }
+
+                mouse_target_for_text_layout(
+                    snapshot.as_text_snapshot(),
+                    display_row,
+                    visual_row_index,
+                    visual_row,
+                    event.position.x,
+                    &text_layout,
+                )
+            }
             DisplayRowLayout::Block(_) => (
                 clip_cursor(&snapshot, selection.head()),
                 SelectionGoal::None,

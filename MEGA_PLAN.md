@@ -186,6 +186,31 @@
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 
+### 2026-05-29：Task checkbox toggle 行为
+
+已完成：
+
+- rendered mode 中 inactive task checkbox glyph 点击会直接切换源码 marker：`[ ]` -> `[x]`，`[x]` / `[X]` -> `[ ]`。
+- 点击命中基于 `MarkdownProjectionOperation::Replace` 和实际 glyph bounds，不重新解析源码文本。
+- glyph 外点击保持普通鼠标选择/定位语义，不改 source text。
+- toggle 后保留原 selection/cursor，不因替换 checkbox marker 跳到任务行。
+- 新增 interaction tests 覆盖 unchecked、checked uppercase 和 outside-glyph no-op。
+
+验证：
+
+- `cargo fmt`：完成；未保留无关格式化 diff。
+- `cargo test -p md_editor rendered_task_checkbox`：3 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo test -p md_editor`：197 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
+- `git diff --check`：passed。
+- 未跑 perf：本批只改 rendered-mode mouse hit-test、等长 marker 替换和对应 interaction tests，没有改 parse、display row 构建、layout、render、scroll 或缓存预热热路径。
+
+后续仍未完成：
+
+- 更多 GFM block/inline 覆盖。
+- `markdown_wysiwyg` 模块拆分。
+- 300KB mixed GFM fixture 与最终验证。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：

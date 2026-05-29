@@ -1,4 +1,7 @@
+use std::ops::Range;
+
 use gpui::{Pixels, px};
+use markdown_wysiwyg::MarkdownProjectionOperation;
 use md_text::{Point, SelectionGoal};
 
 use super::{
@@ -36,4 +39,51 @@ pub(super) fn mouse_target_for_text_layout(
         point,
         visual_horizontal_goal(visual_row_index, target_x.max(px(0.))),
     )
+}
+
+pub(super) fn task_checkbox_source_range_for_text_layout_click(
+    display_row: &DisplayRow,
+    visual_row: &VisualDisplayRow,
+    x: Pixels,
+    text_layout: &DisplayRowTextLayout,
+) -> Option<Range<usize>> {
+    let text_x = (x - gutter_width()).max(px(0.));
+
+    for operation in display_row.projection.operations() {
+        let MarkdownProjectionOperation::Replace {
+            source_range,
+            display_text,
+        } = operation
+        else {
+            continue;
+        };
+        if display_text.as_str() != "\u{2610}" && display_text.as_str() != "\u{2611}" {
+            continue;
+        }
+
+        let display_start = display_row.source_to_display(source_range.start);
+        let display_end = display_start + operation.display_len();
+        if display_start >= visual_row.display_range.end
+            || display_end <= visual_row.display_range.start
+        {
+            continue;
+        }
+
+        let start_x = display_x_for_offset(
+            &text_layout.fragments,
+            &text_layout.shaped_line,
+            display_start,
+        ) - visual_row.line_start_x;
+        let end_x = display_x_for_offset(
+            &text_layout.fragments,
+            &text_layout.shaped_line,
+            display_end,
+        ) - visual_row.line_start_x;
+
+        if start_x <= text_x && text_x <= end_x {
+            return Some(source_range.clone());
+        }
+    }
+
+    None
 }
