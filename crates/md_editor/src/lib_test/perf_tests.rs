@@ -9,7 +9,6 @@ const PERF_WINDOW_HEIGHT: f32 = 700.;
 const PERF_NARROW_WINDOW_WIDTH: f32 = 560.;
 const SCROLL_STEP_PIXELS: f32 = 168.;
 const SCROLL_STEPS: usize = 12;
-const PERF_ITERATIONS: usize = 5;
 
 fn plain_markdown_fixture(target_bytes: usize) -> String {
     let mut text = String::with_capacity(target_bytes + 1024);
@@ -64,7 +63,10 @@ fn middle_row_containing(text: &str, needle: &str) -> u32 {
 fn open_source_perf_window<'a>(
     cx: &'a mut gpui::TestAppContext,
     text: &str,
-) -> (gpui::Entity<MarkdownEditor>, &'a mut gpui::VisualTestContext) {
+) -> (
+    gpui::Entity<MarkdownEditor>,
+    &'a mut gpui::VisualTestContext,
+) {
     let cx = cx.add_empty_window();
     cx.simulate_resize(size(px(PERF_WINDOW_WIDTH), px(PERF_WINDOW_HEIGHT)));
     let text = text.to_string();
@@ -75,7 +77,10 @@ fn open_source_perf_window<'a>(
 fn open_rendered_perf_window<'a>(
     cx: &'a mut gpui::TestAppContext,
     text: &str,
-) -> (gpui::Entity<MarkdownEditor>, &'a mut gpui::VisualTestContext) {
+) -> (
+    gpui::Entity<MarkdownEditor>,
+    &'a mut gpui::VisualTestContext,
+) {
     let cx = cx.add_empty_window();
     cx.simulate_resize(size(px(PERF_WINDOW_WIDTH), px(PERF_WINDOW_HEIGHT)));
     let text = text.to_string();
@@ -89,11 +94,9 @@ fn open_rendered_perf_window<'a>(
 
 fn warm_draw(editor: &gpui::Entity<MarkdownEditor>, cx: &mut gpui::VisualTestContext) {
     let size = cx.update(|window, _| window.bounds().size);
-    cx.draw(
-        gpui::point(px(0.), px(0.)),
-        size,
-        |_, _| editor.clone().into_any_element(),
-    );
+    cx.draw(gpui::point(px(0.), px(0.)), size, |_, _| {
+        editor.clone().into_any_element()
+    });
     cx.run_until_parked();
 }
 
@@ -129,24 +132,6 @@ fn scroll_and_draw(
         });
         warm_draw(editor, cx);
     }
-}
-
-fn scroll_same_region_twice(
-    editor: &gpui::Entity<MarkdownEditor>,
-    cx: &mut gpui::VisualTestContext,
-) {
-    let initial_offset =
-        editor.update(cx, |editor, _| editor.display_list_state.logical_scroll_top());
-    reset_layout_computation_counts(editor, cx);
-    scroll_and_draw(editor, cx, SCROLL_STEPS, SCROLL_STEP_PIXELS);
-    report_layout_computation_counts("first scroll", editor, cx);
-    editor.update(cx, |editor, _| {
-        editor.display_list_state.scroll_to(initial_offset);
-    });
-    warm_draw(editor, cx);
-    reset_layout_computation_counts(editor, cx);
-    scroll_and_draw(editor, cx, SCROLL_STEPS, SCROLL_STEP_PIXELS);
-    report_layout_computation_counts("second scroll", editor, cx);
 }
 
 fn replace_middle_row_word(
@@ -200,14 +185,98 @@ fn replace_middle_row_word(
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+const PERF_DRAW_ITERATIONS: usize = 64;
+const PERF_CACHED_DRAW_ITERATIONS: usize = 128;
+const PERF_SCROLL_ITERATIONS: usize = 8;
+const PERF_EDIT_ITERATIONS: usize = 64;
+const PERF_RESIZE_ITERATIONS: usize = 32;
+const PERF_SELF_TIMED_LINE_PREFIX: &str = "ZED_PERF_SELF_TIMED_NS";
+
+fn perf_iter_count() -> usize {
+    std::env::var("ZED_PERF_ITER")
+        .expect("perf harness should set ZED_PERF_ITER")
+        .parse::<usize>()
+        .expect("ZED_PERF_ITER should be a usize")
+}
+
+fn report_self_timed_duration(duration: std::time::Duration) {
+    println!("{PERF_SELF_TIMED_LINE_PREFIX} {}", duration.as_nanos());
+}
+
+fn measure_self_timed_iterations(mut measure_iteration: impl FnMut() -> std::time::Duration) {
+    let mut duration = std::time::Duration::ZERO;
+    for _ in 0..perf_iter_count() {
+        duration += measure_iteration();
+    }
+    report_self_timed_duration(duration);
+}
+
+fn clear_editor_layout_caches(
+    editor: &gpui::Entity<MarkdownEditor>,
+    cx: &mut gpui::VisualTestContext,
+) {
+    editor.update(cx, |editor, _| {
+        editor.clear_display_row_cache();
+        editor.clear_row_layout_cache();
+        editor.display_list_state.remeasure();
+    });
+}
+
+fn scroll_to(
+    editor: &gpui::Entity<MarkdownEditor>,
+    cx: &mut gpui::VisualTestContext,
+    offset: ListOffset,
+) {
+    editor.update(cx, |editor, _| {
+        editor.display_list_state.scroll_to(offset);
+    });
+}
+
+fn measure_uncached_scroll_iteration(
+    editor: &gpui::Entity<MarkdownEditor>,
+    cx: &mut gpui::VisualTestContext,
+    initial_offset: ListOffset,
+) -> std::time::Duration {
+    scroll_to(editor, cx, initial_offset);
+    clear_editor_layout_caches(editor, cx);
+    warm_draw(editor, cx);
+    reset_layout_computation_counts(editor, cx);
+
+    let start = std::time::Instant::now();
+    scroll_and_draw(editor, cx, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+    start.elapsed()
+}
+
+fn measure_cached_region_scroll_iteration(
+    editor: &gpui::Entity<MarkdownEditor>,
+    cx: &mut gpui::VisualTestContext,
+    initial_offset: ListOffset,
+) -> std::time::Duration {
+    scroll_to(editor, cx, initial_offset);
+    warm_draw(editor, cx);
+    scroll_and_draw(editor, cx, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+    scroll_to(editor, cx, initial_offset);
+    warm_draw(editor, cx);
+    reset_layout_computation_counts(editor, cx);
+
+    let start = std::time::Instant::now();
+    scroll_and_draw(editor, cx, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+    start.elapsed()
+}
+
+#[perf(important, iterations = PERF_DRAW_ITERATIONS, self_timed)]
 fn source_mode_draw_large_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
     let (editor, cx) = open_source_perf_window(&mut cx, &text);
 
-    reset_layout_computation_counts(&editor, cx);
-    warm_draw(&editor, cx);
+    measure_self_timed_iterations(|| {
+        clear_editor_layout_caches(&editor, cx);
+        reset_layout_computation_counts(&editor, cx);
+        let start = std::time::Instant::now();
+        warm_draw(&editor, cx);
+        start.elapsed()
+    });
     report_layout_computation_counts("source large draw", &editor, cx);
 
     editor.read_with(cx, |editor, _| {
@@ -215,14 +284,19 @@ fn source_mode_draw_large_markdown() {
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+#[perf(important, iterations = PERF_DRAW_ITERATIONS, self_timed)]
 fn rendered_mode_draw_large_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
     let (editor, cx) = open_rendered_perf_window(&mut cx, &text);
 
-    reset_layout_computation_counts(&editor, cx);
-    warm_draw(&editor, cx);
+    measure_self_timed_iterations(|| {
+        clear_editor_layout_caches(&editor, cx);
+        reset_layout_computation_counts(&editor, cx);
+        let start = std::time::Instant::now();
+        warm_draw(&editor, cx);
+        start.elapsed()
+    });
     report_layout_computation_counts("rendered large draw", &editor, cx);
 
     editor.read_with(cx, |editor, _| {
@@ -230,15 +304,19 @@ fn rendered_mode_draw_large_markdown() {
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+#[perf(important, iterations = PERF_CACHED_DRAW_ITERATIONS, self_timed)]
 fn source_mode_redraw_large_markdown_cached() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
     let (editor, cx) = open_source_perf_window(&mut cx, &text);
 
     warm_draw(&editor, cx);
-    reset_layout_computation_counts(&editor, cx);
-    warm_draw(&editor, cx);
+    measure_self_timed_iterations(|| {
+        reset_layout_computation_counts(&editor, cx);
+        let start = std::time::Instant::now();
+        warm_draw(&editor, cx);
+        start.elapsed()
+    });
     report_layout_computation_counts("source large cached redraw", &editor, cx);
 
     editor.read_with(cx, |editor, _| {
@@ -246,15 +324,19 @@ fn source_mode_redraw_large_markdown_cached() {
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+#[perf(important, iterations = PERF_CACHED_DRAW_ITERATIONS, self_timed)]
 fn rendered_mode_redraw_large_markdown_cached() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
     let (editor, cx) = open_rendered_perf_window(&mut cx, &text);
 
     warm_draw(&editor, cx);
-    reset_layout_computation_counts(&editor, cx);
-    warm_draw(&editor, cx);
+    measure_self_timed_iterations(|| {
+        reset_layout_computation_counts(&editor, cx);
+        let start = std::time::Instant::now();
+        warm_draw(&editor, cx);
+        start.elapsed()
+    });
     report_layout_computation_counts("rendered large cached redraw", &editor, cx);
 
     editor.read_with(cx, |editor, _| {
@@ -262,15 +344,18 @@ fn rendered_mode_redraw_large_markdown_cached() {
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
 fn source_mode_scroll_short_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = short_plain_markdown_fixture();
     let (editor, cx) = open_source_perf_window(&mut cx, &text);
+    let initial_offset = editor.update(cx, |editor, _| {
+        editor.display_list_state.logical_scroll_top()
+    });
 
-    warm_draw(&editor, cx);
-    reset_layout_computation_counts(&editor, cx);
-    scroll_and_draw(&editor, cx, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+    measure_self_timed_iterations(|| {
+        measure_uncached_scroll_iteration(&editor, cx, initial_offset)
+    });
     report_layout_computation_counts("source short first scroll", &editor, cx);
 
     editor.read_with(cx, |editor, _| {
@@ -278,15 +363,18 @@ fn source_mode_scroll_short_markdown() {
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
 fn source_mode_scroll_large_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
     let (editor, cx) = open_source_perf_window(&mut cx, &text);
+    let initial_offset = editor.update(cx, |editor, _| {
+        editor.display_list_state.logical_scroll_top()
+    });
 
-    warm_draw(&editor, cx);
-    reset_layout_computation_counts(&editor, cx);
-    scroll_and_draw(&editor, cx, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+    measure_self_timed_iterations(|| {
+        measure_uncached_scroll_iteration(&editor, cx, initial_offset)
+    });
     report_layout_computation_counts("source large first scroll", &editor, cx);
 
     editor.read_with(cx, |editor, _| {
@@ -294,43 +382,56 @@ fn source_mode_scroll_large_markdown() {
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
 fn source_mode_scroll_short_markdown_cached_region() {
     let mut cx = gpui::TestAppContext::single();
     let text = short_plain_markdown_fixture();
     let (editor, cx) = open_source_perf_window(&mut cx, &text);
+    let initial_offset = editor.update(cx, |editor, _| {
+        editor.display_list_state.logical_scroll_top()
+    });
 
-    warm_draw(&editor, cx);
-    scroll_same_region_twice(&editor, cx);
+    measure_self_timed_iterations(|| {
+        measure_cached_region_scroll_iteration(&editor, cx, initial_offset)
+    });
+    report_layout_computation_counts("source short cached-region scroll", &editor, cx);
 
     editor.read_with(cx, |editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Source);
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
 fn source_mode_scroll_large_markdown_cached_region() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
     let (editor, cx) = open_source_perf_window(&mut cx, &text);
+    let initial_offset = editor.update(cx, |editor, _| {
+        editor.display_list_state.logical_scroll_top()
+    });
 
-    warm_draw(&editor, cx);
-    scroll_same_region_twice(&editor, cx);
+    measure_self_timed_iterations(|| {
+        measure_cached_region_scroll_iteration(&editor, cx, initial_offset)
+    });
+    report_layout_computation_counts("source large cached-region scroll", &editor, cx);
 
     editor.read_with(cx, |editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Source);
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
 fn rendered_mode_scroll_short_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = short_plain_markdown_fixture();
     let (editor, cx) = open_rendered_perf_window(&mut cx, &text);
+    let initial_offset = editor.update(cx, |editor, _| {
+        editor.display_list_state.logical_scroll_top()
+    });
 
-    warm_draw(&editor, cx);
-    reset_layout_computation_counts(&editor, cx);
-    scroll_and_draw(&editor, cx, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+    measure_self_timed_iterations(|| {
+        measure_uncached_scroll_iteration(&editor, cx, initial_offset)
+    });
     report_layout_computation_counts("rendered short first scroll", &editor, cx);
 
     editor.read_with(cx, |editor, _| {
@@ -338,15 +439,18 @@ fn rendered_mode_scroll_short_markdown() {
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
 fn rendered_mode_scroll_large_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
     let (editor, cx) = open_rendered_perf_window(&mut cx, &text);
+    let initial_offset = editor.update(cx, |editor, _| {
+        editor.display_list_state.logical_scroll_top()
+    });
 
-    warm_draw(&editor, cx);
-    reset_layout_computation_counts(&editor, cx);
-    scroll_and_draw(&editor, cx, SCROLL_STEPS, SCROLL_STEP_PIXELS);
+    measure_self_timed_iterations(|| {
+        measure_uncached_scroll_iteration(&editor, cx, initial_offset)
+    });
     report_layout_computation_counts("rendered large first scroll", &editor, cx);
 
     editor.read_with(cx, |editor, _| {
@@ -354,44 +458,67 @@ fn rendered_mode_scroll_large_markdown() {
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
 fn rendered_mode_scroll_short_markdown_cached_region() {
     let mut cx = gpui::TestAppContext::single();
     let text = short_plain_markdown_fixture();
     let (editor, cx) = open_rendered_perf_window(&mut cx, &text);
+    let initial_offset = editor.update(cx, |editor, _| {
+        editor.display_list_state.logical_scroll_top()
+    });
 
-    warm_draw(&editor, cx);
-    scroll_same_region_twice(&editor, cx);
+    measure_self_timed_iterations(|| {
+        measure_cached_region_scroll_iteration(&editor, cx, initial_offset)
+    });
+    report_layout_computation_counts("rendered short cached-region scroll", &editor, cx);
 
     editor.read_with(cx, |editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+#[perf(important, iterations = PERF_SCROLL_ITERATIONS, self_timed)]
 fn rendered_mode_scroll_large_markdown_cached_region() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
     let (editor, cx) = open_rendered_perf_window(&mut cx, &text);
+    let initial_offset = editor.update(cx, |editor, _| {
+        editor.display_list_state.logical_scroll_top()
+    });
 
-    warm_draw(&editor, cx);
-    scroll_same_region_twice(&editor, cx);
+    measure_self_timed_iterations(|| {
+        measure_cached_region_scroll_iteration(&editor, cx, initial_offset)
+    });
+    report_layout_computation_counts("rendered large cached-region scroll", &editor, cx);
 
     editor.read_with(cx, |editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+#[perf(important, iterations = PERF_EDIT_ITERATIONS, self_timed)]
 fn source_mode_single_row_edit_large_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
     let target_row = middle_row_containing(&text, "source-row");
     let (editor, cx) = open_source_perf_window(&mut cx, &text);
+    let mut using_underscore = false;
 
     warm_draw(&editor, cx);
-    replace_middle_row_word(&editor, cx, target_row, "source-row", "source_rows");
-    warm_draw(&editor, cx);
+    measure_self_timed_iterations(|| {
+        let (from, to) = if using_underscore {
+            ("source_rows", "source-row")
+        } else {
+            ("source-row", "source_rows")
+        };
+        reset_layout_computation_counts(&editor, cx);
+        let start = std::time::Instant::now();
+        replace_middle_row_word(&editor, cx, target_row, from, to);
+        warm_draw(&editor, cx);
+        let elapsed = start.elapsed();
+        using_underscore = !using_underscore;
+        elapsed
+    });
 
     editor.update(cx, |editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Source);
@@ -399,16 +526,29 @@ fn source_mode_single_row_edit_large_markdown() {
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+#[perf(important, iterations = PERF_EDIT_ITERATIONS, self_timed)]
 fn source_mode_single_row_edit_large_markdown_length_change() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
     let target_row = middle_row_containing(&text, "source-row");
     let (editor, cx) = open_source_perf_window(&mut cx, &text);
+    let mut shortened = false;
 
     warm_draw(&editor, cx);
-    replace_middle_row_word(&editor, cx, target_row, "source-row", "row");
-    warm_draw(&editor, cx);
+    measure_self_timed_iterations(|| {
+        let (from, to) = if shortened {
+            ("row", "source-row")
+        } else {
+            ("source-row", "row")
+        };
+        reset_layout_computation_counts(&editor, cx);
+        let start = std::time::Instant::now();
+        replace_middle_row_word(&editor, cx, target_row, from, to);
+        warm_draw(&editor, cx);
+        let elapsed = start.elapsed();
+        shortened = !shortened;
+        elapsed
+    });
 
     editor.update(cx, |editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Source);
@@ -416,16 +556,32 @@ fn source_mode_single_row_edit_large_markdown_length_change() {
     });
 }
 
-#[perf(important, iterations = PERF_ITERATIONS)]
+#[perf(important, iterations = PERF_RESIZE_ITERATIONS, self_timed)]
 fn rendered_mode_resize_large_markdown() {
     let mut cx = gpui::TestAppContext::single();
     let text = large_plain_markdown_fixture();
     let (editor, cx) = open_rendered_perf_window(&mut cx, &text);
+    let mut target_is_narrow = true;
 
     warm_draw(&editor, cx);
-    reset_layout_computation_counts(&editor, cx);
-    cx.simulate_resize(size(px(PERF_NARROW_WINDOW_WIDTH), px(PERF_WINDOW_HEIGHT)));
-    warm_draw(&editor, cx);
+    measure_self_timed_iterations(|| {
+        let (baseline_width, target_width) = if target_is_narrow {
+            (PERF_WINDOW_WIDTH, PERF_NARROW_WINDOW_WIDTH)
+        } else {
+            (PERF_NARROW_WINDOW_WIDTH, PERF_WINDOW_WIDTH)
+        };
+        cx.simulate_resize(size(px(baseline_width), px(PERF_WINDOW_HEIGHT)));
+        clear_editor_layout_caches(&editor, cx);
+        warm_draw(&editor, cx);
+        reset_layout_computation_counts(&editor, cx);
+
+        let start = std::time::Instant::now();
+        cx.simulate_resize(size(px(target_width), px(PERF_WINDOW_HEIGHT)));
+        warm_draw(&editor, cx);
+        let elapsed = start.elapsed();
+        target_is_narrow = !target_is_narrow;
+        elapsed
+    });
     report_layout_computation_counts("rendered large resize", &editor, cx);
 
     editor.read_with(cx, |editor, _| {

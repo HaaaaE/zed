@@ -102,6 +102,8 @@ struct PerfArgs {
     /// How relevant a benchmark is to overall performance. See docs on the enum
     /// for details. If unspecified, `Average` is selected.
     importance: Importance,
+    /// Whether the test function reports the measured duration itself.
+    self_timed: bool,
 }
 
 #[warn(clippy::all, clippy::pedantic)]
@@ -123,6 +125,8 @@ impl PerfArgs {
             self.importance = Importance::Iffy;
         } else if meta.path.is_ident("fluff") {
             self.importance = Importance::Fluff;
+        } else if meta.path.is_ident("self_timed") {
+            self.self_timed = true;
         } else {
             return Err(syn::Error::new_spanned(meta.path, "unexpected identifier"));
         }
@@ -153,6 +157,10 @@ impl PerfArgs {
 /// This attribute should probably not be applied to tests that do any significant
 /// disk IO, as locks on files may not be released in time when repeating a test many
 /// times. This might lead to spurious failures.
+///
+/// Tests with expensive setup can pass `self_timed`; the test body is then
+/// responsible for reading `ZED_PERF_ITER`, timing only the measured region, and
+/// printing `ZED_PERF_SELF_TIMED_NS <nanoseconds>`.
 ///
 /// # Examples
 /// ```rust
@@ -209,6 +217,7 @@ pub fn perf(our_attr: TokenStream, input: TokenStream) -> TokenStream {
         // Also set up values for the second metadata-returning "test".
         let mut new_ident_main = sig_main.ident.to_string();
         let mut new_ident_meta = new_ident_main.clone();
+        let self_timed = args.self_timed;
         new_ident_main.push_str(SUF_NORMAL);
         new_ident_meta.push_str(SUF_MDATA);
 
@@ -221,7 +230,11 @@ pub fn perf(our_attr: TokenStream, input: TokenStream) -> TokenStream {
         let attrs_meta = parse_quote!(#[test] #[allow(non_snake_case)]);
 
         // Make the test loop as the harness instructs it to.
-        let block_main = {
+        let block_main = if self_timed {
+            parse_quote!({
+                #block
+            })
+        } else {
             // The perf harness will pass us the value in an env var. Even if we
             // have a preset value, just do this to keep the code paths unified.
             parse_quote!({
@@ -244,11 +257,24 @@ pub fn perf(our_attr: TokenStream, input: TokenStream) -> TokenStream {
             } else {
                 quote! {}
             };
+            let q_self_timed = if self_timed {
+                quote! {
+                    println!(
+                        "{} {} {}",
+                        #MDATA_LINE_PREF,
+                        #TIMING_MODE_LINE_NAME,
+                        #TIMING_MODE_SELF_TIMED
+                    );
+                }
+            } else {
+                quote! {}
+            };
             let weight = args
                 .weight
                 .unwrap_or_else(|| parse_quote! { #WEIGHT_DEFAULT });
             parse_quote!({
                 #q_iter
+                #q_self_timed
                 println!("{} {} {}", #MDATA_LINE_PREF, #WEIGHT_LINE_NAME, #weight);
                 println!("{} {} {}", #MDATA_LINE_PREF, #IMPORTANCE_LINE_NAME, #importance);
                 println!("{} {} {}", #MDATA_LINE_PREF, #VERSION_LINE_NAME, #MDATA_VER);

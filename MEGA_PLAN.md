@@ -296,6 +296,36 @@
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 
+### 2026-05-29：perf setup 计时污染修正
+
+已完成：
+
+- 临时分段测量确认现有 md_editor perf 的 setup 污染很大：300KB fixture 生成约 0.147ms，但 source/rendered `open_*_perf_window` 分别约 426.311ms / 435.694ms；首帧 draw 约 3.315ms / 4.184ms，cached redraw 约 1.155ms / 2.279ms，scroll 约 51.267ms / 49.527ms。
+- 因此旧 `draw/cached redraw/scroll/edit/resize` mean 主要受 editor/document/window 创建支配，不能代表热路径性能，旧 1.5-2.2s process-timed 数字不再作为后续 GFM 热路径对比基线。
+- `#[perf]` 新增 `self_timed` 模式：metadata 标出 `timing self_timed`，测试函数自行读取 `ZED_PERF_ITER`，只对测量区间计时并打印 `ZED_PERF_SELF_TIMED_NS <nanoseconds>`。
+- `tooling/perf` runner 对 self-timed case 不再用 Hyperfine 量整个进程，而是直接采样测试上报的测量区间耗时，保留 mean/stddev/iterations 输出和 JSON 格式。
+- md_editor important perf case 改为 self-timed：fixture、`TestAppContext`、window/editor 创建、初始 warm draw、滚动预热等 setup 不计入热路径；draw case 通过清 layout cache 测 uncached draw，cached redraw 测缓存命中 redraw，scroll/edit/resize 只包住实际操作区间。
+
+验证：
+
+- `cargo check -p perf -p util_macros`：passed。
+- `cargo test -p md_editor source_mode_redraw_large_markdown_cached --profile release-fast --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]' -- --nocapture`：passed，确认 self-timed case 输出 `ZED_PERF_SELF_TIMED_NS`。
+- `cargo perf-test -p md_editor source_mode_redraw_large_markdown_cached -- --quiet`：passed；当前 runner 对额外 test filter 不筛选 perf list，因此实际输出全量 md_editor important self-timed case。当前 self-timed mean：rendered draw large 250.50ms，rendered cached redraw 427.71ms，rendered resize 125.98ms，rendered scroll large 590.55ms，rendered cached-region scroll 485.19ms，source draw large 160.70ms，source cached redraw 627.20ms，source scroll large 371.94ms，source cached-region scroll 392.49ms，source single-row edit large 133.98ms，source single-row edit length-change 177.93ms。
+- 该次 self-timed run 中 `source cached redraw` 和 `source short scroll` SD 偏高，后续用新基线判断回归时需要复跑确认，不按旧 process-timed 数字横向比较。
+- `cargo test -p md_editor`：198 passed。
+- `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
+- `cargo test -p perf -p util_macros`：passed，均为 0 tests。
+- `git diff --check`：passed。
+
+后续仍未完成：
+
+- 用 self-timed baseline 替换后续 MEGA_PLAN 的 perf 对比口径，必要时复跑以降低高 SD case 的噪声。
+- list/blockquote 的 rendered indentation、marker/source reveal、cursor/selection/editor 级行为回归。
+- task list item 更完整语义与 list item marker 级测试。
+- GFM tagfilter/disallowed raw HTML 的明确语义和 rendered/editor 回归。
+- `markdown_wysiwyg` 模块拆分。
+- 300KB mixed GFM fixture 与最终验证。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：
