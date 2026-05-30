@@ -66,7 +66,11 @@ impl RenderedDisplayIndex {
                         kind,
                     );
                 }
-            } else if kind == RenderedDisplayItemKind::Paragraph
+            } else if matches!(
+                kind,
+                RenderedDisplayItemKind::FencedCodeBlock
+                    | RenderedDisplayItemKind::IndentedCodeBlock
+            ) || kind == RenderedDisplayItemKind::Paragraph
                 && paragraph_can_merge(
                     snapshot,
                     block.source_range.clone(),

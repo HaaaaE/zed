@@ -166,8 +166,8 @@ impl MarkdownEditor {
             .rendered_display_index(snapshot)
             .item(item_index)?
             .clone();
-        let row = item.row_range.start as u32;
-        let source_range = item.source_range.clone();
+        let (row, source_range, source_row_range) =
+            super::rendered_item_display_source_range(snapshot, &item, display_row_state);
         let active_projection_source_ranges = snapshot
             .syntax_tree()
             .active_projection_source_ranges_for_source_range(
@@ -179,7 +179,7 @@ impl MarkdownEditor {
             version: snapshot.version().clone(),
             item_index: item.index as u32,
             source_range: source_range.clone(),
-            source_row_range: item.row_range.clone(),
+            source_row_range: source_row_range.clone(),
             mode,
             active_projection_source_ranges: active_projection_source_ranges.clone(),
         };
@@ -204,7 +204,7 @@ impl MarkdownEditor {
             item.index as u32,
             row,
             source_range,
-            item.row_range.clone(),
+            source_row_range,
             range_semantics,
             self.document_path(),
         ));

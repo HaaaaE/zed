@@ -95,7 +95,7 @@ use rendered_element::{
     inactive_rendered_element_source_ranges_for_selection,
     rendered_element_descriptor_for_inline_span_in_row, rendered_element_source_range_is_active,
 };
-use rendered_index::RenderedDisplayIndex;
+use rendered_index::{RenderedDisplayIndex, RenderedDisplayItem, RenderedDisplayItemKind};
 #[cfg(test)]
 use selection::{HorizontalDirection, move_horizontal_in_mode, move_selection_left, move_vertical};
 use selection::{
@@ -2162,6 +2162,86 @@ fn rendered_display_index_for_tests(snapshot: &BufferSnapshot) -> Arc<RenderedDi
     RenderedDisplayIndex::build(snapshot)
 }
 
+fn rendered_item_display_source_range(
+    snapshot: &BufferSnapshot,
+    item: &RenderedDisplayItem,
+    display_row_state: &DisplayRowProjectionState,
+) -> (u32, Range<usize>, Range<usize>) {
+    if matches!(
+        item.kind,
+        RenderedDisplayItemKind::FencedCodeBlock | RenderedDisplayItemKind::IndentedCodeBlock
+    ) && let Some(block) = snapshot.syntax_tree().blocks().iter().find(|block| {
+        block.row_range == item.row_range
+            && matches!(
+                block.kind,
+                MarkdownBlockKind::FencedCodeBlock | MarkdownBlockKind::IndentedCodeBlock
+            )
+    }) {
+        if let Some(active_marker_range) =
+            display_row_state
+                .active_source_range
+                .as_ref()
+                .and_then(|active_source_range| {
+                    block
+                        .marker_ranges
+                        .iter()
+                        .find(|marker_range| ranges_overlap(marker_range, active_source_range))
+                })
+        {
+            let row = snapshot
+                .as_text_snapshot()
+                .offset_to_point(active_marker_range.start)
+                .row as usize;
+            return (
+                row as u32,
+                row_source_range(snapshot, row as u32),
+                row..row + 1,
+            );
+        }
+
+        return (
+            block.row_range.start as u32,
+            block.content_range.clone(),
+            block.row_range.clone(),
+        );
+    }
+
+    (
+        item.row_range.start as u32,
+        item.source_range.clone(),
+        item.row_range.clone(),
+    )
+}
+
+#[cfg(test)]
+fn rendered_display_row_for_item_for_tests(
+    snapshot: &BufferSnapshot,
+    item_index: usize,
+    selection: Option<&Selection<Point>>,
+) -> DisplayRow {
+    let index = RenderedDisplayIndex::build(snapshot);
+    let item = index.item(item_index).expect("item should exist");
+    let display_row_state =
+        DisplayRowProjectionState::new(snapshot, selection, MarkdownEditorMode::Rendered);
+    let (row, source_range, source_row_range) =
+        rendered_item_display_source_range(snapshot, item, &display_row_state);
+    let range_semantics = snapshot.syntax_tree().range_semantics_for_source_range(
+        source_range.clone(),
+        display_row_state.active_source_range.clone(),
+        &display_row_state.inactive_source_ranges,
+    );
+
+    rendered_display_row(
+        snapshot,
+        item.index as u32,
+        row,
+        source_range,
+        source_row_range,
+        range_semantics,
+        None,
+    )
+}
+
 fn rendered_display_row(
     snapshot: &BufferSnapshot,
     item_index: u32,
@@ -2193,6 +2273,7 @@ fn rendered_display_row(
         &source_text,
         &source_range,
         &projection,
+        &markdown_blocks,
         &inline_spans,
         &rendered_element_descriptors,
         MarkdownEditorMode::Rendered,
@@ -2320,6 +2401,7 @@ fn project_display_row_text(
     source_text: &str,
     row_source_range: &Range<usize>,
     projection: &MarkdownProjectionMap,
+    markdown_blocks: &[MarkdownBlock],
     inline_spans: &[MarkdownInlineSpan],
     rendered_element_descriptors: &[RenderedElementDescriptor],
     mode: MarkdownEditorMode,
@@ -2328,10 +2410,19 @@ fn project_display_row_text(
         return (project_row_text(source_text, projection), Vec::new());
     }
 
-    let mut display_text = project_row_text(source_text, projection)
-        .replace("\r\n", " ")
-        .replace('\n', " ")
-        .replace('\r', " ");
+    let rendered_code_block = markdown_blocks.iter().any(|block| {
+        matches!(
+            block.kind,
+            MarkdownBlockKind::FencedCodeBlock | MarkdownBlockKind::IndentedCodeBlock
+        )
+    });
+    let mut display_text = project_row_text(source_text, projection);
+    if !rendered_code_block {
+        display_text = display_text
+            .replace("\r\n", " ")
+            .replace('\n', " ")
+            .replace('\r', " ");
+    }
     let mut insertions = Vec::new();
     for span in inline_spans {
         let descriptor = rendered_element_descriptors
