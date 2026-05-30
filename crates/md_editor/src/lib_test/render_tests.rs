@@ -93,6 +93,65 @@ fn rendered_styled_segments_apply_inline_semantics() {
     );
 }
 
+#[test]
+fn rendered_styled_segments_apply_raw_html_semantics() {
+    let mut buffer = Buffer::local("<div data-kind=\"raw\">html</div>\nInline <br> raw\n");
+    let snapshot = buffer.snapshot();
+
+    let html_block = display_rows_in_mode(
+        &snapshot,
+        0..1,
+        Some(&collapsed_selection(Point::new(1, 0))),
+        MarkdownEditorMode::Rendered,
+    )
+    .remove(0);
+    let inline_html = display_rows_in_mode(
+        &snapshot,
+        1..2,
+        Some(&collapsed_selection(Point::new(0, 0))),
+        MarkdownEditorMode::Rendered,
+    )
+    .remove(0);
+
+    let block_row_style =
+        row_display_style_for_display_row(&snapshot, &html_block, MarkdownEditorMode::Rendered);
+    let block_segments = text_segments_for_fragments(
+        &html_block.text,
+        &display_inline_fragments(
+            &snapshot,
+            &html_block,
+            MarkdownEditorMode::Rendered,
+            block_row_style,
+            None,
+        ),
+    );
+    let inline_row_style =
+        row_display_style_for_display_row(&snapshot, &inline_html, MarkdownEditorMode::Rendered);
+    let inline_segments = text_segments_for_fragments(
+        &inline_html.text,
+        &display_inline_fragments(
+            &snapshot,
+            &inline_html,
+            MarkdownEditorMode::Rendered,
+            inline_row_style,
+            None,
+        ),
+    );
+    let muted = Some(md_theme::editor_palette().muted_text);
+
+    assert_eq!(html_block.text, "<div data-kind=\"raw\">html</div>");
+    assert_eq!(block_segments.len(), 1);
+    assert_eq!(block_segments[0].style.color, muted);
+    assert_eq!(inline_html.text, "Inline <br> raw");
+    assert!(
+        inline_segments
+            .iter()
+            .any(|segment| segment.text.contains("<br>") && segment.style.color == muted),
+        "inline segments: {inline_segments:?}"
+    );
+    assert_eq!(inline_style(MarkdownInlineKind::InlineHtml).color, muted);
+}
+
 #[gpui::test]
 fn mouse_target_for_wrapped_row_end_keeps_clicked_visual_row_goal(cx: &mut gpui::TestAppContext) {
     let mut buffer = Buffer::local("abcdefghij\n");

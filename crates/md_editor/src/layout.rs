@@ -945,6 +945,14 @@ fn collect_block_style_ranges_for_row(
                     pipe_table_style(),
                 );
             }
+            MarkdownBlockKind::HtmlBlock => {
+                push_style_range(
+                    style_ranges,
+                    row_source_range.clone(),
+                    block.content_range.clone(),
+                    html_raw_style(),
+                );
+            }
             MarkdownBlockKind::Blank
             | MarkdownBlockKind::Paragraph
             | MarkdownBlockKind::ThematicBreak
@@ -953,7 +961,6 @@ fn collect_block_style_ranges_for_row(
             | MarkdownBlockKind::UnorderedList
             | MarkdownBlockKind::ListItem
             | MarkdownBlockKind::TaskListItem { .. }
-            | MarkdownBlockKind::HtmlBlock
             | MarkdownBlockKind::LinkReferenceDefinition => {}
         }
     }
@@ -1004,11 +1011,11 @@ pub(super) fn inline_style(kind: MarkdownInlineKind) -> DisplayTextStyle {
             italic: true,
             ..Default::default()
         },
+        MarkdownInlineKind::InlineHtml => html_raw_style(),
         MarkdownInlineKind::Escape
         | MarkdownInlineKind::Entity
         | MarkdownInlineKind::HardBreak
-        | MarkdownInlineKind::SoftBreak
-        | MarkdownInlineKind::InlineHtml => DisplayTextStyle::default(),
+        | MarkdownInlineKind::SoftBreak => DisplayTextStyle::default(),
     }
 }
 
@@ -1043,6 +1050,14 @@ fn pipe_table_style() -> DisplayTextStyle {
     DisplayTextStyle {
         color: Some(palette.pipe_table_text),
         text_background: Some(palette.pipe_table_background),
+        ..Default::default()
+    }
+}
+
+fn html_raw_style() -> DisplayTextStyle {
+    let palette = editor_palette();
+    DisplayTextStyle {
+        color: Some(palette.muted_text),
         ..Default::default()
     }
 }

@@ -34,7 +34,7 @@
 - `FencedCodeBlock`/`IndentedCodeBlock`：inactive 合成 code block item，隐藏 fence/info marker，保留 raw code 内容与换行；cursor 在 fence/info 行时 reveal 该 source row。
 - [done 2026-05-30] `ThematicBreak`：inactive 单 item 画 horizontal rule；active 时显示 source row。
 - [done 2026-05-30] `LinkReferenceDefinition`：inactive 保留 0-height item 以稳定 index；active 时显示 source text。
-- `HtmlBlock`/`InlineHtml`：不执行、不渲染 HTML，始终按源码文本显示，可用 muted/raw 样式降噪。
+- [done 2026-05-30] `HtmlBlock`/`InlineHtml`：不执行、不渲染 HTML，始终按源码文本显示，并使用 muted/raw 样式降噪。
 
 ### Projection and Text Layout
 
