@@ -18,7 +18,7 @@
   - `item_index -> source_range/row_range/kind`
   - `source_row/source_offset -> item_index`
   - rendered mode 的 item count 来自 index，source mode 继续来自 text row count。
-- [partial 2026-05-30] 引入 `DisplayItemId` 和 item/cache key 适配层；当前仍由 `DisplayRow` 承载 item layout，普通安全 paragraph 可合并，table/code/html/link-ref 等保留可寻址 item/row，后续再补 `DisplayItemLayout`。
+- [partial 2026-05-30] 引入 `DisplayItemId` 和 item/cache key 适配层；当前仍由 `DisplayRow` 承载 item layout，普通安全 paragraph 可合并，table/html/link-ref 等保留可寻址 item/row，code block 当前保留逐 source row 编辑器布局并隐藏 inactive fence rows，后续再补 `DisplayItemLayout`。
 - [done 2026-05-30] 将 rendered gutter 改成 mode-aware left rail：
   - source mode 保留 `48px` 行号。
   - rendered mode 使用 `24px` rail，不显示 source 行号，只在 active item 显示 subtle marker。
@@ -31,7 +31,7 @@
 
 - [partial 2026-05-30] `Paragraph`：inactive 时合并普通安全 Markdown paragraph 的多 source rows，soft break 渲染为空格；含 image/math/task/list/blockquote 等需要更细布局的段落暂保留 row item。
 - [done 2026-05-30] `PipeTable`：继续一 source row 一个 rendered item；inactive 走现有 structured table；active reveal 当前 source row。
-- [partial 2026-05-30] `FencedCodeBlock`/`IndentedCodeBlock`：保留代码内容 source rows 的普通编辑器布局；inactive 隐藏 fence/info marker rows，cursor 在 fence/info marker 时 reveal 该 source row。后续仍需补 code block presentation（背景、padding、monospace-like raw styling）并完善多行 selection/vertical movement 的视觉 polish。
+- [partial 2026-05-30] `FencedCodeBlock`/`IndentedCodeBlock`：保留代码内容 source rows 的普通编辑器布局；inactive 隐藏 fence/info marker rows，cursor 在 fence/info marker 时 reveal 该 source row。不再将整个 code block 合成单 item，避免破坏中间内容的逐行编辑体验。
 - [done 2026-05-30] `ThematicBreak`：inactive 单 item 画 horizontal rule；active 时显示 source row。
 - [done 2026-05-30] `LinkReferenceDefinition`：inactive 保留 0-height item 以稳定 index；active 时显示 source text。
 - [done 2026-05-30] `HtmlBlock`/`InlineHtml`：不执行、不渲染 HTML，始终按源码文本显示，并使用 muted/raw 样式降噪。
@@ -65,7 +65,8 @@
 - Paragraph after spacing `6px`；list item spacing `2px`；blockquote 外侧 `6px`，内部紧凑。
 - List marker 作为 adornment 绘制：unordered bullet、ordered marker、task checkbox；wrapped continuation 与内容文本对齐。
 - Blockquote 按 depth 画 `2px` quote bar，gap `10px`，不改变 source selection。
-- Code block 使用 monospace-like raw styling、background、`8px` vertical/`10px` horizontal padding；table/header/border 沿用现有 table layout 并微调 header bg、cell padding。
+- [next] Code block presentation：代码内容 rows 继续走普通编辑器布局，但作为一个连续视觉区域获得 monospace-like raw styling、background、`8px` vertical/`10px` horizontal padding；fence/info rows inactive 时保持隐藏，active reveal 时显示 source row。
+- Table/header/border 沿用现有 table layout 并微调 header bg、cell padding。
 
 ### Caching and Perf
 
@@ -79,7 +80,7 @@
 
 ### Unit Tests
 
-- rendered index：paragraph merge、table row keep 1:1、code block item、0-height link reference、source row/item 双向映射。
+- rendered index：paragraph merge、table row keep 1:1、code block content rows keep editable、inactive fence rows hidden、0-height link reference、source row/item 双向映射。
 - projection：soft break -> space、hard break -> forced line、active soft/hard break reveal、HTML raw text。
 - selection：multi-row paragraph selection highlight、copy/cut/delete 仍返回/修改 source text。
 - active reveal：bold token、link token、table row、table cell inline token、soft break neighbor、thematic/code/link-ref active cases。
@@ -95,7 +96,7 @@
 
 - list marker 与 wrapped continuation 对齐。
 - blockquote bar depth 正确。
-- thematic break/code block/table delimiter/header/image/math placeholder 尺寸稳定。
+- thematic break/code block presentation/table delimiter/header/image/math placeholder 尺寸稳定。
 
 ### Validation Commands
 
