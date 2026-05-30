@@ -16,12 +16,13 @@
 - 已新增编辑测试覆盖 rendered Enter、rendered Shift+Enter、Source Enter 自动缩进。
 - 已将 rendered paragraph 内普通 `\n` 的显示从空格改为视觉断行，和 `Shift+Enter` 的输入语义对齐。
 - 已让 rendered 空段在 Backspace/Delete 下可直接删除，并新增针对性的 interaction 测试。
+- 已新增空段内 Enter 测试，覆盖从 1 个 empty paragraph 到 2 个 empty paragraphs 的 `2n + 1` blank run 序列化。
 - 验证通过：
   - `cargo test -p md_editor rendered_display_index --lib`
   - `cargo test -p md_editor enter --lib`
   - `cargo test -p md_editor --lib`
   - `cargo check -p updraft_editor`
-- 剩余主要工作：Rendered 模式连续 Enter / 空段 Enter 的 `2n + 1` blank run 规范化；空段点击/caret 交互测试；空段删除后更完整的跨段合并和光标收敛。
+- 剩余主要工作：Rendered 模式段尾连续 Enter 的光标语义细化；空段点击/caret 交互测试；空段删除后更完整的跨段合并和光标收敛。
 
 ## Key Changes
 

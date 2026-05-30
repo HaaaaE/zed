@@ -2707,6 +2707,27 @@ fn rendered_shift_enter_inserts_soft_break() {
 }
 
 #[test]
+fn rendered_enter_in_empty_paragraph_creates_next_empty_paragraph() {
+    let mut buffer = Buffer::local("a\n\n\n\nb\n");
+    let selection = collapsed_selection(Point::new(2, 0));
+
+    let (selection, transaction_id) =
+        insert_newline_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "a\n\n\n\n\n\nb\n");
+    assert_eq!(selection, collapsed_selection(Point::new(4, 0)));
+    assert!(transaction_id.is_some());
+
+    let snapshot = buffer.snapshot();
+    let index = rendered_display_index_for_tests(&snapshot);
+    let empty_paragraph_count = (0..index.item_count())
+        .filter_map(|item_index| index.item(item_index))
+        .filter(|item| item.kind == rendered_index::RenderedDisplayItemKind::EmptyParagraph)
+        .count();
+    assert_eq!(empty_paragraph_count, 2);
+}
+
+#[test]
 fn source_enter_preserves_auto_indent() {
     let mut buffer = Buffer::local("    ab");
     let selection = collapsed_selection(Point::new(0, "    a".len() as u32));
