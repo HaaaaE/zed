@@ -545,6 +545,39 @@
 
 - 300KB mixed GFM fixture 与最终验证。
 
+### 2026-05-30：300KB mixed GFM fixture 与最终验证
+
+已完成：
+
+- `md_editor` segmented perf fixture 从偏普通文本的 `plain_markdown_fixture` 改为 `mixed_gfm_markdown_fixture`。
+- 300KB large fixture 继续由 `LARGE_MARKDOWN_TARGET_BYTES = 300 * 1024` 控制，small fixture 继续由 `SHORT_MARKDOWN_TARGET_BYTES = 5 * 1024` 控制。
+- mixed fixture 覆盖 heading、bold/emphasis/strike/code、link、URI autolink、entity、escape、CJK、blockquote、task list item、nested ordered/unordered list、pipe table、fenced code、indented code、safe raw HTML、tagfilter disallowed raw HTML、hard/soft break。
+- `source-row` edit target 保留在 fixture 多类 block 中，现有 source edit segment 不需要改语义。
+- session timeline 保持 2 个 case、每个 34 段，segment 名称和顺序不变；但 fixture 内容语义已变，因此旧 `.perf-runs/20260530-scroll-segments.md_editor.json` 只作为旧 fixture 历史 baseline，不再作为后续 GFM mixed fixture 的 perf 起点。
+- 新 mixed GFM baseline 写入 `.perf-runs/20260530-mixed-gfm-fixture.md_editor.json`。
+
+验证：
+
+- `cargo test -p md_editor --profile release-fast --lib --no-run --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]'`：passed，保留既有 `md_text` 未使用 `FxHasher` 和 `md_editor` `move_selection_right` warnings。
+- `MD_PERF_ITER=1 cargo test -p md_editor perf_tests::small_document_session__MD_PERF_FN --profile release-fast --lib --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]' -- --exact --nocapture`：passed，确认输出 34 段 timeline。
+- `cargo perf-test -p md_editor -- --quiet --json=20260530-mixed-gfm-fixture`：passed，使用 Windows Kits `D:\Windows Kits\10\bin\10.0.26100.0\x64` 加入 `PATH`。
+- mixed GFM baseline command-level：
+  - `perf_tests::large_document_session`：iterations 8，iter/sec 0.63，mean 12740.13ms，SD 389.91ms。
+  - `perf_tests::small_document_session`：iterations 16，iter/sec 1.63，mean 9813.97ms，SD 373.92ms。
+- `cargo test -p md_sum_tree`：10 passed。
+- `cargo test -p md_rope`：24 passed，doc-tests 0 passed。
+- `cargo test -p md_text`：37 passed。
+- `cargo test -p md_buffer`：17 passed。
+- 同一最终批次还验证了：
+  - `cargo test -p markdown_wysiwyg`：39 passed。
+  - `cargo test -p md_editor`：207 passed，保留既有 `move_selection_right` dead_code warning。
+  - `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
+  - `git diff --check`：passed，仅有 Windows line-ending 提示。
+
+后续状态：
+
+- MEGA_PLAN 中列出的 GFM 语义覆盖、replacement projection、task checkbox toggle、blockquote/list indentation、`markdown_wysiwyg` 模块拆分、300KB mixed GFM fixture 和最终验证均已完成并记录。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：
@@ -592,7 +625,7 @@
 - `md_editor` perf 必须使用 2026-05-30 之后的 self-timed segmented session 口径：每个样本必须有一个 `MD_PERF_SELF_TIMED_NS` total 和稳定有序的 `MD_PERF_SEGMENT_NS` timeline。
 - 旧 process-timed `md_editor` mean 和 2026-05-29 hot-path self-timed mean 已作废，不参与回归判断。
 - command-level mean 只代表合成 editor session 总成本；具体 draw、cached redraw、scroll、edit、resize、mode switch、setup 影响必须看 segment table。
-- 当前正式 segmented baseline 标识为 `.perf-runs/20260530-scroll-segments.md_editor.json`；该文件在本地 `.perf-runs` 中 ignored，计划文档只记录关键摘要。此前 `.perf-runs/20260530-014124-8bf8106989.md_editor.json` 是旧 27 段 timeline 的首个 baseline，已被 scroll prepare 拆分后的 34 段 baseline 取代。
+- 当前正式 segmented baseline 标识为 `.perf-runs/20260530-mixed-gfm-fixture.md_editor.json`；该文件在本地 `.perf-runs` 中 ignored，计划文档只记录关键摘要。此前 `.perf-runs/20260530-scroll-segments.md_editor.json` 是 34 段 timeline 的旧普通 fixture baseline，已被 mixed GFM fixture baseline 取代；更早的 `.perf-runs/20260530-014124-8bf8106989.md_editor.json` 是旧 27 段 timeline 的首个 baseline，已被 scroll prepare 拆分后的 34 段协议取代。
 - 以下节点必须跑 perf：
   - 重构前 baseline
   - semantic index 重构后

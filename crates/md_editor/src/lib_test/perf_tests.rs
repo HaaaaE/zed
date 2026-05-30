@@ -11,17 +11,51 @@ const PERF_NARROW_WINDOW_WIDTH: f32 = 560.;
 const SCROLL_STEP_PIXELS: f32 = 168.;
 const SCROLL_STEPS: usize = 12;
 
-fn plain_markdown_fixture(target_bytes: usize) -> String {
+fn mixed_gfm_markdown_fixture(target_bytes: usize) -> String {
     let mut text = String::with_capacity(target_bytes + 1024);
-    let paragraph = "Before **bold** text and regular wrapped prose repeated for source-row layout profiling.\n";
-    let block = "## Heading\n\n";
-    let list = "- first item in a long wrapped list entry for layout profiling\n";
+    let block = [
+        "## Mixed GFM section",
+        "",
+        "Before **bold** text, _emphasis_, ~~strike~~, `code`, [link](https://example.com), <https://example.com>, &amp; entity, escaped \\* marker, and source-row layout profiling.",
+        "CJK mixed content: 中文段落用于覆盖宽字符 wrapping 和 source-row edit 定位。",
+        "",
+        "> quoted paragraph with source-row target",
+        "> - [ ] quoted unchecked task",
+        "> - [x] quoted checked task",
+        ">   1. nested ordered item",
+        "",
+        "- [ ] unchecked task item with a long wrapped source-row entry for layout profiling",
+        "- [X] uppercase checked task item",
+        "- plain unordered item",
+        "  - nested unordered item",
+        "1. ordered item",
+        "2) ordered paren item",
+        "",
+        "| Feature | State | Notes |",
+        "| :--- | :---: | ---: |",
+        "| table | ok | source-row |",
+        "| task | mixed | 42 |",
+        "",
+        "```rust",
+        "fn main() {",
+        "    println!(\"source-row fenced code\");",
+        "}",
+        "```",
+        "",
+        "    indented code block source-row",
+        "",
+        "<div data-kind=\"safe\">raw html source-row</div>",
+        "<script>blocked_by_tagfilter()</script>",
+        "",
+        "Hard break follows two spaces  ",
+        "after hard break and soft",
+        "break continuation source-row.",
+        "",
+    ]
+    .join("\n");
 
     while text.len() < target_bytes {
-        text.push_str(block);
-        text.push_str(paragraph);
-        text.push_str(paragraph);
-        text.push_str(list);
+        text.push_str(&block);
         text.push('\n');
     }
 
@@ -242,7 +276,7 @@ fn run_editor_session(target_bytes: usize) {
     for _ in 0..perf_iter_count() {
         let mut segments = Vec::new();
         let (text, target_row) = record_segment(&mut segments, "fixture_prepare", || {
-            let text = plain_markdown_fixture(target_bytes);
+            let text = mixed_gfm_markdown_fixture(target_bytes);
             let target_row = middle_row_containing(&text, "source-row");
             (text, target_row)
         });
