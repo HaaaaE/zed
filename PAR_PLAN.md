@@ -1,0 +1,69 @@
+# Rendered 段序列重构计划
+
+## Summary
+
+将 rendered 模式从“源码行渲染器”改成“段序列编辑器”，但继续保留 `source row` 作为坐标、range、缓存、重测和 selection 的底层单位。GFM AST 继续提供语义/样式，不再决定 rendered 文档结构。
+
+## Key Changes
+
+- 在 `rendered_index.rs` 重建 `RenderedDisplayIndex`：item 语义改为 `Paragraph / Heading / EmptyParagraph / StructuredBlock / TableRow / SourceFallback`。
+- `source_row_range`、`source_range`、`row_to_item` 保留；但 `row_to_item` 不再把 blank row 全部塌到邻近 item，而是按 blank role 映射。
+- 引入内部 `BlankRowRole`：
+  - `Separator`：段分割，不生成可编辑 item。
+  - `EmptyParagraph`：生成 `EmptyParagraph` item，可放光标。
+  - `IgnoredExtra`：非规范 blank run 渲染时向下取最近规范 run，源码不立即重写。
+- blank run 按“连续物理空白 source rows”解释：
+  - `1` 行：仅分割，`0` 个空段。
+  - `2` 行：非规范，按 `1` 行渲染，`0` 个空段。
+  - `3` 行：`1` 个空段。
+  - `4` 行：非规范，按 `3` 行渲染，`1` 个空段。
+  - 通用公式：`effective = run_len` 若为奇数，否则 `run_len - 1`；`empty_count = (effective - 1) / 2`。
+- separator 不显示为空段，只提供段间 spacing；`EmptyParagraph` 才显示为可编辑空行。
+
+## Editing Behavior
+
+- Source 模式保持现有源码编辑行为。
+- Rendered 模式 `Enter` 执行段操作：
+  - 正文/标题中间：split 成两个段，源码写入规范段分割。
+  - 段尾：创建下一段；连续 Enter 产生规范空段结构。
+  - 空段内 Enter：新增一个空段，blank run 规范化为 `2n + 1` 个 blank source rows。
+- 新增 `Shift+Enter` action；Rendered 模式插入普通 `\n` 作为段内断行。
+- Rendered 模式 paragraph 内普通 `\n` 显示为视觉换行，不再 inactive 投影成空格；这只改变 rendered 编辑语义，GFM 兼容显示可在 Source/preview 另行处理。
+- Rendered 模式 Backspace/Delete 按段结构处理：
+  - 空段上删除：删除该 `EmptyParagraph` item 并规范化 blank run。
+  - 段首 Backspace：与前一段合并。
+  - 跨段 selection 删除：删除选中段内容并重建最小规范 blank run。
+
+## Implementation Notes
+
+- `DisplayRow` 继续携带 `source_row_range` 和源码坐标；新增 item kind/blank role 信息，避免 layout/edit 层反查 blank 含义。
+- cache key 继续使用 `item_id + source_range + source_row_range + projection state`；`item_id` 对空段使用 source row + role 生成，保证稳定。
+- paragraph item 内部仍复用现有 inline projection、inline atom、table/block layout；只替换 rendered item 构建和 rendered-mode 编辑入口。
+- 删除或改写“blank rows collapsed between blocks”相关测试和逻辑；保留 source-row invalidation、remeasure、selection 映射机制。
+
+## Test Plan
+
+- Index tests：
+  - `A\n\nB`：两个 paragraph item，0 个 empty paragraph。
+  - `A\n\n\nB`：非规范，按 `A\n\nB` 渲染，0 个 empty paragraph，源码不变。
+  - `A\n\n\n\nB`：生成 1 个 `EmptyParagraph` item。
+  - `A\n\n\n\n\nB`：非规范，仍生成 1 个 `EmptyParagraph` item。
+  - `A\n\n\n\n\n\nB`：生成 2 个 `EmptyParagraph` items。
+- Render tests：
+  - separator 只产生段间 spacing，不可放光标。
+  - empty paragraph 有可见高度、可点击、可显示 caret。
+  - paragraph 内 `Shift+Enter` 的普通 `\n` 显示为视觉断行。
+- Editing tests：
+  - Rendered `Enter` split paragraph 后源码为规范 blank run。
+  - 连续 `Enter` 创建空段并序列化为 `2n + 1` blank source rows。
+  - 空段 Backspace/Delete 删除一个空段并保持规范结构。
+  - Source 模式 Enter 行为不变。
+- Regression tests：
+  - 现有 paragraph merge、hard break、inline marker hiding、table row、code block、image/math block 行为保持。
+  - rendered cache invalidation 仍按受影响 `source_row_range` 局部清理。
+
+## Assumptions
+
+- “两个 `\n`/两个空白行不规范，就当一个处理”按物理 blank source row 解释：偶数 blank run 渲染时向下取前一个奇数，但不在纯渲染阶段改源码。
+- `Shift+Enter` 使用普通 `\n`，rendered 模式把它作为段内视觉断行；不使用反斜杠或两个空格 hard break。
+- 本轮重构只改变 rendered 编辑/显示主路径，不改变 Source 模式的 Markdown 源码体验。
