@@ -918,6 +918,71 @@ fn rendered_table_click_reveals_only_clicked_source_row(cx: &mut gpui::TestAppCo
 }
 
 #[gpui::test]
+fn rendered_empty_paragraph_has_clickable_caret_row(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("a\n\n\n\nb\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(4, 0));
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        let snapshot = editor.buffer.snapshot();
+        let index = rendered_display_index_for_tests(&snapshot);
+        let empty_item_index = (0..index.item_count())
+            .find(|item_index| {
+                index.item(*item_index).is_some_and(|item| {
+                    item.kind == rendered_index::RenderedDisplayItemKind::EmptyParagraph
+                })
+            })
+            .expect("expected empty paragraph item");
+
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, empty_item_index, editor.mode, &display_row_state)
+            .expect("empty paragraph display row should exist");
+        assert_eq!(display_row.source_row_range, 2..3);
+        assert_eq!(display_row.text, "");
+
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            text_wrap_width_for_mode(window, editor.mode),
+            false,
+            window,
+            cx,
+        );
+        let DisplayRowLayout::Text(text_layout) = row_layout else {
+            panic!("expected empty paragraph to use text layout");
+        };
+        assert_eq!(text_layout.visual_rows.len(), 1);
+        assert_eq!(text_layout.visual_rows[0].display_range, 0..0);
+        assert!(text_layout.height(row_style) >= row_style.line_height);
+
+        let (point, goal) = mouse_target_for_text_layout(
+            snapshot.as_text_snapshot(),
+            &display_row,
+            0,
+            &text_layout.visual_rows[0],
+            left_rail_width(editor.mode),
+            left_rail_width(editor.mode),
+            &text_layout,
+        );
+
+        assert_eq!(point, Point::new(2, 0));
+        assert_eq!(goal, visual_horizontal_goal(0, px(0.)));
+    });
+}
+
+#[gpui::test]
 fn rendered_table_shift_down_selects_across_source_rows(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     cx.simulate_resize(gpui::size(px(320.), px(200.)));
