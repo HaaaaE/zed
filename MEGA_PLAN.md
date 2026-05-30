@@ -518,6 +518,33 @@
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 
+### 2026-05-30：`markdown_wysiwyg` 模块拆分
+
+已完成：
+
+- 将 `crates/markdown_wysiwyg/src/markdown_wysiwyg.rs` 从 3131 行拆到约 1735 行，保留原公开 API 和 crate 入口不变。
+- 新增内部模块：
+  - `parser.rs`：tree-sitter block/inline parse 编排、inline included ranges。
+  - `blocks.rs`：block node 收集、blockquote/list/task item marker、heading/code/table block marker、blank block 生成。
+  - `inline.rs`：inline span 收集、soft break 推断、escape/entity/task replacement 收集、marker dependency prefix 索引。
+  - `tables.rs`：pipe table extraction、row/cell/alignment/marker range 收集。
+  - `projection.rs`：`MarkdownProjectionMap` / `MarkdownProjectionOperation` 的 projection operation、source/display offset mapping、hidden range 兼容层。
+- 根文件继续承载公开数据结构、`MarkdownSyntaxTree` 查询/索引编排、通用 range/row utility 和现有 tests。
+- 已核对 `NOTICE` / license 边界：本批只在 GPL crate `markdown_wysiwyg` 内部移动代码，没有跨 crate/license 移动，不需要修改 `NOTICE`。
+
+验证：
+
+- `rustfmt --edition 2024 crates/markdown_wysiwyg/src/markdown_wysiwyg.rs crates/markdown_wysiwyg/src/parser.rs crates/markdown_wysiwyg/src/blocks.rs crates/markdown_wysiwyg/src/inline.rs crates/markdown_wysiwyg/src/tables.rs crates/markdown_wysiwyg/src/projection.rs`：passed。
+- `cargo test -p markdown_wysiwyg`：39 passed。
+- `cargo test -p md_editor`：207 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
+- `git diff --check`：passed，仅有 Windows line-ending 提示。
+- 未跑 perf：本批是同 crate 内的纯模块拆分，没有改变 parser、projection、layout、render、scroll、edit 的运行逻辑或 perf fixture/session 语义。
+
+后续仍未完成：
+
+- 300KB mixed GFM fixture 与最终验证。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：
