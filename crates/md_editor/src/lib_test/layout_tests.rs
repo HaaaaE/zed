@@ -1379,6 +1379,136 @@ fn rendered_formula_block_reveals_active_formula_source() {
 }
 
 #[test]
+fn rendered_thematic_break_uses_inactive_source_block_layout() {
+    let source = "---";
+    let mut buffer = Buffer::local(&format!("{source}\nnext\n"));
+    let snapshot = buffer.snapshot();
+    let selection = collapsed_selection(Point::new(1, 0));
+    let row = display_rows_in_mode(
+        &snapshot,
+        0..1,
+        Some(&selection),
+        MarkdownEditorMode::Rendered,
+    )
+    .remove(0);
+    let row_style =
+        row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
+    let block_layout = rendered_source_block_layout_for_tests(
+        &snapshot,
+        &row,
+        &selection,
+        MarkdownEditorMode::Rendered,
+        px(240.),
+        row_style,
+    )
+    .expect("inactive thematic break should become a source-backed block");
+
+    assert_eq!(row.text, source);
+    assert_eq!(block_layout.source_range(), &(0..source.len()));
+    assert_eq!(block_layout.height(), row_style.line_height);
+    assert!(block_layout.cacheable());
+    assert!(matches!(block_layout, DisplayBlockLayout::ThematicBreak(_)));
+}
+
+#[test]
+fn rendered_thematic_break_reveals_active_source_row() {
+    let source = "---";
+    let mut buffer = Buffer::local(&format!("{source}\n"));
+    let snapshot = buffer.snapshot();
+    let selection = collapsed_selection(Point::new(0, 1));
+    let row = display_rows_in_mode(
+        &snapshot,
+        0..1,
+        Some(&selection),
+        MarkdownEditorMode::Rendered,
+    )
+    .remove(0);
+    let row_style =
+        row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
+
+    assert_eq!(row.text, source);
+    assert!(
+        rendered_source_block_layout_for_tests(
+            &snapshot,
+            &row,
+            &selection,
+            MarkdownEditorMode::Rendered,
+            px(240.),
+            row_style,
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn rendered_link_reference_definition_uses_zero_height_inactive_block_layout() {
+    let source = "[ref]: https://example.com";
+    let mut buffer = Buffer::local(&format!("{source}\nnext\n"));
+    let snapshot = buffer.snapshot();
+    let selection = collapsed_selection(Point::new(1, 0));
+    let row = display_rows_in_mode(
+        &snapshot,
+        0..1,
+        Some(&selection),
+        MarkdownEditorMode::Rendered,
+    )
+    .remove(0);
+    let row_style =
+        row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
+    let block_layout = rendered_source_block_layout_for_tests(
+        &snapshot,
+        &row,
+        &selection,
+        MarkdownEditorMode::Rendered,
+        px(240.),
+        row_style,
+    )
+    .expect("inactive link reference definition should become a hidden source-backed block");
+    let row_layout = DisplayRowLayout::Block(block_layout.clone().into());
+
+    assert_eq!(row.text, source);
+    assert_eq!(block_layout.source_range(), &(0..source.len()));
+    assert_eq!(block_layout.height(), px(0.));
+    assert_eq!(row_layout.row_min_height(row_style), px(0.));
+    assert_eq!(row_layout.content_min_height(row_style), px(0.));
+    assert!(row_layout.cacheable());
+    assert!(matches!(
+        block_layout,
+        DisplayBlockLayout::LinkReferenceDefinition(_)
+    ));
+}
+
+#[test]
+fn rendered_link_reference_definition_reveals_active_source_row() {
+    let source = "[ref]: https://example.com";
+    let mut buffer = Buffer::local(&format!("{source}\n"));
+    let snapshot = buffer.snapshot();
+    let selection = collapsed_selection(Point::new(0, 2));
+    let row = display_rows_in_mode(
+        &snapshot,
+        0..1,
+        Some(&selection),
+        MarkdownEditorMode::Rendered,
+    )
+    .remove(0);
+    let row_style =
+        row_display_style_for_display_row(&snapshot, &row, MarkdownEditorMode::Rendered);
+
+    assert_eq!(row.text, source);
+    assert!(
+        rendered_source_block_layout_for_tests(
+            &snapshot,
+            &row,
+            &selection,
+            MarkdownEditorMode::Rendered,
+            px(240.),
+            row_style,
+        )
+        .is_none()
+    );
+}
+
+#[test]
 fn rendered_image_block_keeps_source_boundaries_inactive() {
     let mut buffer = Buffer::local("![alt](https://example.com/cat.png)\nnext\n");
     let snapshot = buffer.snapshot();

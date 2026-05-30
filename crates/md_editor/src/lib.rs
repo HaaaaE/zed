@@ -48,6 +48,7 @@ use block::{
     RENDERED_IMAGE_BLOCK_VERTICAL_PADDING, RenderedFormulaBlock, RenderedFormulaBlockLayout,
     RenderedImageBlock, RenderedImageBlockLayout, image_block_size_for_size,
     image_block_source_offset_for_x, rendered_formula_block_for_row, rendered_image_block_for_row,
+    rendered_source_block_layout_for_tests,
 };
 use display_model::{DisplayInsertion, DisplayRow, DisplayTextStyle, StyledDisplaySegment};
 pub use edit::{backspace_selection, current_line_indent, delete_selection, replace_selection};

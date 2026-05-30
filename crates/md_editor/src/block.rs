@@ -4,6 +4,7 @@ use gpui::{
     App, Context, ImgResourceLoader, IntoElement, MouseButton, Pixels, SharedString, Window, div,
     img, prelude::*, px,
 };
+use markdown_wysiwyg::MarkdownBlockKind;
 use md_assets::EDITOR_FONT_FAMILY;
 use md_buffer::BufferSnapshot;
 use md_text::{Point, Selection, SelectionGoal};
@@ -30,6 +31,8 @@ pub(super) const RENDERED_FORMULA_BLOCK_VERTICAL_PADDING: gpui::Pixels = px(8.);
 enum DisplayBlockKind {
     RemoteImage(RenderedImageBlock),
     Formula(RenderedFormulaBlock),
+    ThematicBreak(RenderedSourceBlock),
+    LinkReferenceDefinition(RenderedSourceBlock),
 }
 
 impl DisplayBlockKind {
@@ -40,7 +43,9 @@ impl DisplayBlockKind {
         mode: MarkdownEditorMode,
         document_path: Option<&Path>,
     ) -> Option<Self> {
-        rendered_block_for_row(snapshot, display_row, selection, mode, document_path)
+        rendered_source_block_for_row(snapshot, display_row, selection, mode).or_else(|| {
+            rendered_block_for_row(snapshot, display_row, selection, mode, document_path)
+        })
     }
 
     fn into_layout(
@@ -65,6 +70,12 @@ impl DisplayBlockKind {
                     cx,
                 ))
             }
+            Self::ThematicBreak(block) => DisplayBlockLayout::ThematicBreak(
+                RenderedSourceBlockLayout::new(block, wrap_width, row_style),
+            ),
+            Self::LinkReferenceDefinition(block) => DisplayBlockLayout::LinkReferenceDefinition(
+                RenderedSourceBlockLayout::hidden(block, wrap_width),
+            ),
         }
     }
 }
@@ -73,6 +84,8 @@ impl DisplayBlockKind {
 pub(super) enum DisplayBlockLayout {
     RemoteImage(RenderedImageBlockLayout),
     Formula(RenderedFormulaBlockLayout),
+    ThematicBreak(RenderedSourceBlockLayout),
+    LinkReferenceDefinition(RenderedSourceBlockLayout),
 }
 
 impl DisplayBlockLayout {
@@ -96,6 +109,8 @@ impl DisplayBlockLayout {
         match self {
             Self::RemoteImage(image_layout) => image_layout.height(),
             Self::Formula(formula_layout) => formula_layout.height(),
+            Self::ThematicBreak(layout) => layout.height(),
+            Self::LinkReferenceDefinition(layout) => layout.height(),
         }
     }
 
@@ -103,6 +118,8 @@ impl DisplayBlockLayout {
         match self {
             Self::RemoteImage(image_layout) => image_layout.cacheable(),
             Self::Formula(formula_layout) => formula_layout.cacheable(),
+            Self::ThematicBreak(layout) => layout.cacheable(),
+            Self::LinkReferenceDefinition(layout) => layout.cacheable(),
         }
     }
 
@@ -110,6 +127,8 @@ impl DisplayBlockLayout {
         match self {
             Self::RemoteImage(image_layout) => &image_layout.image_block.source_range,
             Self::Formula(formula_layout) => &formula_layout.formula_block.source_range,
+            Self::ThematicBreak(layout) => &layout.block.source_range,
+            Self::LinkReferenceDefinition(layout) => &layout.block.source_range,
         }
     }
 
@@ -125,6 +144,13 @@ impl DisplayBlockLayout {
                 formula_layout.width,
                 source_offset,
             ),
+            Self::ThematicBreak(layout) | Self::LinkReferenceDefinition(layout) => {
+                block_visible_x_for_source_offset(
+                    &layout.block.source_range,
+                    layout.width,
+                    source_offset,
+                )
+            }
         }
     }
 
@@ -138,6 +164,9 @@ impl DisplayBlockLayout {
                 formula_layout.width,
                 x,
             ),
+            Self::ThematicBreak(layout) | Self::LinkReferenceDefinition(layout) => {
+                block_source_offset_for_x(&layout.block.source_range, layout.width, x)
+            }
         }
     }
 
@@ -274,7 +303,67 @@ impl DisplayBlockLayout {
                     cx,
                 )]
             }
+            Self::ThematicBreak(layout) => vec![render_thematic_break(
+                layout,
+                selected,
+                caret_x,
+                row_style,
+                indent_width,
+                cx,
+            )],
+            Self::LinkReferenceDefinition(layout) => vec![render_hidden_source_block(
+                layout,
+                caret_x,
+                row_style,
+                indent_width,
+                cx,
+            )],
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct RenderedSourceBlock {
+    pub(super) source_range: Range<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct RenderedSourceBlockLayout {
+    pub(super) block: RenderedSourceBlock,
+    pub(super) width: gpui::Pixels,
+    pub(super) height: gpui::Pixels,
+    pub(super) cacheable: bool,
+}
+
+impl RenderedSourceBlockLayout {
+    fn new(
+        block: RenderedSourceBlock,
+        wrap_width: gpui::Pixels,
+        row_style: RowDisplayStyle,
+    ) -> Self {
+        Self {
+            block,
+            width: wrap_width.max(px(1.)),
+            height: row_style.line_height,
+            cacheable: true,
+        }
+    }
+
+    pub(super) fn hidden(block: RenderedSourceBlock, wrap_width: gpui::Pixels) -> Self {
+        Self {
+            block,
+            width: wrap_width.max(px(1.)),
+            height: px(0.),
+            cacheable: true,
+        }
+    }
+
+    pub(super) fn height(&self) -> gpui::Pixels {
+        self.height
+    }
+
+    pub(super) fn cacheable(&self) -> bool {
+        self.cacheable
     }
 }
 
@@ -638,6 +727,80 @@ fn render_formula_block(
         .into_any_element()
 }
 
+fn render_thematic_break(
+    layout: &RenderedSourceBlockLayout,
+    selected: bool,
+    caret_x: Option<gpui::Pixels>,
+    row_style: RowDisplayStyle,
+    indent_width: Pixels,
+    cx: &mut Context<MarkdownEditor>,
+) -> gpui::AnyElement {
+    let palette = editor_palette();
+    let mouse_down_block_layout = DisplayBlockLayout::ThematicBreak(layout.clone());
+    let mouse_down_indent_width = indent_width;
+    let mouse_move_block_layout = mouse_down_block_layout.clone();
+    let mouse_move_indent_width = indent_width;
+
+    div()
+        .w_full()
+        .h(layout.height)
+        .relative()
+        .flex()
+        .items_center()
+        .when(selected, |this| {
+            this.bg(palette.selection_background.opacity(0.20))
+        })
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event, window, cx| {
+                this.mouse_left_down_on_block(
+                    &mouse_down_block_layout,
+                    mouse_down_indent_width,
+                    event,
+                    window,
+                    cx,
+                )
+            }),
+        )
+        .on_mouse_move(cx.listener(move |this, event, window, cx| {
+            this.mouse_move_on_block(
+                &mouse_move_block_layout,
+                mouse_move_indent_width,
+                event,
+                window,
+                cx,
+            )
+        }))
+        .child(div().flex_none().w(indent_width).h_full())
+        .child(
+            div()
+                .w(layout.width)
+                .h(px(1.))
+                .bg(palette.gutter_text.opacity(0.55)),
+        )
+        .when_some(caret_x, |this, caret_x| {
+            this.child(caret_element(caret_x + indent_width, row_style))
+        })
+        .into_any_element()
+}
+
+fn render_hidden_source_block(
+    layout: &RenderedSourceBlockLayout,
+    caret_x: Option<gpui::Pixels>,
+    row_style: RowDisplayStyle,
+    indent_width: Pixels,
+    _cx: &mut Context<MarkdownEditor>,
+) -> gpui::AnyElement {
+    div()
+        .w_full()
+        .h(layout.height)
+        .relative()
+        .when_some(caret_x, |this, caret_x| {
+            this.child(caret_element(caret_x + indent_width, row_style))
+        })
+        .into_any_element()
+}
+
 fn render_formula_block_inner(
     formula_layout: &RenderedFormulaBlockLayout,
     row_style: RowDisplayStyle,
@@ -769,6 +932,60 @@ fn rendered_block_for_row(
         }
         RenderedElementKind::Custom { .. } => None,
     }
+}
+
+fn rendered_source_block_for_row(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+) -> Option<DisplayBlockKind> {
+    if mode != MarkdownEditorMode::Rendered {
+        return None;
+    }
+
+    let block = display_row
+        .markdown_blocks
+        .iter()
+        .find(|block| block.row_range == display_row.source_row_range)?;
+    if rendered_element_source_range_is_active(snapshot, selection, &block.source_range) {
+        return None;
+    }
+
+    let source_block = RenderedSourceBlock {
+        source_range: display_row.source_range.clone(),
+    };
+    match block.kind {
+        MarkdownBlockKind::ThematicBreak => Some(DisplayBlockKind::ThematicBreak(source_block)),
+        MarkdownBlockKind::LinkReferenceDefinition => {
+            Some(DisplayBlockKind::LinkReferenceDefinition(source_block))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+pub(super) fn rendered_source_block_layout_for_tests(
+    snapshot: &BufferSnapshot,
+    display_row: &DisplayRow,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+    wrap_width: gpui::Pixels,
+    row_style: RowDisplayStyle,
+) -> Option<DisplayBlockLayout> {
+    rendered_source_block_for_row(snapshot, display_row, selection, mode).map(|kind| match kind {
+        DisplayBlockKind::ThematicBreak(block) => DisplayBlockLayout::ThematicBreak(
+            RenderedSourceBlockLayout::new(block, wrap_width, row_style),
+        ),
+        DisplayBlockKind::LinkReferenceDefinition(block) => {
+            DisplayBlockLayout::LinkReferenceDefinition(RenderedSourceBlockLayout::hidden(
+                block, wrap_width,
+            ))
+        }
+        DisplayBlockKind::RemoteImage(_) | DisplayBlockKind::Formula(_) => {
+            unreachable!("source block helper only returns source-backed blocks")
+        }
+    })
 }
 
 fn rendered_block_descriptor_for_row(
