@@ -535,13 +535,20 @@ impl MarkdownSyntaxTree {
                 continue;
             }
 
-            if span.kind == MarkdownInlineKind::SoftBreak {
+            if matches!(
+                span.kind,
+                MarkdownInlineKind::SoftBreak | MarkdownInlineKind::HardBreak
+            ) {
                 let start = span.source_range.start.max(visible_source_range.start);
                 let end = span.source_range.end.min(visible_source_range.end);
                 if start < end {
                     operations.push(MarkdownProjectionOperation::Replace {
                         source_range: start..end,
-                        display_text: " ".to_string(),
+                        display_text: if span.kind == MarkdownInlineKind::HardBreak {
+                            "\n".to_string()
+                        } else {
+                            " ".to_string()
+                        },
                     });
                 }
                 continue;
@@ -1356,6 +1363,26 @@ mod tests {
         let projection = tree.projection_for_visible_rows(0..2, None);
 
         assert_eq!(projection.project_source_text(source), "first second\n");
+    }
+
+    #[test]
+    fn projection_replaces_inactive_hard_breaks_with_forced_breaks() {
+        let source = "first  \nsecond\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let projection = tree.projection_for_visible_rows(0..2, None);
+
+        assert_eq!(projection.project_source_text(source), "first\nsecond\n");
+        assert_eq!(projection.display_len(), "first\nsecond\n".len());
+        assert_eq!(projection.source_to_display("first".len()), "first".len());
+        assert_eq!(
+            projection.source_to_display("first  \n".len()),
+            "first\n".len()
+        );
+        assert_eq!(projection.display_to_source("first".len()), "first".len());
+        assert_eq!(
+            projection.display_to_source("first\n".len()),
+            "first  \n".len()
+        );
     }
 
     #[test]

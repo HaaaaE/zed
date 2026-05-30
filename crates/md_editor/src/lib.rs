@@ -75,8 +75,8 @@ use layout::{
 use layout::{
     atom_range_containing_display_index, atomic_wrap_boundary_index,
     display_fragments_for_text_layout, display_inline_fragments, display_inline_row_inputs,
-    inline_style, line_fragments_for_wrapping, text_segments_for_fragments,
-    unwrapped_visual_rows_if_fits, visual_row_height_for_range,
+    forced_break_visual_rows, inline_style, line_fragments_for_wrapping, source_display_fragments,
+    text_segments_for_fragments, unwrapped_visual_rows_if_fits, visual_row_height_for_range,
 };
 #[cfg(test)]
 use markdown_image::MarkdownImageSource;
@@ -95,7 +95,7 @@ use rendered_element::{
     inactive_rendered_element_source_ranges_for_selection,
     rendered_element_descriptor_for_inline_span_in_row, rendered_element_source_range_is_active,
 };
-use rendered_index::{RenderedDisplayIndex, RenderedDisplayItem};
+use rendered_index::{DisplayItemId, RenderedDisplayIndex, RenderedDisplayItem};
 #[cfg(test)]
 use selection::{HorizontalDirection, move_horizontal_in_mode, move_selection_left, move_vertical};
 use selection::{
@@ -2146,6 +2146,7 @@ fn display_rows_in_mode(
             );
             rendered_display_row(
                 snapshot,
+                rendered_index::source_display_item_id(&source_range, row as usize),
                 row,
                 row,
                 source_range,
@@ -2194,6 +2195,7 @@ fn rendered_display_row_for_item_for_tests(
 
     rendered_display_row(
         snapshot,
+        item.id,
         item.index as u32,
         row,
         source_range,
@@ -2205,6 +2207,7 @@ fn rendered_display_row_for_item_for_tests(
 
 fn rendered_display_row(
     snapshot: &BufferSnapshot,
+    item_id: DisplayItemId,
     item_index: u32,
     row: u32,
     source_range: Range<usize>,
@@ -2241,6 +2244,7 @@ fn rendered_display_row(
     let heading_level = heading_level_for_display_row(&markdown_blocks, row);
     let rendered_indent_level = rendered_indent_level_for_display_row(&markdown_blocks, row);
     DisplayRow {
+        item_id,
         item_index,
         row,
         source_row_range,
@@ -2278,6 +2282,7 @@ fn source_display_row_in_text_snapshot(snapshot: &TextBufferSnapshot, row: u32) 
     let source_text: String = snapshot.text_for_range(source_range.clone()).collect();
     let projection = MarkdownProjectionMap::new(snapshot.len(), source_range.clone(), Vec::new());
     DisplayRow {
+        item_id: rendered_index::source_display_item_id(&source_range, row as usize),
         item_index: row,
         row,
         source_row_range: row as usize..row as usize + 1,
@@ -2369,11 +2374,7 @@ fn project_display_row_text(
         return (project_row_text(source_text, projection), Vec::new());
     }
 
-    let mut display_text = project_row_text(source_text, projection);
-    display_text = display_text
-        .replace("\r\n", " ")
-        .replace('\n', " ")
-        .replace('\r', " ");
+    let mut display_text = project_rendered_row_text(source_text, row_source_range, projection);
     let mut insertions = Vec::new();
     for span in inline_spans {
         let descriptor = rendered_element_descriptors
@@ -2419,6 +2420,66 @@ fn project_display_row_text(
 
 fn project_row_text(source_text: &str, projection: &MarkdownProjectionMap) -> String {
     projection.project_source_text(source_text)
+}
+
+fn project_rendered_row_text(
+    source_text: &str,
+    row_source_range: &Range<usize>,
+    projection: &MarkdownProjectionMap,
+) -> String {
+    let mut rendered_text = String::new();
+    let mut cursor = row_source_range.start;
+    for operation in projection.operations() {
+        let operation_range = operation.source_range();
+        let start = operation_range.start.max(row_source_range.start);
+        let end = operation_range.end.min(row_source_range.end);
+        if start >= end {
+            continue;
+        }
+
+        if cursor < start {
+            push_rendered_source_text_chunk(
+                &mut rendered_text,
+                source_text,
+                row_source_range,
+                cursor..start,
+            );
+        }
+        if let markdown_wysiwyg::MarkdownProjectionOperation::Replace { display_text, .. } =
+            operation
+        {
+            rendered_text.push_str(display_text);
+        }
+        cursor = cursor.max(end);
+    }
+
+    if cursor < row_source_range.end {
+        push_rendered_source_text_chunk(
+            &mut rendered_text,
+            source_text,
+            row_source_range,
+            cursor..row_source_range.end,
+        );
+    }
+
+    rendered_text
+}
+
+fn push_rendered_source_text_chunk(
+    rendered_text: &mut String,
+    source_text: &str,
+    row_source_range: &Range<usize>,
+    source_range: Range<usize>,
+) {
+    let local_start = source_range.start - row_source_range.start;
+    let local_end = source_range.end - row_source_range.start;
+    if let Some(text) = source_text.get(local_start..local_end) {
+        rendered_text.push_str(
+            text.replace("\r\n", " ")
+                .replace(['\n', '\r'], " ")
+                .as_str(),
+        );
+    }
 }
 
 fn buffer_byte_delta(before_len: usize, after_len: usize) -> Option<isize> {

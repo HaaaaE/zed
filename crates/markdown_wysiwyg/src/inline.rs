@@ -129,6 +129,15 @@ pub(super) fn projection_marker_dependencies(
         }));
     }
     for span in inline_spans {
+        if matches!(
+            span.kind,
+            MarkdownInlineKind::SoftBreak | MarkdownInlineKind::HardBreak
+        ) {
+            dependencies.push(ProjectionMarkerDependency {
+                marker_range: span.source_range.clone(),
+                owner_source_range: span.source_range.clone(),
+            });
+        }
         dependencies.extend(span.marker_ranges.iter().cloned().map(|marker_range| {
             ProjectionMarkerDependency {
                 marker_range,

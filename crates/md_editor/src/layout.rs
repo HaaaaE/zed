@@ -68,13 +68,15 @@ impl DisplayRowTextLayout {
 }
 
 #[derive(Clone, Debug)]
-pub(super) enum DisplayRowLayout {
+pub(super) enum DisplayItemLayout {
     Text(Arc<DisplayRowTextLayout>),
     Block(Arc<DisplayBlockLayout>),
     TableRow(Arc<DisplayTableRowLayout>),
 }
 
-impl DisplayRowLayout {
+pub(super) type DisplayRowLayout = DisplayItemLayout;
+
+impl DisplayItemLayout {
     pub(super) fn cacheable(&self) -> bool {
         match self {
             Self::Text(text_layout) => text_layout.cacheable,
@@ -105,6 +107,7 @@ impl DisplayRowLayout {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct DisplayRowCacheKey {
     pub(super) version: md_text::Global,
+    pub(super) item_id: crate::rendered_index::DisplayItemId,
     pub(super) item_index: u32,
     pub(super) source_range: Range<usize>,
     pub(super) source_row_range: Range<usize>,
@@ -145,6 +148,7 @@ impl DisplayRowProjectionState {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct RowLayoutCacheKey {
+    pub(super) item_id: crate::rendered_index::DisplayItemId,
     pub(super) item_index: u32,
     pub(super) source_range: Range<usize>,
     pub(super) source_row_range: Range<usize>,
@@ -157,6 +161,7 @@ pub(super) struct RowLayoutCacheKey {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct RowLayoutInputCacheKey {
     pub(super) version: md_text::Global,
+    pub(super) item_id: crate::rendered_index::DisplayItemId,
     pub(super) item_index: u32,
     pub(super) source_range: Range<usize>,
     pub(super) source_row_range: Range<usize>,
@@ -217,8 +222,9 @@ pub(super) fn display_row_layout_inputs_for_fragments(
         &display_row.text,
         &text_runs_for_display_segments(&display_row.text, &segments),
     );
+    let shaped_text = shapeable_display_text(&display_row.text);
     let shaped_line = window.text_system().shape_line(
-        SharedString::from(display_row.text.clone()),
+        SharedString::from(shaped_text),
         row_style.text_size,
         &text_runs,
         None,
@@ -234,6 +240,10 @@ pub(super) fn display_row_layout_inputs_for_fragments(
     }
 }
 
+fn shapeable_display_text(display_text: &str) -> String {
+    display_text.replace(['\r', '\n'], " ")
+}
+
 pub(super) fn text_layout_for_display_row_inputs(
     display_text: &str,
     inputs: &DisplayRowLayoutInputs,
@@ -246,7 +256,9 @@ pub(super) fn text_layout_for_display_row_inputs(
     let mut fragments = inputs.fragments.clone();
     let cacheable =
         apply_inline_atom_measurements(&mut fragments, inputs, row_style, inline_atom_measurements);
-    let visual_rows = if inputs.has_inline_atoms {
+    let visual_rows = if display_text.contains('\n') {
+        forced_break_visual_rows(display_text, &fragments, &inputs.shaped_line, row_style)
+    } else if inputs.has_inline_atoms {
         visual_rows_for_fragments(
             display_text,
             &fragments,
@@ -298,6 +310,40 @@ pub(super) fn unwrapped_visual_rows_if_fits(
     wrap_width: gpui::Pixels,
 ) -> Option<Vec<VisualDisplayRow>> {
     (shaped_line_width <= wrap_width).then(|| fallback_visual_rows(text_len, fragments, row_style))
+}
+
+pub(super) fn forced_break_visual_rows(
+    display_text: &str,
+    fragments: &[DisplayInlineFragment],
+    shaped_line: &gpui::ShapedLine,
+    row_style: RowDisplayStyle,
+) -> Vec<VisualDisplayRow> {
+    let mut rows = Vec::new();
+    let mut start = 0;
+    let mut top = px(0.);
+
+    for (break_index, _) in display_text.match_indices('\n') {
+        let display_range = start..break_index + 1;
+        let height = visual_row_height_for_range(fragments, &display_range, row_style);
+        rows.push(VisualDisplayRow {
+            line_start_x: display_x_for_offset(fragments, shaped_line, start),
+            display_range,
+            top,
+            height,
+        });
+        top += height;
+        start = break_index + 1;
+    }
+
+    let display_range = start..display_text.len();
+    rows.push(VisualDisplayRow {
+        line_start_x: display_x_for_offset(fragments, shaped_line, start),
+        height: visual_row_height_for_range(fragments, &display_range, row_style),
+        display_range,
+        top,
+    });
+
+    rows
 }
 
 pub(super) fn display_fragments_for_text_layout(
@@ -613,6 +659,11 @@ pub(super) fn display_inline_fragments(
     let row_inputs = display_inline_row_inputs(snapshot, display_row, row_style, document_path);
     let hidden_ranges = display_row.projection.hidden_ranges();
     let mut breakpoints = vec![source_range.start, source_range.end];
+    for operation in display_row.projection.operations() {
+        let operation_range = operation.source_range();
+        breakpoints.push(operation_range.start.max(source_range.start));
+        breakpoints.push(operation_range.end.min(source_range.end));
+    }
     for hidden_range in hidden_ranges {
         breakpoints.push(hidden_range.start.max(source_range.start));
         breakpoints.push(hidden_range.end.min(source_range.end));

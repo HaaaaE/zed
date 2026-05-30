@@ -21,6 +21,7 @@ use crate::layout::{
     display_row_layout_inputs, effective_text_wrap_width, source_display_row_layout_inputs,
     text_layout_for_display_row_inputs,
 };
+use crate::rendered_index::source_display_item_id;
 
 fn row_source_range_in_text_snapshot_for_cache(
     snapshot: &TextBufferSnapshot,
@@ -74,6 +75,7 @@ impl MarkdownEditor {
                 Some((
                     DisplayRowCacheKey {
                         version: version.clone(),
+                        item_id: source_display_item_id(&key.source_range, row),
                         ..key
                     },
                     display_row,
@@ -105,6 +107,7 @@ impl MarkdownEditor {
                 Some((
                     RowLayoutInputCacheKey {
                         version: version.clone(),
+                        item_id: source_display_item_id(&key.source_range, row),
                         ..key
                     },
                     inputs,
@@ -177,6 +180,7 @@ impl MarkdownEditor {
             );
         let cache_key = DisplayRowCacheKey {
             version: snapshot.version().clone(),
+            item_id: item.id,
             item_index: item.index as u32,
             source_range: source_range.clone(),
             source_row_range: source_row_range.clone(),
@@ -201,6 +205,7 @@ impl MarkdownEditor {
         );
         let display_row = Arc::new(rendered_display_row(
             snapshot,
+            item.id,
             item.index as u32,
             row,
             source_range,
@@ -227,6 +232,7 @@ impl MarkdownEditor {
         let source_range = row_source_range_in_text_snapshot_for_cache(snapshot, row);
         let cache_key = DisplayRowCacheKey {
             version: snapshot.version().clone(),
+            item_id: source_display_item_id(&source_range, row as usize),
             item_index: row,
             source_range: source_range.clone(),
             source_row_range: row as usize..row as usize + 1,
@@ -262,6 +268,7 @@ impl MarkdownEditor {
     ) -> DisplayRowLayout {
         let content_wrap_width = effective_text_wrap_width(display_row, wrap_width);
         let cache_key = RowLayoutCacheKey {
+            item_id: display_row.item_id,
             item_index: display_row.item_index,
             source_range: display_row.source_range.clone(),
             source_row_range: display_row.source_row_range.clone(),
@@ -393,6 +400,7 @@ impl MarkdownEditor {
         cx: &mut Context<Self>,
     ) -> Arc<DisplayRowTextLayout> {
         let cache_key = RowLayoutCacheKey {
+            item_id: display_row.item_id,
             item_index: display_row.item_index,
             source_range: display_row.source_range.clone(),
             source_row_range: display_row.source_row_range.clone(),
@@ -682,6 +690,7 @@ impl MarkdownEditor {
     ) -> DisplayRowLayoutInputs {
         let cache_key = RowLayoutInputCacheKey {
             version: snapshot.version().clone(),
+            item_id: display_row.item_id,
             item_index: display_row.item_index,
             source_range: display_row.source_range.clone(),
             source_row_range: display_row.source_row_range.clone(),
@@ -719,6 +728,7 @@ impl MarkdownEditor {
     ) -> DisplayRowLayoutInputs {
         let cache_key = RowLayoutInputCacheKey {
             version: self.buffer.as_text_snapshot().version().clone(),
+            item_id: display_row.item_id,
             item_index: display_row.item_index,
             source_range: display_row.source_range.clone(),
             source_row_range: display_row.source_row_range.clone(),

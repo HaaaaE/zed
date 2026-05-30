@@ -18,7 +18,7 @@
   - `item_index -> source_range/row_range/kind`
   - `source_row/source_offset -> item_index`
   - rendered mode 的 item count 来自 index，source mode 继续来自 text row count。
-- [partial 2026-05-30] 引入 `DisplayItemId` 和 item/cache key 适配层；当前仍由 `DisplayRow` 承载 item layout，普通安全 paragraph 可合并，table/html/link-ref 等保留可寻址 item/row，code block 当前保留逐 source row 编辑器布局并隐藏 inactive fence rows，后续再补 `DisplayItemLayout`。
+- [done 2026-05-30] 引入 `DisplayItemId` 和 item/cache key 适配层；`DisplayRow` 持有稳定 item id，display/layout/input cache key 使用 `item_id + source_range + source_row_range + projection state`；`DisplayItemLayout` 作为 item layout 入口保留 `DisplayRowLayout` 兼容别名。普通安全 paragraph 可合并，table/html/link-ref 等保留可寻址 item/row，code block 当前保留逐 source row 编辑器布局并隐藏 inactive fence rows。
 - [done 2026-05-30] 将 rendered gutter 改成 mode-aware left rail：
   - source mode 保留 `48px` 行号。
   - rendered mode 使用 `24px` rail，不显示 source 行号，只在 active item 显示 subtle marker。
@@ -40,17 +40,17 @@
 
 - 扩展 rendered projection 使用现有 `MarkdownProjectionOperation::Replace`：
   - [done 2026-05-30] inactive soft break -> `" "`
-  - inactive hard break -> forced visual break
+  - [done 2026-05-30] inactive hard break -> forced visual break
 - 将 text layout 从单 `ShapedLine` 升级为可包含 forced breaks 的 flow layout；`VisualDisplayRow` 记录所属 shaped line，所有 `display_x_for_offset`、mouse target、selection bounds 通过 layout helper 访问，不再直接依赖单行 `shaped_line`。
-- paragraph item 的 `projection.source_to_display/display_to_source` 必须覆盖跨行 source range，包含 newline replacement、inline marker hiding、entity/escape replacement、inline atom insertion。
+- [done 2026-05-30] paragraph item 的 `projection.source_to_display/display_to_source` 覆盖跨行 source range，包含 newline replacement、inline marker hiding、entity/escape replacement、inline atom insertion；merged paragraph source range 保留内部 soft break 但排除段落末尾行结束符。
 - [done 2026-05-30] 修复 rendered/table wrapping 在 CJK 与 entity/escape replacement 混合文本中的 UTF-8 char boundary 对齐，避免 GPUI DirectWrite shaping 因 `TextRun` 长度落入多字节字符中间而崩溃。
 
 ### Active Reveal Policy
 
 - Inline strong/emphasis/code/link/image/math：只 reveal 当前 inline span/token，不 reveal 整行或整段。
 - Table：active item reveal 当前 table source row，保持现有行为。
-- Soft break：只有 caret/selection overlap 或贴近该 break source range 时 reveal 该 break；其它 soft breaks 仍显示为空格。
-- Hard break：inactive 显示 GFM line break；active 在 break marker 附近显示源码 marker。
+- [done 2026-05-30] Soft break：只有 caret/selection overlap 或贴近该 break source range 时 reveal 该 break；其它 soft breaks 仍显示为空格。
+- [done 2026-05-30] Hard break：inactive 显示 GFM line break；active 在 break marker 附近显示源码 marker。
 - List/blockquote marker：只 reveal 当前编辑命中的 list/quote marker 所在 source row/token；inactive 用 adornment 画 bullet/number/quote bar。
 - Image/math block：inactive 显示 rendered block；cursor 在边界保持 block，进入 source 内容或 marker 时 reveal 对应 source token/row。
 
@@ -62,6 +62,7 @@
   - H2 `8/4px`
   - H3 `6/3px`
   - H4-H6 `4/2px`
+- [done 2026-05-30] rendered mode 折叠空白 source rows，不生成可见空白行；空白行 source row 映射到相邻可见 item，用块间距表达 GFM block separation。
 - Paragraph after spacing `6px`；list item spacing `2px`；blockquote 外侧 `6px`，内部紧凑。
 - List marker 作为 adornment 绘制：unordered bullet、ordered marker、task checkbox；wrapped continuation 与内容文本对齐。
 - Blockquote 按 depth 画 `2px` quote bar，gap `10px`，不改变 source selection。

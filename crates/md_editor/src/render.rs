@@ -121,12 +121,12 @@ pub(super) fn fragment_text_for_visual_row(
 
     let local_start = start - display_range.start;
     let local_end = end - display_range.start;
-    let text = text.get(local_start..local_end)?;
+    let text = text.get(local_start..local_end)?.replace('\n', "");
     if text.is_empty() {
         return None;
     }
 
-    Some(text.to_string())
+    Some(text)
 }
 
 fn render_visual_text_row(

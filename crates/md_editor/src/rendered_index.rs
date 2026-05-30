@@ -31,7 +31,7 @@ pub(crate) struct RenderedDisplayItem {
 pub(crate) struct RenderedDisplayIndex {
     version: md_text::Global,
     items: Vec<RenderedDisplayItem>,
-    row_to_item: Vec<usize>,
+    row_to_item: Vec<Option<usize>>,
 }
 
 impl RenderedDisplayIndex {
@@ -42,6 +42,11 @@ impl RenderedDisplayIndex {
         let mut covered_rows = vec![false; row_count];
 
         for block in snapshot.syntax_tree().blocks() {
+            if block.kind == MarkdownBlockKind::Blank {
+                mark_rows_covered(&mut covered_rows, block.row_range.clone());
+                continue;
+            }
+
             let Some(kind) = item_kind_for_block(block.kind) else {
                 continue;
             };
@@ -73,10 +78,11 @@ impl RenderedDisplayIndex {
                     block.row_range.clone(),
                 )
             {
+                let source_range = source_range_for_row_range(snapshot, block.row_range.clone());
                 push_item(
                     &mut items,
                     &mut covered_rows,
-                    block.source_range.clone(),
+                    source_range,
                     block.row_range.clone(),
                     kind,
                 );
@@ -99,6 +105,10 @@ impl RenderedDisplayIndex {
                 continue;
             }
             let source_range = super::row_source_range(snapshot, row as u32);
+            if source_range_is_blank(snapshot, source_range.clone()) {
+                covered_rows[row] = true;
+                continue;
+            }
             push_item(
                 &mut items,
                 &mut covered_rows,
@@ -113,14 +123,15 @@ impl RenderedDisplayIndex {
             item.index = index;
         }
 
-        let mut row_to_item = vec![0; row_count];
+        let mut row_to_item = vec![None; row_count];
         for item in &items {
             for row in item.row_range.clone() {
                 if let Some(slot) = row_to_item.get_mut(row) {
-                    *slot = item.index;
+                    *slot = Some(item.index);
                 }
             }
         }
+        fill_collapsed_row_mappings(&mut row_to_item);
 
         Arc::new(Self {
             version,
@@ -142,7 +153,7 @@ impl RenderedDisplayIndex {
     }
 
     pub(crate) fn item_index_for_source_row(&self, row: usize) -> Option<usize> {
-        self.row_to_item.get(row).copied()
+        self.row_to_item.get(row).copied().flatten()
     }
 
     pub(crate) fn item_index_for_source_offset(
@@ -155,6 +166,41 @@ impl RenderedDisplayIndex {
             .offset_to_point(source_offset)
             .row as usize;
         self.item_index_for_source_row(row)
+    }
+}
+
+fn mark_rows_covered(covered_rows: &mut [bool], row_range: Range<usize>) {
+    for row in row_range {
+        if let Some(covered) = covered_rows.get_mut(row) {
+            *covered = true;
+        }
+    }
+}
+
+fn source_range_is_blank(snapshot: &BufferSnapshot, source_range: Range<usize>) -> bool {
+    snapshot
+        .as_text_snapshot()
+        .text_for_range(source_range)
+        .all(|chunk| chunk.trim().is_empty())
+}
+
+fn fill_collapsed_row_mappings(row_to_item: &mut [Option<usize>]) {
+    let mut previous = None;
+    for slot in row_to_item.iter_mut() {
+        if slot.is_some() {
+            previous = *slot;
+        } else {
+            *slot = previous;
+        }
+    }
+
+    let mut next = None;
+    for slot in row_to_item.iter_mut().rev() {
+        if slot.is_some() {
+            next = *slot;
+        } else {
+            *slot = next;
+        }
     }
 }
 
@@ -181,6 +227,17 @@ fn push_item(
         row_range,
         kind,
     });
+}
+
+fn source_range_for_row_range(snapshot: &BufferSnapshot, row_range: Range<usize>) -> Range<usize> {
+    if row_range.is_empty() {
+        let end = snapshot.as_text_snapshot().len();
+        return end..end;
+    }
+
+    let start = super::row_source_range(snapshot, row_range.start as u32).start;
+    let end = super::row_source_range(snapshot, row_range.end.saturating_sub(1) as u32).end;
+    start..end
 }
 
 fn item_kind_for_block(kind: MarkdownBlockKind) -> Option<RenderedDisplayItemKind> {
@@ -239,7 +296,15 @@ fn ranges_overlap(left: &Range<usize>, right: &Range<usize>) -> bool {
     left.start < right.end && right.start < left.end
 }
 
-fn display_item_id(
+pub(crate) fn source_display_item_id(source_range: &Range<usize>, row: usize) -> DisplayItemId {
+    DisplayItemId(display_item_id(
+        source_range,
+        &(row..row.saturating_add(1)),
+        RenderedDisplayItemKind::SourceRow,
+    ))
+}
+
+pub(crate) fn display_item_id(
     source_range: &Range<usize>,
     row_range: &Range<usize>,
     kind: RenderedDisplayItemKind,

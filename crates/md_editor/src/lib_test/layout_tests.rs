@@ -88,60 +88,206 @@ fn rendered_display_index_groups_paragraphs_and_keeps_structured_rows_addressabl
         items,
         vec![
             (0, 0..2, rendered_index::RenderedDisplayItemKind::Paragraph),
-            (1, 2..3, rendered_index::RenderedDisplayItemKind::SourceRow),
             (
-                2,
+                1,
                 3..4,
                 rendered_index::RenderedDisplayItemKind::PipeTableRow
             ),
             (
-                3,
+                2,
                 4..5,
                 rendered_index::RenderedDisplayItemKind::PipeTableRow
             ),
             (
-                4,
+                3,
                 5..6,
                 rendered_index::RenderedDisplayItemKind::PipeTableRow
             ),
-            (5, 6..7, rendered_index::RenderedDisplayItemKind::SourceRow),
             (
-                6,
+                4,
                 7..8,
                 rendered_index::RenderedDisplayItemKind::FencedCodeBlock
             ),
             (
-                7,
+                5,
                 8..9,
                 rendered_index::RenderedDisplayItemKind::FencedCodeBlock
             ),
             (
-                8,
+                6,
                 9..10,
                 rendered_index::RenderedDisplayItemKind::FencedCodeBlock
             ),
             (
-                9,
+                7,
                 10..11,
                 rendered_index::RenderedDisplayItemKind::LinkReferenceDefinition
             ),
             (
-                10,
+                8,
                 11..12,
                 rendered_index::RenderedDisplayItemKind::HtmlBlock
-            ),
-            (
-                11,
-                12..13,
-                rendered_index::RenderedDisplayItemKind::SourceRow
             ),
         ]
     );
 
     assert_eq!(index.item_index_for_source_row(0), Some(0));
     assert_eq!(index.item_index_for_source_row(1), Some(0));
-    assert_eq!(index.item_index_for_source_row(4), Some(3));
-    assert_eq!(index.item_index_for_source_row(8), Some(7));
+    assert_eq!(index.item_index_for_source_row(2), Some(0));
+    assert_eq!(index.item_index_for_source_row(4), Some(2));
+    assert_eq!(index.item_index_for_source_row(6), Some(3));
+    assert_eq!(index.item_index_for_source_row(8), Some(5));
+    assert_eq!(index.item_index_for_source_row(12), Some(8));
+}
+
+#[test]
+fn rendered_display_index_collapses_blank_rows_between_blocks() {
+    let mut buffer = Buffer::local(
+        "# GFM Feature Test\n\nThis file is a manual fixture for checking GFM support.\n",
+    );
+    let snapshot = buffer.snapshot();
+    let index = rendered_display_index_for_tests(&snapshot);
+
+    let items = (0..index.item_count())
+        .map(|ix| index.item(ix).expect("item should exist"))
+        .map(|item| (item.row_range.clone(), item.kind))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        items,
+        vec![
+            (0..1, rendered_index::RenderedDisplayItemKind::SourceRow),
+            (2..3, rendered_index::RenderedDisplayItemKind::Paragraph),
+        ]
+    );
+    assert_eq!(index.item_index_for_source_row(0), Some(0));
+    assert_eq!(index.item_index_for_source_row(1), Some(0));
+    assert_eq!(index.item_index_for_source_row(2), Some(1));
+}
+
+#[test]
+fn rendered_merged_paragraph_projects_across_source_rows() {
+    let source = "first **bold**\ncontinued &amp; escaped \\*\n\nnext\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+    let index = rendered_display_index_for_tests(&snapshot);
+    let paragraph_item = index
+        .item_index_for_source_row(0)
+        .expect("paragraph item should exist");
+
+    let row = rendered_display_row_for_item_for_tests(
+        &snapshot,
+        paragraph_item,
+        Some(&collapsed_selection(Point::new(3, 0))),
+    );
+
+    assert_eq!(row.source_row_range, 0..2);
+    assert_eq!(row.text, "first bold continued & escaped *");
+
+    let newline = source.find('\n').expect("expected soft break");
+    let continued = source
+        .find("continued")
+        .expect("expected second source row");
+    let entity = source.find("&amp;").expect("expected entity");
+    let escaped = source.find("\\*").expect("expected escape");
+
+    assert_eq!(row.source_to_display(newline), "first bold".len());
+    assert_eq!(row.source_to_display(newline + 1), "first bold ".len());
+    assert_eq!(row.source_to_display(continued), "first bold ".len());
+    assert_eq!(row.source_to_display(entity), "first bold continued ".len());
+    assert_eq!(
+        row.source_to_display(escaped),
+        "first bold continued & escaped ".len()
+    );
+    assert_eq!(row.display_to_source("first bold ".len()), newline + 1);
+    assert_eq!(row.display_to_source("first bold continued ".len()), entity);
+}
+
+#[test]
+fn rendered_merged_paragraph_preserves_inactive_hard_break_as_visual_break() {
+    let source = "first  \nsecond\n\nnext\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+    let index = rendered_display_index_for_tests(&snapshot);
+    let paragraph_item = index
+        .item_index_for_source_row(0)
+        .expect("paragraph item should exist");
+
+    let row = rendered_display_row_for_item_for_tests(
+        &snapshot,
+        paragraph_item,
+        Some(&collapsed_selection(Point::new(3, 0))),
+    );
+
+    assert_eq!(row.text, "first\nsecond");
+    let hard_break = source.find("  \n").expect("expected hard break");
+    assert_eq!(row.source_to_display(hard_break), "first".len());
+    assert_eq!(
+        row.source_to_display(hard_break + "  \n".len()),
+        "first\n".len()
+    );
+    assert_eq!(row.display_to_source("first".len()), hard_break);
+    assert_eq!(
+        row.display_to_source("first\n".len()),
+        hard_break + "  \n".len()
+    );
+
+    let row_style = default_row_metrics().into();
+    let fragments = source_display_fragments(&row);
+    let visual_rows = forced_break_visual_rows(
+        &row.text,
+        &fragments,
+        &gpui::ShapedLine::default(),
+        row_style,
+    );
+    assert_eq!(
+        visual_rows
+            .into_iter()
+            .map(|visual_row| visual_row.display_range)
+            .collect::<Vec<_>>(),
+        vec![0.."first\n".len(), "first\n".len().."first\nsecond".len()]
+    );
+}
+
+#[test]
+fn rendered_merged_paragraph_reveals_active_soft_and_hard_break_source() {
+    let source = "soft\nnext\n\nhard  \nnext\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+    let index = rendered_display_index_for_tests(&snapshot);
+
+    let soft_item = index
+        .item_index_for_source_row(0)
+        .expect("soft paragraph item should exist");
+    let hard_item = index
+        .item_index_for_source_row(3)
+        .expect("hard paragraph item should exist");
+
+    let inactive_soft = rendered_display_row_for_item_for_tests(
+        &snapshot,
+        soft_item,
+        Some(&collapsed_selection(Point::new(2, 0))),
+    );
+    let active_soft = rendered_display_row_for_item_for_tests(
+        &snapshot,
+        soft_item,
+        Some(&collapsed_selection(Point::new(0, 4))),
+    );
+    let inactive_hard = rendered_display_row_for_item_for_tests(
+        &snapshot,
+        hard_item,
+        Some(&collapsed_selection(Point::new(0, 0))),
+    );
+    let active_hard = rendered_display_row_for_item_for_tests(
+        &snapshot,
+        hard_item,
+        Some(&collapsed_selection(Point::new(3, 4))),
+    );
+
+    assert_eq!(inactive_soft.text, "soft next");
+    assert_eq!(active_soft.text, "soft next");
+    assert_eq!(inactive_hard.text, "hard\nnext");
+    assert_eq!(active_hard.text, "hard   next");
 }
 
 #[test]

@@ -2062,13 +2062,13 @@ fn rendered_mode_draws_empty_alt_inline_image_atom(cx: &mut gpui::TestAppContext
 fn inline_atom_deferred_remeasure_only_clears_affected_row(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     let editor = cx.new(|cx| {
-        let mut editor = MarkdownEditor::for_text("first cached row\nsecond cached row\n", cx);
+        let mut editor = MarkdownEditor::for_text("first cached row\n\nsecond cached row\n", cx);
         editor.set_mode(MarkdownEditorMode::Rendered, cx);
         editor
     });
 
     editor.update_in(cx, |editor, window, cx| {
-        editor.set_cursor(Point::new(2, 0));
+        editor.set_cursor(Point::new(3, 0));
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
             DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
