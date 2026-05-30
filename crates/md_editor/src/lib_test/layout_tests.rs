@@ -107,21 +107,31 @@ fn rendered_display_index_groups_paragraphs_and_keeps_structured_rows_addressabl
             (5, 6..7, rendered_index::RenderedDisplayItemKind::SourceRow),
             (
                 6,
-                7..10,
+                7..8,
                 rendered_index::RenderedDisplayItemKind::FencedCodeBlock
             ),
             (
                 7,
+                8..9,
+                rendered_index::RenderedDisplayItemKind::FencedCodeBlock
+            ),
+            (
+                8,
+                9..10,
+                rendered_index::RenderedDisplayItemKind::FencedCodeBlock
+            ),
+            (
+                9,
                 10..11,
                 rendered_index::RenderedDisplayItemKind::LinkReferenceDefinition
             ),
             (
-                8,
+                10,
                 11..12,
                 rendered_index::RenderedDisplayItemKind::HtmlBlock
             ),
             (
-                9,
+                11,
                 12..13,
                 rendered_index::RenderedDisplayItemKind::SourceRow
             ),
@@ -131,28 +141,55 @@ fn rendered_display_index_groups_paragraphs_and_keeps_structured_rows_addressabl
     assert_eq!(index.item_index_for_source_row(0), Some(0));
     assert_eq!(index.item_index_for_source_row(1), Some(0));
     assert_eq!(index.item_index_for_source_row(4), Some(3));
-    assert_eq!(index.item_index_for_source_row(8), Some(6));
+    assert_eq!(index.item_index_for_source_row(8), Some(7));
 }
 
 #[test]
-fn rendered_fenced_code_item_hides_fence_until_marker_is_active() {
+fn rendered_fenced_code_keeps_content_rows_editable_and_hides_inactive_fences() {
     let source = "intro\n```rust\nlet x = 1;\nlet y = 2;\n```\nnext\n";
     let mut buffer = Buffer::local(source);
     let snapshot = buffer.snapshot();
     let index = rendered_display_index_for_tests(&snapshot);
-    let code_item_index = index.item_index_for_source_row(2).expect("code row item");
+    let opening_fence_item = index
+        .item_index_for_source_row(1)
+        .expect("opening fence item");
+    let code_item_index = index
+        .item_index_for_source_row(2)
+        .expect("code content item");
 
-    let inactive_row = rendered_display_row_for_item_for_tests(
+    let code_row = rendered_display_row_for_item_for_tests(
         &snapshot,
         code_item_index,
         Some(&collapsed_selection(Point::new(5, 0))),
     );
-    assert_eq!(inactive_row.text, "let x = 1; let y = 2; ");
-    assert_eq!(inactive_row.source_row_range, 1..5);
+    assert_eq!(code_row.text, "let x = 1;");
+    assert_eq!(code_row.source_row_range, 2..3);
+
+    let inactive_fence_row = rendered_display_row_for_item_for_tests(
+        &snapshot,
+        opening_fence_item,
+        Some(&collapsed_selection(Point::new(5, 0))),
+    );
+    assert_eq!(inactive_fence_row.text, "");
+    assert!(matches!(
+        rendered_source_block_layout_for_tests(
+            &snapshot,
+            &inactive_fence_row,
+            &collapsed_selection(Point::new(5, 0)),
+            MarkdownEditorMode::Rendered,
+            px(200.),
+            row_display_style_for_display_row(
+                &snapshot,
+                &inactive_fence_row,
+                MarkdownEditorMode::Rendered
+            )
+        ),
+        Some(DisplayBlockLayout::LinkReferenceDefinition(_))
+    ));
 
     let active_fence_row = rendered_display_row_for_item_for_tests(
         &snapshot,
-        code_item_index,
+        opening_fence_item,
         Some(&collapsed_selection(Point::new(1, 1))),
     );
     assert_eq!(active_fence_row.text, "```rust");

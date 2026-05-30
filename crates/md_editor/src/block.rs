@@ -18,7 +18,7 @@ use super::{
     display_model::DisplayRow,
     formula_render::{FormulaRenderMode, FormulaRenderState, formula_render_key, render_formula},
     markdown_image::MarkdownImageSource,
-    range_contains, rendered_element_descriptor_for_inline_span_in_row,
+    range_contains, ranges_overlap, rendered_element_descriptor_for_inline_span_in_row,
     rendered_element_source_range_is_active, selection_byte_range, visual_horizontal_goal,
 };
 
@@ -941,6 +941,33 @@ fn rendered_source_block_for_row(
     mode: MarkdownEditorMode,
 ) -> Option<DisplayBlockKind> {
     if mode != MarkdownEditorMode::Rendered {
+        return None;
+    }
+
+    if let Some(block) = display_row.markdown_blocks.iter().find(|block| {
+        matches!(
+            block.kind,
+            MarkdownBlockKind::FencedCodeBlock | MarkdownBlockKind::IndentedCodeBlock
+        ) && range_contains(&block.row_range, &display_row.source_row_range)
+    }) {
+        let row_is_marker = block
+            .marker_ranges
+            .iter()
+            .any(|marker_range| ranges_overlap(marker_range, &display_row.source_range));
+        let marker_is_active = row_is_marker
+            && block.marker_ranges.iter().any(|marker_range| {
+                ranges_overlap(marker_range, &display_row.source_range)
+                    && rendered_element_source_range_is_active(snapshot, selection, marker_range)
+            });
+
+        if row_is_marker && !marker_is_active {
+            return Some(DisplayBlockKind::LinkReferenceDefinition(
+                RenderedSourceBlock {
+                    source_range: display_row.source_range.clone(),
+                },
+            ));
+        }
+
         return None;
     }
 

@@ -31,7 +31,7 @@
 
 - [partial 2026-05-30] `Paragraph`：inactive 时合并普通安全 Markdown paragraph 的多 source rows，soft break 渲染为空格；含 image/math/task/list/blockquote 等需要更细布局的段落暂保留 row item。
 - [done 2026-05-30] `PipeTable`：继续一 source row 一个 rendered item；inactive 走现有 structured table；active reveal 当前 source row。
-- [partial 2026-05-30] `FencedCodeBlock`/`IndentedCodeBlock`：inactive 合成 code block item，隐藏 fence/info marker，显示 raw code 内容；cursor 在 fence/info marker 时 reveal 该 source row。后续仍需接入 flow layout/visual row helper 来保留代码换行，并完整支持多视觉行命中与 selection bounds。
+- [partial 2026-05-30] `FencedCodeBlock`/`IndentedCodeBlock`：保留代码内容 source rows 的普通编辑器布局；inactive 隐藏 fence/info marker rows，cursor 在 fence/info marker 时 reveal 该 source row。后续仍需补 code block presentation（背景、padding、monospace-like raw styling）并完善多行 selection/vertical movement 的视觉 polish。
 - [done 2026-05-30] `ThematicBreak`：inactive 单 item 画 horizontal rule；active 时显示 source row。
 - [done 2026-05-30] `LinkReferenceDefinition`：inactive 保留 0-height item 以稳定 index；active 时显示 source text。
 - [done 2026-05-30] `HtmlBlock`/`InlineHtml`：不执行、不渲染 HTML，始终按源码文本显示，并使用 muted/raw 样式降噪。

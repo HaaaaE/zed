@@ -95,7 +95,7 @@ use rendered_element::{
     inactive_rendered_element_source_ranges_for_selection,
     rendered_element_descriptor_for_inline_span_in_row, rendered_element_source_range_is_active,
 };
-use rendered_index::{RenderedDisplayIndex, RenderedDisplayItem, RenderedDisplayItemKind};
+use rendered_index::{RenderedDisplayIndex, RenderedDisplayItem};
 #[cfg(test)]
 use selection::{HorizontalDirection, move_horizontal_in_mode, move_selection_left, move_vertical};
 use selection::{
@@ -2163,49 +2163,10 @@ fn rendered_display_index_for_tests(snapshot: &BufferSnapshot) -> Arc<RenderedDi
 }
 
 fn rendered_item_display_source_range(
-    snapshot: &BufferSnapshot,
+    _snapshot: &BufferSnapshot,
     item: &RenderedDisplayItem,
-    display_row_state: &DisplayRowProjectionState,
+    _display_row_state: &DisplayRowProjectionState,
 ) -> (u32, Range<usize>, Range<usize>) {
-    if matches!(
-        item.kind,
-        RenderedDisplayItemKind::FencedCodeBlock | RenderedDisplayItemKind::IndentedCodeBlock
-    ) && let Some(block) = snapshot.syntax_tree().blocks().iter().find(|block| {
-        block.row_range == item.row_range
-            && matches!(
-                block.kind,
-                MarkdownBlockKind::FencedCodeBlock | MarkdownBlockKind::IndentedCodeBlock
-            )
-    }) {
-        if let Some(active_marker_range) =
-            display_row_state
-                .active_source_range
-                .as_ref()
-                .and_then(|active_source_range| {
-                    block
-                        .marker_ranges
-                        .iter()
-                        .find(|marker_range| ranges_overlap(marker_range, active_source_range))
-                })
-        {
-            let row = snapshot
-                .as_text_snapshot()
-                .offset_to_point(active_marker_range.start)
-                .row as usize;
-            return (
-                row as u32,
-                row_source_range(snapshot, row as u32),
-                row..row + 1,
-            );
-        }
-
-        return (
-            block.row_range.start as u32,
-            block.content_range.clone(),
-            block.row_range.clone(),
-        );
-    }
-
     (
         item.row_range.start as u32,
         item.source_range.clone(),
