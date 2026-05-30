@@ -2408,6 +2408,7 @@ fn project_display_row_text(
     }
 
     let mut display_text = project_rendered_row_text(source_text, row_source_range, projection);
+    restore_rendered_soft_breaks(&mut display_text, row_source_range, inline_spans, projection);
     let mut insertions = Vec::new();
     for span in inline_spans {
         let descriptor = rendered_element_descriptors
@@ -2449,6 +2450,32 @@ fn project_display_row_text(
     }
 
     (display_text, insertions)
+}
+
+fn restore_rendered_soft_breaks(
+    display_text: &mut String,
+    row_source_range: &Range<usize>,
+    inline_spans: &[MarkdownInlineSpan],
+    projection: &MarkdownProjectionMap,
+) {
+    let mut replacements = inline_spans
+        .iter()
+        .filter(|span| {
+            span.kind == MarkdownInlineKind::SoftBreak
+                && range_contains(row_source_range, &span.source_range)
+        })
+        .filter_map(|span| {
+            let display_start = projection.source_to_display(span.source_range.start);
+            let display_end = projection.source_to_display(span.source_range.end);
+            (display_start < display_end && display_end <= display_text.len())
+                .then_some(display_start..display_end)
+        })
+        .collect::<Vec<_>>();
+
+    replacements.sort_by_key(|range| range.start);
+    for range in replacements.into_iter().rev() {
+        display_text.replace_range(range, "\n");
+    }
 }
 
 fn project_row_text(source_text: &str, projection: &MarkdownProjectionMap) -> String {

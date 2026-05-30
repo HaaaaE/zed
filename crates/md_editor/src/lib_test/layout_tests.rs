@@ -356,8 +356,8 @@ fn rendered_merged_paragraph_reveals_active_soft_and_hard_break_source() {
         Some(&collapsed_selection(Point::new(3, 4))),
     );
 
-    assert_eq!(inactive_soft.text, "soft next");
-    assert_eq!(active_soft.text, "soft next");
+    assert_eq!(inactive_soft.text, "soft\nnext");
+    assert_eq!(active_soft.text, "soft\nnext");
     assert_eq!(inactive_hard.text, "hard\nnext");
     assert_eq!(active_hard.text, "hard   next");
 }
