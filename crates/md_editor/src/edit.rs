@@ -136,6 +136,10 @@ pub(crate) fn backspace_selection_in_mode(
     mode: MarkdownEditorMode,
 ) -> (Selection<Point>, Option<md_text::TransactionId>) {
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
+    if mode == MarkdownEditorMode::Rendered && !selection.is_empty() {
+        return delete_rendered_selection(buffer, &selection);
+    }
+
     if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
         let snapshot = buffer.snapshot();
         if let Some(deletion) = rendered_blank_paragraph_deletion_at_cursor(
@@ -214,6 +218,10 @@ pub(crate) fn delete_selection_in_mode(
     mode: MarkdownEditorMode,
 ) -> (Selection<Point>, Option<md_text::TransactionId>) {
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
+    if mode == MarkdownEditorMode::Rendered && !selection.is_empty() {
+        return delete_rendered_selection(buffer, &selection);
+    }
+
     if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
         let snapshot = buffer.snapshot();
         if let Some(deletion) = rendered_blank_paragraph_deletion_at_cursor(
@@ -253,6 +261,84 @@ pub(crate) fn delete_selection_in_mode(
     }
 
     delete_selection(buffer, &selection)
+}
+
+fn delete_rendered_selection(
+    buffer: &mut Buffer,
+    selection: &Selection<Point>,
+) -> (Selection<Point>, Option<md_text::TransactionId>) {
+    let range = selection_byte_range_in_text_snapshot(buffer.as_text_snapshot(), selection);
+    if range.is_empty() {
+        return (selection.clone(), None);
+    }
+
+    let mut cursor_offset = range.start;
+    buffer.start_transaction();
+    buffer.edit([(range, "")]);
+
+    if let Some((range, replacement)) =
+        rendered_blank_run_normalization_after_delete(&buffer.snapshot(), cursor_offset)
+    {
+        if range.start <= cursor_offset {
+            cursor_offset = range.start + replacement.len();
+        }
+        buffer.edit([(range, replacement)]);
+    }
+
+    let transaction_id = buffer.end_transaction();
+    let cursor = buffer
+        .as_text_snapshot()
+        .offset_to_point(cursor_offset.min(buffer.as_text_snapshot().len()));
+    (collapsed_selection(cursor), transaction_id)
+}
+
+fn rendered_blank_run_normalization_after_delete(
+    snapshot: &BufferSnapshot,
+    cursor_offset: usize,
+) -> Option<(std::ops::Range<usize>, String)> {
+    let text_snapshot = snapshot.as_text_snapshot();
+    let row_count = text_snapshot.row_count() as usize;
+    if row_count == 0 {
+        return None;
+    }
+
+    let cursor = text_snapshot.offset_to_point(cursor_offset.min(text_snapshot.len()));
+    let cursor_row = cursor.row as usize;
+    let candidate_rows = [
+        cursor_row.min(row_count.saturating_sub(1)),
+        cursor_row.saturating_sub(1),
+    ];
+    let blank_row = candidate_rows
+        .into_iter()
+        .find(|row| *row < row_count && source_row_is_blank(snapshot, *row))?;
+    let blank_run = blank_run_containing_row(snapshot, blank_row);
+
+    let has_previous_paragraph =
+        blank_run.start > 0 && !source_row_is_blank(snapshot, blank_run.start - 1);
+    let has_next_paragraph =
+        blank_run.end < row_count && !source_row_is_blank(snapshot, blank_run.end);
+    let target_blank_rows = usize::from(has_previous_paragraph && has_next_paragraph);
+
+    let start = text_snapshot.point_to_offset(Point::new(blank_run.start as u32, 0));
+    let end = text_snapshot.point_to_offset(Point::new(blank_run.end as u32, 0));
+    let replacement = "\n".repeat(target_blank_rows);
+    let current_text = text_snapshot.text_for_range(start..end).collect::<String>();
+    (current_text != replacement).then_some((start..end, replacement))
+}
+
+fn blank_run_containing_row(snapshot: &BufferSnapshot, row: usize) -> std::ops::Range<usize> {
+    let row_count = snapshot.as_text_snapshot().row_count() as usize;
+    let mut start = row;
+    while start > 0 && source_row_is_blank(snapshot, start - 1) {
+        start -= 1;
+    }
+
+    let mut end = row + 1;
+    while end < row_count && source_row_is_blank(snapshot, end) {
+        end += 1;
+    }
+
+    start..end
 }
 
 struct RenderedBlankParagraphDeletion {

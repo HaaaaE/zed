@@ -2902,6 +2902,63 @@ fn delete_selection_deletes_selected_range() {
 }
 
 #[test]
+fn rendered_delete_selection_removes_empty_paragraph_and_canonicalizes_separator() {
+    let mut buffer = Buffer::local("a\n\n\n\nb\n");
+    let selection = Selection {
+        id: 1,
+        start: Point::new(2, 0),
+        end: Point::new(3, 0),
+        reversed: false,
+        goal: SelectionGoal::None,
+    };
+
+    let (selection, transaction_id) =
+        delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "a\n\nb\n");
+    assert_eq!(selection, collapsed_selection(Point::new(2, 0)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn rendered_backspace_selection_removes_middle_paragraph_with_minimal_separator() {
+    let mut buffer = Buffer::local("a\n\nb\n\nc\n");
+    let selection = Selection {
+        id: 1,
+        start: Point::new(2, 0),
+        end: Point::new(3, 0),
+        reversed: false,
+        goal: SelectionGoal::None,
+    };
+
+    let (selection, transaction_id) =
+        backspace_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "a\n\nc\n");
+    assert_eq!(selection, collapsed_selection(Point::new(2, 0)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn rendered_delete_selection_across_paragraph_text_merges_remaining_text() {
+    let mut buffer = Buffer::local("alpha\n\nbeta\n");
+    let selection = Selection {
+        id: 1,
+        start: Point::new(0, 2),
+        end: Point::new(2, 2),
+        reversed: false,
+        goal: SelectionGoal::None,
+    };
+
+    let (selection, transaction_id) =
+        delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "alta\n");
+    assert_eq!(selection, collapsed_selection(Point::new(0, 2)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
 fn rendered_backspace_deletes_previous_inactive_inline_atom() {
     let mut buffer = Buffer::local("Before $x + y$ after\n");
     let atom_start = "Before ".len();
