@@ -35,6 +35,7 @@ mod layout;
 mod markdown_image;
 mod render;
 mod rendered_element;
+mod rendered_index;
 mod selection;
 mod table;
 mod virtual_list;
@@ -67,7 +68,7 @@ use interaction::{mouse_target_for_text_layout, task_checkbox_source_range_for_t
 use layout::{
     DisplayRowCacheKey, DisplayRowLayout, DisplayRowLayoutInputs, DisplayRowProjectionState,
     DisplayRowTextLayout, RowLayoutCacheKey, RowLayoutInputCacheKey, VisualDisplayRow,
-    row_display_style_for_display_row, text_wrap_width,
+    row_display_style_for_display_row, text_wrap_width, text_wrap_width_for_mode,
 };
 #[cfg(test)]
 use layout::{
@@ -93,6 +94,7 @@ use rendered_element::{
     inactive_rendered_element_source_ranges_for_selection,
     rendered_element_descriptor_for_inline_span_in_row, rendered_element_source_range_is_active,
 };
+use rendered_index::RenderedDisplayIndex;
 #[cfg(test)]
 use selection::{HorizontalDirection, move_horizontal_in_mode, move_selection_left, move_vertical};
 use selection::{
@@ -104,7 +106,7 @@ use selection::{
     move_selection_to_beginning_of_line_in_text_snapshot, move_selection_to_end_of_line,
     move_selection_to_end_of_line_in_text_snapshot, move_selection_vertical,
     move_selection_vertical_in_text_snapshot, reveal_selection_head_row_in_text_snapshot,
-    select_left_in_mode, select_left_in_text_snapshot, select_right_in_mode,
+    reveal_selection_item, select_left_in_mode, select_left_in_text_snapshot, select_right_in_mode,
     select_right_in_text_snapshot, select_to_beginning_of_line_in_text_snapshot,
     select_to_end_of_line_in_text_snapshot, select_to_point_in_text_snapshot_with_goal,
     select_to_point_with_goal, select_vertical_in_text_snapshot,
@@ -160,6 +162,14 @@ gpui::actions!(
 );
 
 const DISPLAY_LIST_OVERDRAW: gpui::Pixels = px(500.);
+const RENDERED_LEFT_RAIL_WIDTH: gpui::Pixels = px(24.);
+
+fn left_rail_width(mode: MarkdownEditorMode) -> gpui::Pixels {
+    match mode {
+        MarkdownEditorMode::Source => gutter_width(),
+        MarkdownEditorMode::Rendered => RENDERED_LEFT_RAIL_WIDTH,
+    }
+}
 
 /// Construct editor keybindings from the single-source-of-truth in `md_settings`.
 ///
@@ -231,6 +241,7 @@ pub struct MarkdownEditor {
     inline_atom_remeasure_scheduled: bool,
     source_prewarm: Option<SourcePrewarmState>,
     rendered_prewarm: Option<RenderedPrewarmState>,
+    rendered_display_index: Option<Arc<RenderedDisplayIndex>>,
     #[cfg(perf_enabled)]
     layout_computation_counts: LayoutComputationCounts,
 }
@@ -298,6 +309,7 @@ struct SourcePrewarmState {
 struct RenderedPrewarmState {
     version: md_text::Global,
     wrap_width: gpui::Pixels,
+    #[allow(dead_code)]
     selection: Selection<Point>,
     anchor_row: usize,
     rows: VecDeque<usize>,
@@ -360,6 +372,7 @@ impl MarkdownEditor {
             inline_atom_remeasure_scheduled: false,
             source_prewarm: None,
             rendered_prewarm: None,
+            rendered_display_index: None,
             #[cfg(perf_enabled)]
             layout_computation_counts: LayoutComputationCounts::default(),
         }
@@ -433,11 +446,12 @@ impl MarkdownEditor {
             return;
         }
 
+        let row_count_before = self.display_list_state.item_count();
         self.mode = mode;
         self.selection = selection_without_goal(&self.selection);
         self.clear_display_row_cache();
         self.clear_row_layout_cache();
-        self.display_list_state.remeasure();
+        self.sync_display_list_state(row_count_before, &self.selection.clone());
         self.reveal_cursor_row();
         cx.notify();
     }
@@ -453,6 +467,42 @@ impl MarkdownEditor {
 
     pub fn row_count(&mut self) -> u32 {
         self.buffer.as_text_snapshot().row_count()
+    }
+
+    fn display_item_count_for_mode(&mut self, mode: MarkdownEditorMode) -> usize {
+        match mode {
+            MarkdownEditorMode::Source => self.buffer.as_text_snapshot().row_count() as usize,
+            MarkdownEditorMode::Rendered => {
+                let snapshot = self.buffer.snapshot();
+                self.rendered_display_index(&snapshot).item_count()
+            }
+        }
+    }
+
+    fn display_item_index_for_cursor(
+        &mut self,
+        snapshot: &BufferSnapshot,
+        cursor: Point,
+        mode: MarkdownEditorMode,
+    ) -> Option<usize> {
+        match mode {
+            MarkdownEditorMode::Source => Some(cursor.row as usize),
+            MarkdownEditorMode::Rendered => self
+                .rendered_display_index(snapshot)
+                .item_index_for_source_row(cursor.row as usize),
+        }
+    }
+
+    fn rendered_display_index(&mut self, snapshot: &BufferSnapshot) -> Arc<RenderedDisplayIndex> {
+        if let Some(index) = &self.rendered_display_index
+            && index.version() == snapshot.version()
+        {
+            return index.clone();
+        }
+
+        let index = RenderedDisplayIndex::build(snapshot);
+        self.rendered_display_index = Some(index.clone());
+        index
     }
 
     pub fn row_text(&mut self, row: u32) -> String {
@@ -766,7 +816,7 @@ impl MarkdownEditor {
         let cursor = clip_cursor_in_text_snapshot(snapshot, selection.head());
         let display_row = self.cached_source_display_row(snapshot, cursor.row as usize)?;
         let row_style = default_row_metrics().into();
-        let wrap_width = text_wrap_width(window);
+        let wrap_width = text_wrap_width_for_mode(window, self.mode);
         let text_layout =
             self.cached_source_text_layout(&display_row, row_style, wrap_width, false, window, cx);
 
@@ -811,7 +861,7 @@ impl MarkdownEditor {
         let cursor = clip_cursor_in_text_snapshot(snapshot, selection.head());
         let display_row = self.cached_source_display_row(snapshot, cursor.row as usize)?;
         let row_style = default_row_metrics().into();
-        let wrap_width = text_wrap_width(window);
+        let wrap_width = text_wrap_width_for_mode(window, self.mode);
         let current_layout =
             self.cached_source_text_layout(&display_row, row_style, wrap_width, false, window, cx);
 
@@ -907,10 +957,11 @@ impl MarkdownEditor {
         let cursor = clip_cursor(snapshot, selection.head());
         let display_row_state =
             DisplayRowProjectionState::new(snapshot, Some(selection), self.mode);
+        let item_index = self.display_item_index_for_cursor(snapshot, cursor, self.mode)?;
         let display_row =
-            self.cached_display_row(snapshot, cursor.row as usize, self.mode, &display_row_state)?;
+            self.cached_display_row(snapshot, item_index, self.mode, &display_row_state)?;
         let row_style = row_display_style_for_display_row(snapshot, &display_row, self.mode);
-        let wrap_width = text_wrap_width(window);
+        let wrap_width = text_wrap_width_for_mode(window, self.mode);
         let layout = self.cached_row_layout(
             snapshot,
             &display_row,
@@ -974,10 +1025,11 @@ impl MarkdownEditor {
         let cursor = clip_cursor(snapshot, selection.head());
         let display_row_state =
             DisplayRowProjectionState::new(snapshot, Some(selection), self.mode);
+        let item_index = self.display_item_index_for_cursor(snapshot, cursor, self.mode)?;
         let display_row =
-            self.cached_display_row(snapshot, cursor.row as usize, self.mode, &display_row_state)?;
+            self.cached_display_row(snapshot, item_index, self.mode, &display_row_state)?;
         let row_style = row_display_style_for_display_row(snapshot, &display_row, self.mode);
-        let wrap_width = text_wrap_width(window);
+        let wrap_width = text_wrap_width_for_mode(window, self.mode);
         let current_layout = self.cached_row_layout(
             snapshot,
             &display_row,
@@ -1042,17 +1094,21 @@ impl MarkdownEditor {
             ),
         };
 
-        let target_row = if delta_visual_rows.is_negative() {
-            display_row.row.checked_sub(1)?
+        let target_item = if delta_visual_rows.is_negative() {
+            display_row.item_index.checked_sub(1)?
         } else {
-            let next_row = display_row.row.saturating_add(1);
-            if next_row >= snapshot.row_count() {
+            let next_item = display_row.item_index.saturating_add(1);
+            if next_item as usize >= self.display_item_count_for_mode(self.mode) {
                 return None;
             }
-            next_row
+            next_item
         };
-        let target_display_row =
-            self.cached_display_row(snapshot, target_row as usize, self.mode, &display_row_state)?;
+        let target_display_row = self.cached_display_row(
+            snapshot,
+            target_item as usize,
+            self.mode,
+            &display_row_state,
+        )?;
         let target_row_style =
             row_display_style_for_display_row(snapshot, &target_display_row, self.mode);
         let target_layout = self.cached_row_layout(
@@ -1466,7 +1522,7 @@ impl MarkdownEditor {
         row_count_before: usize,
         previous_selection: &Selection<Point>,
     ) {
-        let row_count_after = self.buffer.as_text_snapshot().row_count() as usize;
+        let row_count_after = self.display_item_count_for_mode(self.mode);
         if row_count_before != row_count_after {
             if let Some((old_range, count)) = row_count_change_splice(
                 row_count_before,
@@ -1478,9 +1534,6 @@ impl MarkdownEditor {
             } else {
                 self.display_list_state
                     .splice(0..row_count_before, row_count_after);
-            }
-            if self.mode == MarkdownEditorMode::Rendered {
-                self.display_list_state.remeasure();
             }
             return;
         }
@@ -1526,11 +1579,21 @@ impl MarkdownEditor {
     }
 
     fn reveal_cursor_row(&mut self) {
-        reveal_selection_head_row_in_text_snapshot(
-            &self.display_list_state,
-            self.buffer.as_text_snapshot(),
-            &self.selection,
-        );
+        if self.mode == MarkdownEditorMode::Rendered {
+            let snapshot = self.buffer.snapshot();
+            let cursor = clip_cursor(&snapshot, self.selection.head());
+            let source_offset = snapshot.as_text_snapshot().point_to_offset(cursor);
+            let item_index = self
+                .rendered_display_index(&snapshot)
+                .item_index_for_source_offset(&snapshot, source_offset);
+            reveal_selection_item(&self.display_list_state, item_index);
+        } else {
+            reveal_selection_head_row_in_text_snapshot(
+                &self.display_list_state,
+                self.buffer.as_text_snapshot(),
+                &self.selection,
+            );
+        }
     }
 
     fn mouse_left_down_on_row(
@@ -1563,6 +1626,7 @@ impl MarkdownEditor {
                 visual_row_index,
                 visual_row,
                 event.position.x,
+                left_rail_width(MarkdownEditorMode::Source),
                 &text_layout,
             );
             let previous_selection = self.selection.clone();
@@ -1596,6 +1660,7 @@ impl MarkdownEditor {
                         display_row,
                         visual_row,
                         event.position.x,
+                        left_rail_width(self.mode),
                         &text_layout,
                     )
                     && self.toggle_task_checkbox_source_range(source_range, cx)
@@ -1610,6 +1675,7 @@ impl MarkdownEditor {
                     visual_row_index,
                     visual_row,
                     event.position.x,
+                    left_rail_width(self.mode),
                     &text_layout,
                 )
             }
@@ -1664,6 +1730,7 @@ impl MarkdownEditor {
                 visual_row_index,
                 visual_row,
                 event.position.x,
+                left_rail_width(MarkdownEditorMode::Source),
                 &text_layout,
             );
             let previous_selection = self.selection.clone();
@@ -1694,6 +1761,7 @@ impl MarkdownEditor {
                 visual_row_index,
                 visual_row,
                 event.position.x,
+                left_rail_width(self.mode),
                 &text_layout,
             ),
             DisplayRowLayout::Block(_) => (
@@ -1860,6 +1928,7 @@ impl Render for MarkdownEditor {
 
                         render_editor_row(
                             &display_row,
+                            mode,
                             is_cursor_row,
                             row_style,
                             row_min_height,
@@ -1917,6 +1986,7 @@ impl Render for MarkdownEditor {
 
                         render_editor_row(
                             &display_row,
+                            mode,
                             is_cursor_row,
                             row_style,
                             row_min_height,
@@ -1973,6 +2043,7 @@ impl Render for MarkdownEditor {
 
 fn render_editor_row(
     display_row: &DisplayRow,
+    mode: MarkdownEditorMode,
     is_cursor_row: bool,
     row_style: RowDisplayStyle,
     row_min_height: gpui::Pixels,
@@ -2001,7 +2072,7 @@ fn render_editor_row(
         )
         .child(
             div()
-                .w(gutter_width())
+                .w(left_rail_width(mode))
                 .flex_none()
                 .pr_2()
                 .text_align(TextAlign::Right)
@@ -2010,7 +2081,13 @@ fn render_editor_row(
                 } else {
                     palette.gutter_text
                 })
-                .child(SharedString::from((display_row.row + 1).to_string())),
+                .when(mode == MarkdownEditorMode::Source, |this| {
+                    this.child(SharedString::from((display_row.row + 1).to_string()))
+                })
+                .when(
+                    mode == MarkdownEditorMode::Rendered && is_cursor_row,
+                    |this| this.child(SharedString::from("\u{2022}")),
+                ),
         )
         .child(
             div()
@@ -2066,15 +2143,30 @@ fn display_rows_in_mode(
                 display_row_state.active_source_range.clone(),
                 &display_row_state.inactive_source_ranges,
             );
-            rendered_display_row(snapshot, row, source_range, range_semantics, None)
+            rendered_display_row(
+                snapshot,
+                row,
+                row,
+                source_range,
+                row as usize..row as usize + 1,
+                range_semantics,
+                None,
+            )
         })
         .collect()
 }
 
+#[cfg(test)]
+fn rendered_display_index_for_tests(snapshot: &BufferSnapshot) -> Arc<RenderedDisplayIndex> {
+    RenderedDisplayIndex::build(snapshot)
+}
+
 fn rendered_display_row(
     snapshot: &BufferSnapshot,
+    item_index: u32,
     row: u32,
     source_range: Range<usize>,
+    source_row_range: Range<usize>,
     range_semantics: MarkdownRangeSemantics,
     document_path: Option<&Path>,
 ) -> DisplayRow {
@@ -2107,7 +2199,9 @@ fn rendered_display_row(
     let heading_level = heading_level_for_display_row(&markdown_blocks, row);
     let rendered_indent_level = rendered_indent_level_for_display_row(&markdown_blocks, row);
     DisplayRow {
+        item_index,
         row,
+        source_row_range,
         text,
         source_text,
         source_range,
@@ -2142,7 +2236,9 @@ fn source_display_row_in_text_snapshot(snapshot: &TextBufferSnapshot, row: u32) 
     let source_text: String = snapshot.text_for_range(source_range.clone()).collect();
     let projection = MarkdownProjectionMap::new(snapshot.len(), source_range.clone(), Vec::new());
     DisplayRow {
+        item_index: row,
         row,
+        source_row_range: row as usize..row as usize + 1,
         text: source_text.clone(),
         source_text,
         source_range,
@@ -2227,11 +2323,14 @@ fn project_display_row_text(
     rendered_element_descriptors: &[RenderedElementDescriptor],
     mode: MarkdownEditorMode,
 ) -> (String, Vec<DisplayInsertion>) {
-    let mut display_text = project_row_text(source_text, projection);
     if mode != MarkdownEditorMode::Rendered {
-        return (display_text, Vec::new());
+        return (project_row_text(source_text, projection), Vec::new());
     }
 
+    let mut display_text = project_row_text(source_text, projection)
+        .replace("\r\n", " ")
+        .replace('\n', " ")
+        .replace('\r', " ");
     let mut insertions = Vec::new();
     for span in inline_spans {
         let descriptor = rendered_element_descriptors

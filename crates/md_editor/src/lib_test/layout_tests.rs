@@ -46,6 +46,79 @@ fn display_rows_cache_source_text_and_range() {
 }
 
 #[test]
+fn rendered_display_index_groups_paragraphs_and_keeps_structured_rows_addressable() {
+    let mut buffer = Buffer::local(
+        "first paragraph\ncontinued\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n```rust\nlet x = 1;\n```\n[label]: https://example.com\n<div>raw</div>\n",
+    );
+    let snapshot = buffer.snapshot();
+    let index = rendered_display_index_for_tests(&snapshot);
+
+    let items = (0..index.item_count())
+        .map(|ix| index.item(ix).expect("item should exist"))
+        .map(|item| (item.index, item.row_range.clone(), item.kind))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        items,
+        vec![
+            (0, 0..2, rendered_index::RenderedDisplayItemKind::Paragraph),
+            (1, 2..3, rendered_index::RenderedDisplayItemKind::SourceRow),
+            (
+                2,
+                3..4,
+                rendered_index::RenderedDisplayItemKind::PipeTableRow
+            ),
+            (
+                3,
+                4..5,
+                rendered_index::RenderedDisplayItemKind::PipeTableRow
+            ),
+            (
+                4,
+                5..6,
+                rendered_index::RenderedDisplayItemKind::PipeTableRow
+            ),
+            (5, 6..7, rendered_index::RenderedDisplayItemKind::SourceRow),
+            (
+                6,
+                7..8,
+                rendered_index::RenderedDisplayItemKind::FencedCodeBlock
+            ),
+            (
+                7,
+                8..9,
+                rendered_index::RenderedDisplayItemKind::FencedCodeBlock
+            ),
+            (
+                8,
+                9..10,
+                rendered_index::RenderedDisplayItemKind::FencedCodeBlock
+            ),
+            (
+                9,
+                10..11,
+                rendered_index::RenderedDisplayItemKind::LinkReferenceDefinition
+            ),
+            (
+                10,
+                11..12,
+                rendered_index::RenderedDisplayItemKind::HtmlBlock
+            ),
+            (
+                11,
+                12..13,
+                rendered_index::RenderedDisplayItemKind::SourceRow
+            ),
+        ]
+    );
+
+    assert_eq!(index.item_index_for_source_row(0), Some(0));
+    assert_eq!(index.item_index_for_source_row(1), Some(0));
+    assert_eq!(index.item_index_for_source_row(4), Some(3));
+    assert_eq!(index.item_index_for_source_row(8), Some(7));
+}
+
+#[test]
 fn row_text_returns_empty_string_for_out_of_bounds_rows() {
     let mut buffer = Buffer::local("one");
     let snapshot = buffer.snapshot();

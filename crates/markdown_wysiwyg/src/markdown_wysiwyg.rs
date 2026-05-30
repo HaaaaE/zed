@@ -535,6 +535,18 @@ impl MarkdownSyntaxTree {
                 continue;
             }
 
+            if span.kind == MarkdownInlineKind::SoftBreak {
+                let start = span.source_range.start.max(visible_source_range.start);
+                let end = span.source_range.end.min(visible_source_range.end);
+                if start < end {
+                    operations.push(MarkdownProjectionOperation::Replace {
+                        source_range: start..end,
+                        display_text: " ".to_string(),
+                    });
+                }
+                continue;
+            }
+
             for marker_range in &span.marker_ranges {
                 let start = marker_range.start.max(visible_source_range.start);
                 let end = marker_range.end.min(visible_source_range.end);
@@ -1335,6 +1347,15 @@ mod tests {
         );
         assert_eq!(projection.project_source_text(source), "Escape * & * *\n");
         assert_eq!(projection.display_len(), "Escape * & * *\n".len());
+    }
+
+    #[test]
+    fn projection_replaces_inactive_soft_breaks_with_spaces() {
+        let source = "first\nsecond\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let projection = tree.projection_for_visible_rows(0..2, None);
+
+        assert_eq!(projection.project_source_text(source), "first second\n");
     }
 
     #[test]

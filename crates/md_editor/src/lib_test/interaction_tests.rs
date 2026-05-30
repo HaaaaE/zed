@@ -157,9 +157,8 @@ fn source_render_prewarms_display_rows_and_layout_inputs(cx: &mut gpui::TestAppC
 fn rendered_render_prewarms_display_rows_and_layout_inputs(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     let text = (0..200)
-        .map(|row| format!("rendered prewarm row {row}"))
-        .collect::<Vec<_>>()
-        .join("\n");
+        .map(|row| format!("rendered prewarm row {row}\n\n"))
+        .collect::<String>();
     let editor = cx.new(|cx| {
         let mut editor = MarkdownEditor::for_text(text, cx);
         editor.set_mode(MarkdownEditorMode::Rendered, cx);
@@ -298,9 +297,8 @@ fn rendered_prewarm_large_file_stays_near_scroll_anchor(cx: &mut gpui::TestAppCo
 fn rendered_prewarm_reanchors_after_large_scroll_jump(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     let text = (0..2_000)
-        .map(|row| format!("rendered prewarm jump row {row}"))
-        .collect::<Vec<_>>()
-        .join("\n");
+        .map(|row| format!("rendered prewarm jump row {row}\n\n"))
+        .collect::<String>();
     let editor = cx.new(|cx| {
         let mut editor = MarkdownEditor::for_text(text, cx);
         editor.set_mode(MarkdownEditorMode::Rendered, cx);
@@ -315,7 +313,7 @@ fn rendered_prewarm_reanchors_after_large_scroll_jump(cx: &mut gpui::TestAppCont
 
     editor.update_in(cx, |editor, window, cx| {
         editor.display_list_state.scroll_to(ListOffset {
-            item_ix: 200,
+            item_ix: 20,
             offset_in_item: px(0.),
         });
         editor.schedule_rendered_cache_prewarm(px(240.), editor.selection.clone(), window, cx);
@@ -326,8 +324,8 @@ fn rendered_prewarm_reanchors_after_large_scroll_jump(cx: &mut gpui::TestAppCont
             .rendered_prewarm
             .as_ref()
             .expect("rendered prewarm should be scheduled");
-        assert_eq!(state.anchor_row, 200);
-        assert_eq!(state.rows.front().copied(), Some(200));
+        assert_eq!(state.anchor_row, 20);
+        assert_eq!(state.rows.front().copied(), Some(20));
     });
 }
 
@@ -351,7 +349,7 @@ fn rendered_interaction_layouts_cache_plain_text_rows(cx: &mut gpui::TestAppCont
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
         let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
-        let wrap_width = text_wrap_width(window);
+        let wrap_width = text_wrap_width_for_mode(window, editor.mode);
         let selection = editor.selection.clone();
 
         let _ = editor.cached_row_layout(
@@ -402,7 +400,7 @@ fn rendered_table_rows_use_structured_layout_when_inactive(cx: &mut gpui::TestAp
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
         let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
-        let wrap_width = text_wrap_width(window);
+        let wrap_width = text_wrap_width_for_mode(window, editor.mode);
         let selection = editor.selection.clone();
         let row_layout = editor.cached_row_layout(
             &snapshot,
@@ -495,7 +493,7 @@ fn rendered_table_cells_wrap_to_available_width(cx: &mut gpui::TestAppContext) {
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
         let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
-        let wrap_width = text_wrap_width(window);
+        let wrap_width = text_wrap_width_for_mode(window, editor.mode);
         let selection = editor.selection.clone();
         let row_layout = editor.cached_row_layout(
             &snapshot,
@@ -592,7 +590,7 @@ fn rendered_table_shrinks_long_columns_before_short_columns(cx: &mut gpui::TestA
             .cached_display_row(&snapshot, 2, editor.mode, &display_row_state)
             .expect("display row should exist");
         let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
-        let wrap_width = text_wrap_width(window);
+        let wrap_width = text_wrap_width_for_mode(window, editor.mode);
         let selection = editor.selection.clone();
         let row_layout = editor.cached_row_layout(
             &snapshot,
@@ -792,7 +790,7 @@ fn rendered_table_mouse_target_accounts_for_rendered_indent(cx: &mut gpui::TestA
             panic!("expected structured table row layout");
         };
 
-        let second_cell_x = gutter_width()
+        let second_cell_x = left_rail_width(MarkdownEditorMode::Rendered)
             + display_row.rendered_indent_width()
             + table_layout.cells[1].x
             + px(10.);
@@ -949,7 +947,7 @@ fn rendered_mode_actions_follow_wrapped_visual_rows_with_inline_image(
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
         let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
-        let wrap_width = text_wrap_width(window);
+        let wrap_width = text_wrap_width_for_mode(window, editor.mode);
         let selection = editor.selection.clone();
         let row_layout = editor.cached_row_layout(
             &snapshot,
@@ -1035,7 +1033,7 @@ fn rendered_mode_select_actions_follow_wrapped_visual_rows_with_inline_image(
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
         let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
-        let wrap_width = text_wrap_width(window);
+        let wrap_width = text_wrap_width_for_mode(window, editor.mode);
         let selection = editor.selection.clone();
         let row_layout = editor.cached_row_layout(
             &snapshot,
@@ -1525,8 +1523,11 @@ fn rendered_task_checkbox_click_positions(
     );
 
     (
-        gutter_width() + indent_width + x_start + (x_end - x_start) * 0.5,
-        gutter_width() + indent_width + x_end + px(6.),
+        left_rail_width(MarkdownEditorMode::Rendered)
+            + indent_width
+            + x_start
+            + (x_end - x_start) * 0.5,
+        left_rail_width(MarkdownEditorMode::Rendered) + indent_width + x_end + px(6.),
     )
 }
 
@@ -1748,7 +1749,12 @@ fn rendered_mode_does_not_cache_loading_image_block_layout(cx: &mut gpui::TestAp
     );
 
     editor.read_with(cx, |editor, _| {
-        assert!(!editor.row_layout_cache.keys().any(|key| key.row == 0));
+        assert!(
+            !editor
+                .row_layout_cache
+                .keys()
+                .any(|key| key.item_index == 0)
+        );
     });
 }
 
@@ -2013,8 +2019,18 @@ fn inline_atom_deferred_remeasure_only_clears_affected_row(cx: &mut gpui::TestAp
         assert_eq!(editor.row_layout_cache.len(), 2);
 
         editor.flush_inline_atom_row_remeasures(cx);
-        assert!(!editor.row_layout_cache.keys().any(|key| key.row == 0));
-        assert!(editor.row_layout_cache.keys().any(|key| key.row == 1));
+        assert!(
+            !editor
+                .row_layout_cache
+                .keys()
+                .any(|key| key.item_index == 0)
+        );
+        assert!(
+            editor
+                .row_layout_cache
+                .keys()
+                .any(|key| key.item_index == 1)
+        );
     });
 }
 

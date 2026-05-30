@@ -7,7 +7,6 @@ use md_text::{Point, SelectionGoal};
 use super::{
     TextBufferSnapshot, clip_cursor_in_text_snapshot,
     display_model::DisplayRow,
-    gutter_width,
     layout::{DisplayRowTextLayout, VisualDisplayRow},
     visual_row::{
         display_offset_for_visual_row_x, display_x_for_offset, source_offset_for_display_offset,
@@ -21,9 +20,10 @@ pub(super) fn mouse_target_for_text_layout(
     visual_row_index: usize,
     visual_row: &VisualDisplayRow,
     x: Pixels,
+    left_rail_width: Pixels,
     text_layout: &DisplayRowTextLayout,
 ) -> (Point, SelectionGoal) {
-    let text_x = (x - gutter_width() - display_row.rendered_indent_width()).max(px(0.));
+    let text_x = (x - left_rail_width - display_row.rendered_indent_width()).max(px(0.));
     let display_offset = display_offset_for_visual_row_x(text_layout, visual_row, text_x);
     let source_offset =
         source_offset_for_display_offset(display_row, &text_layout.fragments, display_offset);
@@ -45,9 +45,10 @@ pub(super) fn task_checkbox_source_range_for_text_layout_click(
     display_row: &DisplayRow,
     visual_row: &VisualDisplayRow,
     x: Pixels,
+    left_rail_width: Pixels,
     text_layout: &DisplayRowTextLayout,
 ) -> Option<Range<usize>> {
-    let text_x = (x - gutter_width() - display_row.rendered_indent_width()).max(px(0.));
+    let text_x = (x - left_rail_width - display_row.rendered_indent_width()).max(px(0.));
 
     for operation in display_row.projection.operations() {
         let MarkdownProjectionOperation::Replace {

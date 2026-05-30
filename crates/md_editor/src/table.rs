@@ -8,7 +8,7 @@ use markdown_wysiwyg::{
 };
 use md_buffer::BufferSnapshot;
 use md_text::{Point, Selection, SelectionGoal};
-use md_theme::{editor_palette, gutter_width};
+use md_theme::editor_palette;
 
 use super::{
     MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, VisualLineBoundary, clip_cursor,
@@ -213,7 +213,10 @@ impl DisplayTableRowLayout {
         x: gpui::Pixels,
         indent_width: Pixels,
     ) -> (Point, SelectionGoal) {
-        let point = self.point_for_x(snapshot, x - gutter_width() - indent_width);
+        let point = self.point_for_x(
+            snapshot,
+            x - super::left_rail_width(super::MarkdownEditorMode::Rendered) - indent_width,
+        );
         let source_offset = snapshot.as_text_snapshot().point_to_offset(point);
         (
             point,

@@ -6,9 +6,7 @@ use md_text::{Bias, BufferSnapshot as TextBufferSnapshot, Point, Selection, Sele
 
 use super::{
     MarkdownEditorMode, MdListState, TransactionSelectionState, merge_overlapping_row_ranges,
-    rendered_element::{
-        projection_replacement_range_at_cursor, rendered_element_range_at_cursor,
-    },
+    rendered_element::{projection_replacement_range_at_cursor, rendered_element_range_at_cursor},
     source_range_to_row_range,
 };
 
@@ -89,6 +87,16 @@ pub(crate) fn reveal_selection_head_row_in_text_snapshot(
     let cursor = clip_cursor_in_text_snapshot(snapshot, selection.head());
     let row = (cursor.row as usize).min(item_count.saturating_sub(1));
     display_list_state.scroll_to_reveal_item(row);
+}
+
+pub(crate) fn reveal_selection_item(display_list_state: &MdListState, item_index: Option<usize>) {
+    let item_count = display_list_state.item_count();
+    if item_count == 0 {
+        return;
+    }
+
+    let item_index = item_index.unwrap_or(0).min(item_count.saturating_sub(1));
+    display_list_state.scroll_to_reveal_item(item_index);
 }
 
 pub(crate) fn apply_text_wrap_width_change(

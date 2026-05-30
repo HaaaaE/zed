@@ -7,7 +7,9 @@ use crate::rendered_element::RenderedElementDescriptor;
 
 #[derive(Clone, Debug)]
 pub struct DisplayRow {
+    pub(crate) item_index: u32,
     pub row: u32,
+    pub(crate) source_row_range: Range<usize>,
     pub text: String,
     pub(crate) source_text: String,
     pub(crate) source_range: Range<usize>,
@@ -25,6 +27,8 @@ pub struct DisplayRow {
 impl PartialEq for DisplayRow {
     fn eq(&self, other: &Self) -> bool {
         self.row == other.row
+            && self.item_index == other.item_index
+            && self.source_row_range == other.source_row_range
             && self.text == other.text
             && self.rendered_indent_level == other.rendered_indent_level
     }

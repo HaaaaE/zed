@@ -94,9 +94,7 @@ fn rendered_styled_segments_apply_inline_semantics() {
 }
 
 #[gpui::test]
-fn mouse_target_for_wrapped_row_end_keeps_clicked_visual_row_goal(
-    cx: &mut gpui::TestAppContext,
-) {
+fn mouse_target_for_wrapped_row_end_keeps_clicked_visual_row_goal(cx: &mut gpui::TestAppContext) {
     let mut buffer = Buffer::local("abcdefghij\n");
     let snapshot = buffer.snapshot();
     let Some(display_row) = display_rows(&snapshot, 0..1).into_iter().next() else {
@@ -139,6 +137,7 @@ fn mouse_target_for_wrapped_row_end_keeps_clicked_visual_row_goal(
         0,
         &first_visual_row,
         gutter_width() + row_end_x,
+        gutter_width(),
         &text_layout,
     );
 
@@ -190,6 +189,7 @@ fn mouse_target_for_wrapped_row_uses_visual_row_local_x(cx: &mut gpui::TestAppCo
         1,
         &second_visual_row,
         gutter_width(),
+        gutter_width(),
         &text_layout,
     );
     let (middle_point, middle_goal) = mouse_target_for_text_layout(
@@ -198,6 +198,7 @@ fn mouse_target_for_wrapped_row_uses_visual_row_local_x(cx: &mut gpui::TestAppCo
         1,
         &second_visual_row,
         gutter_width() + local_x,
+        gutter_width(),
         &text_layout,
     );
 

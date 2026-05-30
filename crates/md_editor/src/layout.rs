@@ -8,7 +8,7 @@ use markdown_wysiwyg::{MarkdownBlockKind, MarkdownInlineKind};
 use md_assets::EDITOR_FONT_FAMILY;
 use md_buffer::BufferSnapshot;
 use md_text::{Point, Selection};
-use md_theme::{default_row_metrics, editor_palette, gutter_width, heading_row_metrics};
+use md_theme::{default_row_metrics, editor_palette, heading_row_metrics};
 
 use super::{
     DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, DisplayTableRowLayout,
@@ -16,7 +16,7 @@ use super::{
     active_source_range_for_selection,
     block::DisplayBlockLayout,
     display_model::{DisplayRow, DisplayTextStyle, StyledDisplaySegment},
-    inactive_rendered_element_source_ranges_for_selection, ranges_overlap,
+    inactive_rendered_element_source_ranges_for_selection, left_rail_width, ranges_overlap,
     rendered_element_descriptor_for_inline_span_in_row,
     visual_row::display_x_for_offset,
 };
@@ -103,7 +103,9 @@ impl DisplayRowLayout {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct DisplayRowCacheKey {
     pub(super) version: md_text::Global,
-    pub(super) row: u32,
+    pub(super) item_index: u32,
+    pub(super) source_range: Range<usize>,
+    pub(super) source_row_range: Range<usize>,
     pub(super) mode: MarkdownEditorMode,
     pub(super) active_projection_source_ranges: Vec<Range<usize>>,
 }
@@ -141,7 +143,9 @@ impl DisplayRowProjectionState {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct RowLayoutCacheKey {
-    pub(super) row: u32,
+    pub(super) item_index: u32,
+    pub(super) source_range: Range<usize>,
+    pub(super) source_row_range: Range<usize>,
     pub(super) mode: MarkdownEditorMode,
     pub(super) row_style: RowDisplayStyle,
     pub(super) wrap_width: gpui::Pixels,
@@ -151,14 +155,20 @@ pub(super) struct RowLayoutCacheKey {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct RowLayoutInputCacheKey {
     pub(super) version: md_text::Global,
-    pub(super) row: u32,
+    pub(super) item_index: u32,
+    pub(super) source_range: Range<usize>,
+    pub(super) source_row_range: Range<usize>,
     pub(super) mode: MarkdownEditorMode,
     pub(super) active_projection_source_ranges: Vec<Range<usize>>,
     pub(super) row_style: RowDisplayStyle,
 }
 
 pub(super) fn text_wrap_width(window: &Window) -> gpui::Pixels {
-    (window.bounds().size.width - gutter_width()).max(px(1.))
+    text_wrap_width_for_mode(window, MarkdownEditorMode::Source)
+}
+
+pub(super) fn text_wrap_width_for_mode(window: &Window, mode: MarkdownEditorMode) -> gpui::Pixels {
+    (window.bounds().size.width - left_rail_width(mode)).max(px(1.))
 }
 
 pub(super) fn effective_text_wrap_width(

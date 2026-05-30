@@ -14,14 +14,14 @@
 
 ## Key Changes
 
-- 增加 rendered-only `RenderedDisplayIndex`，按 snapshot version 缓存，稳定映射：
+- [done 2026-05-30] 增加 rendered-only `RenderedDisplayIndex`，按 snapshot version 缓存，稳定映射：
   - `item_index -> source_range/row_range/kind`
   - `source_row/source_offset -> item_index`
   - rendered mode 的 item count 来自 index，source mode 继续来自 text row count。
-- 引入 `DisplayItemId` 和 `DisplayItemLayout` 适配层；先让每个 item 仍包装现有 `DisplayRow`，再逐步支持 paragraph/code/thematic/link-ref 等非 1:1 item。
-- 将 rendered gutter 改成 mode-aware left rail：
+- [partial 2026-05-30] 引入 `DisplayItemId` 和 item/cache key 适配层；当前仍由 `DisplayRow` 承载 item layout，普通安全 paragraph 可合并，table/code/html/link-ref 等保留可寻址 item/row，后续再补 `DisplayItemLayout`。
+- [done 2026-05-30] 将 rendered gutter 改成 mode-aware left rail：
   - source mode 保留 `48px` 行号。
-  - rendered mode 最终使用 `24px` rail，不显示 source 行号，只在 active item 显示 subtle marker。
+  - rendered mode 使用 `24px` rail，不显示 source 行号，只在 active item 显示 subtle marker。
   - 所有 mouse x、block/table hit-test、wrap width 从硬编码 `gutter_width()` 改为 `left_rail_width(mode)`。
 - 保持 selection/copy/cut/delete/backspace 的 source range 语义；新增 item 级 projection/highlight，把 source selection clip 到 item source range 后投影到 display ranges。
 
@@ -29,8 +29,8 @@
 
 ### Rendered Item Index
 
-- `Paragraph`：inactive 时合并同一个 Markdown paragraph 的多 source rows，soft break 渲染为空格；超过 `8192 bytes` 或 `128 rows` 的 paragraph 降级为 row-chunked items，避免超大 shaping。
-- `PipeTable`：继续一 source row 一个 rendered item；inactive 走现有 structured table；active reveal 当前 source row。
+- [partial 2026-05-30] `Paragraph`：inactive 时合并普通安全 Markdown paragraph 的多 source rows，soft break 渲染为空格；含 image/math/task/list/blockquote 等需要更细布局的段落暂保留 row item。
+- [done 2026-05-30] `PipeTable`：继续一 source row 一个 rendered item；inactive 走现有 structured table；active reveal 当前 source row。
 - `FencedCodeBlock`/`IndentedCodeBlock`：inactive 合成 code block item，隐藏 fence/info marker，保留 raw code 内容与换行；cursor 在 fence/info 行时 reveal 该 source row。
 - `ThematicBreak`：inactive 单 item 画 horizontal rule；active 时显示 source row。
 - `LinkReferenceDefinition`：inactive 保留 0-height item 以稳定 index；active 时显示 source text。
@@ -39,7 +39,7 @@
 ### Projection and Text Layout
 
 - 扩展 rendered projection 使用现有 `MarkdownProjectionOperation::Replace`：
-  - inactive soft break -> `" "`
+  - [done 2026-05-30] inactive soft break -> `" "`
   - inactive hard break -> forced visual break
 - 将 text layout 从单 `ShapedLine` 升级为可包含 forced breaks 的 flow layout；`VisualDisplayRow` 记录所属 shaped line，所有 `display_x_for_offset`、mouse target、selection bounds 通过 layout helper 访问，不再直接依赖单行 `shaped_line`。
 - paragraph item 的 `projection.source_to_display/display_to_source` 必须覆盖跨行 source range，包含 newline replacement、inline marker hiding、entity/escape replacement、inline atom insertion。

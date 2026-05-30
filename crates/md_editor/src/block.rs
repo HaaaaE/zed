@@ -7,7 +7,7 @@ use gpui::{
 use md_assets::EDITOR_FONT_FAMILY;
 use md_buffer::BufferSnapshot;
 use md_text::{Point, Selection, SelectionGoal};
-use md_theme::{editor_palette, gutter_width};
+use md_theme::editor_palette;
 
 use super::rendered_element::{
     RenderedElementDescriptor, RenderedElementKind, RenderedElementPlacement,
@@ -165,7 +165,10 @@ impl DisplayBlockLayout {
         x: gpui::Pixels,
         indent_width: Pixels,
     ) -> Point {
-        self.point_for_x(snapshot, x - gutter_width() - indent_width)
+        self.point_for_x(
+            snapshot,
+            x - super::left_rail_width(super::MarkdownEditorMode::Rendered) - indent_width,
+        )
     }
 
     #[cfg(test)]
