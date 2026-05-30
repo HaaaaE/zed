@@ -267,6 +267,84 @@ fn mouse_target_for_wrapped_row_uses_visual_row_local_x(cx: &mut gpui::TestAppCo
     assert_eq!(middle_goal, visual_horizontal_goal(1, local_x));
 }
 
+#[gpui::test]
+fn rendered_soft_break_caret_stays_inside_paragraph_item(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("first\nsecond\n\nnext\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(1, 0));
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        let snapshot = editor.buffer.snapshot();
+        let index = rendered_display_index_for_tests(&snapshot);
+        let paragraph_item = index
+            .item_index_for_source_row(1)
+            .expect("soft-break row should map to paragraph item");
+        assert_eq!(index.item_index_for_source_row(0), Some(paragraph_item));
+
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, paragraph_item, editor.mode, &display_row_state)
+            .expect("paragraph display row should exist");
+        assert_eq!(display_row.source_row_range, 0..2);
+        assert_eq!(display_row.text, "first\nsecond");
+        assert!(display_row.contains_source_point(editor.cursor()));
+
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            text_wrap_width_for_mode(window, editor.mode),
+            false,
+            window,
+            cx,
+        );
+        let DisplayRowLayout::Text(text_layout) = row_layout else {
+            panic!("expected paragraph text layout");
+        };
+        assert_eq!(
+            text_layout
+                .visual_rows
+                .iter()
+                .map(|visual_row| visual_row.display_range.clone())
+                .collect::<Vec<_>>(),
+            vec![0.."first\n".len(), "first\n".len().."first\nsecond".len()]
+        );
+
+        assert!(
+            caret_position_for_visual_row(
+                snapshot.as_text_snapshot(),
+                &display_row,
+                &selection,
+                &text_layout,
+                0,
+                &text_layout.visual_rows[0],
+            )
+            .is_none()
+        );
+        assert!(
+            caret_position_for_visual_row(
+                snapshot.as_text_snapshot(),
+                &display_row,
+                &selection,
+                &text_layout,
+                1,
+                &text_layout.visual_rows[1],
+            )
+            .is_some()
+        );
+    });
+}
+
 #[test]
 fn fragment_text_for_visual_row_clips_to_visible_range() {
     let visual_row = VisualDisplayRow {

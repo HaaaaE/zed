@@ -254,7 +254,7 @@ fn rendered_merged_paragraph_projects_across_source_rows() {
     );
 
     assert_eq!(row.source_row_range, 0..2);
-    assert_eq!(row.text, "first bold continued & escaped *");
+    assert_eq!(row.text, "first bold\ncontinued & escaped *");
 
     let newline = source.find('\n').expect("expected soft break");
     let continued = source
@@ -264,15 +264,15 @@ fn rendered_merged_paragraph_projects_across_source_rows() {
     let escaped = source.find("\\*").expect("expected escape");
 
     assert_eq!(row.source_to_display(newline), "first bold".len());
-    assert_eq!(row.source_to_display(newline + 1), "first bold ".len());
-    assert_eq!(row.source_to_display(continued), "first bold ".len());
-    assert_eq!(row.source_to_display(entity), "first bold continued ".len());
+    assert_eq!(row.source_to_display(newline + 1), "first bold\n".len());
+    assert_eq!(row.source_to_display(continued), "first bold\n".len());
+    assert_eq!(row.source_to_display(entity), "first bold\ncontinued ".len());
     assert_eq!(
         row.source_to_display(escaped),
-        "first bold continued & escaped ".len()
+        "first bold\ncontinued & escaped ".len()
     );
-    assert_eq!(row.display_to_source("first bold ".len()), newline + 1);
-    assert_eq!(row.display_to_source("first bold continued ".len()), entity);
+    assert_eq!(row.display_to_source("first bold\n".len()), newline + 1);
+    assert_eq!(row.display_to_source("first bold\ncontinued ".len()), entity);
 }
 
 #[test]

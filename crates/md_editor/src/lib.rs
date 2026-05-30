@@ -1938,7 +1938,7 @@ impl Render for MarkdownEditor {
                             return div().into_any_element();
                         };
 
-                        let is_cursor_row = display_row.row == cursor.row;
+                        let is_cursor_row = display_row.contains_source_point(cursor);
                         let row_style = default_metrics.into();
                         let text_layout = this.cached_source_text_layout(
                             &display_row,
@@ -1992,7 +1992,7 @@ impl Render for MarkdownEditor {
                             return div().into_any_element();
                         };
 
-                        let is_cursor_row = display_row.row == cursor.row;
+                        let is_cursor_row = display_row.contains_source_point(cursor);
                         let row_style =
                             row_display_style_for_display_row(&snapshot, &display_row, mode);
                         let row_layout = this.cached_row_layout(
@@ -2408,7 +2408,12 @@ fn project_display_row_text(
     }
 
     let mut display_text = project_rendered_row_text(source_text, row_source_range, projection);
-    restore_rendered_soft_breaks(&mut display_text, row_source_range, inline_spans, projection);
+    restore_rendered_soft_breaks(
+        &mut display_text,
+        row_source_range,
+        inline_spans,
+        projection,
+    );
     let mut insertions = Vec::new();
     for span in inline_spans {
         let descriptor = rendered_element_descriptors
@@ -2693,6 +2698,7 @@ mod test_support {
 
     pub(super) use super::*;
     pub(super) use crate::layout::text_runs_on_char_boundaries;
+    pub(super) use crate::render::caret_position_for_visual_row;
 
     pub(super) fn image_descriptor(
         source_range: Range<usize>,

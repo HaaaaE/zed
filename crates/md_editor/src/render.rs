@@ -278,7 +278,7 @@ fn render_fragments_for_visual_row(
     elements
 }
 
-fn caret_position_for_visual_row(
+pub(super) fn caret_position_for_visual_row(
     snapshot: &TextBufferSnapshot,
     display_row: &DisplayRow,
     selection: &Selection<Point>,
@@ -291,7 +291,7 @@ fn caret_position_for_visual_row(
     }
 
     let cursor = selection.head();
-    if display_row.row != cursor.row {
+    if !display_row.contains_source_point(cursor) {
         return None;
     }
 

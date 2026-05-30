@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use gpui::{FontWeight, Pixels, px};
 use markdown_wysiwyg::{MarkdownBlock, MarkdownInlineSpan, MarkdownProjectionMap};
+use md_text::Point;
 
 use crate::{rendered_element::RenderedElementDescriptor, rendered_index::DisplayItemId};
 
@@ -39,6 +40,10 @@ impl PartialEq for DisplayRow {
 impl Eq for DisplayRow {}
 
 impl DisplayRow {
+    pub(crate) fn contains_source_point(&self, point: Point) -> bool {
+        self.source_row_range.contains(&(point.row as usize))
+    }
+
     pub(crate) fn rendered_indent_width(&self) -> Pixels {
         px(f32::from(self.rendered_indent_level) * 24.)
     }
