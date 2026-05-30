@@ -37,6 +37,36 @@ pub fn replace_selection(
     (collapsed_selection(cursor), transaction_id)
 }
 
+pub(crate) fn insert_newline_in_mode(
+    buffer: &mut Buffer,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+) -> (Selection<Point>, Option<md_text::TransactionId>) {
+    let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
+    let insert_text = match mode {
+        MarkdownEditorMode::Source => {
+            let current_line_indent =
+                current_line_indent_in_text_snapshot(buffer.as_text_snapshot(), selection.head());
+            format!("\n{current_line_indent}")
+        }
+        MarkdownEditorMode::Rendered => "\n\n".to_string(),
+    };
+
+    replace_selection(buffer, &selection, &insert_text)
+}
+
+pub(crate) fn insert_soft_break_in_mode(
+    buffer: &mut Buffer,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+) -> (Selection<Point>, Option<md_text::TransactionId>) {
+    if mode == MarkdownEditorMode::Source {
+        return insert_newline_in_mode(buffer, selection, mode);
+    }
+
+    replace_selection(buffer, selection, "\n")
+}
+
 pub(crate) fn backspace_selection_in_mode(
     buffer: &mut Buffer,
     selection: &Selection<Point>,

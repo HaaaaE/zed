@@ -12,11 +12,14 @@
 - 已完成 blank run 解释：连续物理空白 source rows 按奇数规范长度渲染，偶数 run 的多余行标记为 `IgnoredExtra`，渲染阶段不改写源码。
 - 已完成 `row_to_item` 映射调整：`EmptyParagraph` 拥有自己的 item；`Separator` / `IgnoredExtra` 不生成 item，只映射到邻近可渲染 item 以维持滚动、selection reveal 和缓存定位。
 - 已新增索引测试覆盖 `A\n\nB`、`A\n\n\nB`、`A\n\n\n\nB`、`A\n\n\n\n\nB`、`A\n\n\n\n\n\nB` 的 empty paragraph 数量与 blank role。
+- 已完成第二片：新增 `InsertSoftBreak` action 和默认 `shift-enter` keybinding；Source 模式 Enter 仍保留自动缩进；Rendered 模式 Enter 先落基础段分割，写入规范 separator `\n\n`；Rendered 模式 Shift+Enter 写入普通 `\n` 作为段内软断行。
+- 已新增编辑测试覆盖 rendered Enter、rendered Shift+Enter、Source Enter 自动缩进。
 - 验证通过：
   - `cargo test -p md_editor rendered_display_index --lib`
+  - `cargo test -p md_editor enter --lib`
   - `cargo test -p md_editor --lib`
   - `cargo check -p updraft_editor`
-- 剩余主要工作：rendered 模式 Enter / Shift+Enter / Backspace / Delete 的段结构编辑；空段点击/caret 交互测试；paragraph 内普通 `\n` 的 rendered 视觉断行语义从“inactive 空格投影”切换到段内断行。
+- 剩余主要工作：Rendered 模式连续 Enter / 空段 Enter 的 `2n + 1` blank run 规范化；Backspace / Delete 的空段删除和跨段合并；空段点击/caret 交互测试；paragraph 内普通 `\n` 的 rendered 视觉断行语义从“inactive 空格投影”切换到段内断行。
 
 ## Key Changes
 

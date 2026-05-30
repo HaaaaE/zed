@@ -94,6 +94,7 @@ pub const DEFAULT_EDITOR_KEYBINDINGS: &[KeyBindingSpec] = &[
     key_binding("backspace", "Backspace"),
     key_binding("delete", "Delete"),
     key_binding("enter", "InsertNewline"),
+    key_binding("shift-enter", "InsertSoftBreak"),
     key_binding("tab", "Tab"),
     key_binding("ctrl-z", "Undo"),
     key_binding("cmd-z", "Undo"),

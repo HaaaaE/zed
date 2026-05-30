@@ -2681,6 +2681,45 @@ fn replace_selection_replaces_active_selection() {
 }
 
 #[test]
+fn rendered_enter_splits_paragraph_with_canonical_separator() {
+    let mut buffer = Buffer::local("ab");
+    let selection = collapsed_selection(Point::new(0, 1));
+
+    let (selection, transaction_id) =
+        insert_newline_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "a\n\nb");
+    assert_eq!(selection, collapsed_selection(Point::new(2, 0)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn rendered_shift_enter_inserts_soft_break() {
+    let mut buffer = Buffer::local("ab");
+    let selection = collapsed_selection(Point::new(0, 1));
+
+    let (selection, transaction_id) =
+        insert_soft_break_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "a\nb");
+    assert_eq!(selection, collapsed_selection(Point::new(1, 0)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn source_enter_preserves_auto_indent() {
+    let mut buffer = Buffer::local("    ab");
+    let selection = collapsed_selection(Point::new(0, "    a".len() as u32));
+
+    let (selection, transaction_id) =
+        insert_newline_in_mode(&mut buffer, &selection, MarkdownEditorMode::Source);
+
+    assert_eq!(buffer.text(), "    a\n    b");
+    assert_eq!(selection, collapsed_selection(Point::new(1, 4)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
 fn backspace_selection_deletes_previous_utf8_character() {
     let mut buffer = Buffer::local("aβ");
     let selection = collapsed_selection(Point::new(0, "aβ".len() as u32));

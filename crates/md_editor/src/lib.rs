@@ -53,7 +53,8 @@ use block::{
 use display_model::{DisplayInsertion, DisplayRow, DisplayTextStyle, StyledDisplaySegment};
 pub use edit::{backspace_selection, current_line_indent, delete_selection, replace_selection};
 use edit::{
-    backspace_selection_in_mode, current_line_indent_in_text_snapshot, delete_selection_in_mode,
+    backspace_selection_in_mode, delete_selection_in_mode, insert_newline_in_mode,
+    insert_soft_break_in_mode,
 };
 use inline_atom::{
     DisplayInlineAtom, DisplayInlineAtomKind, DisplayInlineFragment, DisplayInlineRowInputs,
@@ -156,6 +157,7 @@ gpui::actions!(
         Backspace,
         Delete,
         InsertNewline,
+        InsertSoftBreak,
         Tab,
         Undo,
         Redo,
@@ -205,6 +207,7 @@ fn editor_keybindings() -> Vec<KeyBinding> {
                 "Backspace" => KeyBinding::new(spec.keystroke, Backspace, context),
                 "Delete" => KeyBinding::new(spec.keystroke, Delete, context),
                 "InsertNewline" => KeyBinding::new(spec.keystroke, InsertNewline, context),
+                "InsertSoftBreak" => KeyBinding::new(spec.keystroke, InsertSoftBreak, context),
                 "Tab" => KeyBinding::new(spec.keystroke, Tab, context),
                 "Undo" => KeyBinding::new(spec.keystroke, Undo, context),
                 "Redo" => KeyBinding::new(spec.keystroke, Redo, context),
@@ -1259,10 +1262,16 @@ impl MarkdownEditor {
     }
 
     pub fn insert_newline(&mut self, _: &InsertNewline, _: &mut Window, cx: &mut Context<Self>) {
-        let current_line_indent =
-            current_line_indent_in_text_snapshot(self.buffer.as_text_snapshot(), self.cursor());
-        let insert_text = format!("\n{current_line_indent}");
-        self.replace_current_selection(&insert_text, cx);
+        self.insert_line_break(cx, false);
+    }
+
+    pub fn insert_soft_break(
+        &mut self,
+        _: &InsertSoftBreak,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.insert_line_break(cx, true);
     }
 
     pub fn tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
@@ -1384,6 +1393,29 @@ impl MarkdownEditor {
         let buffer_len_before = self.buffer.len();
         let (selection, transaction_id) =
             replace_selection(&mut self.buffer, &self.selection, text);
+        let changed = transaction_id.is_some();
+        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
+        self.selection = selection;
+        self.record_selection_history(transaction_id, selection_before, self.selection.clone());
+        self.notify_after_edit(
+            changed,
+            row_count_before,
+            &previous_selection,
+            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+            cx,
+        );
+    }
+
+    fn insert_line_break(&mut self, cx: &mut Context<Self>, soft_break: bool) {
+        let selection_before = self.selection.clone();
+        let previous_selection = self.selection.clone();
+        let row_count_before = self.display_list_state.item_count();
+        let buffer_len_before = self.buffer.len();
+        let (selection, transaction_id) = if soft_break {
+            insert_soft_break_in_mode(&mut self.buffer, &self.selection, self.mode)
+        } else {
+            insert_newline_in_mode(&mut self.buffer, &self.selection, self.mode)
+        };
         let changed = transaction_id.is_some();
         let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
         self.selection = selection;
@@ -2027,6 +2059,7 @@ impl Render for MarkdownEditor {
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::insert_newline))
+            .on_action(cx.listener(Self::insert_soft_break))
             .on_action(cx.listener(Self::tab))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
