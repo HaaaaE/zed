@@ -260,9 +260,12 @@ pub(super) fn text_layout_for_display_row_inputs(
         forced_break_visual_rows_with_wrap(
             display_text,
             &fragments,
+            &inputs.text_runs,
             &inputs.shaped_line,
             row_style,
             wrap_width,
+            inputs.has_inline_atoms,
+            window,
             cx,
         )
     } else if inputs.has_inline_atoms {
@@ -357,9 +360,12 @@ pub(super) fn forced_break_visual_rows(
 pub(super) fn forced_break_visual_rows_with_wrap(
     display_text: &str,
     fragments: &[DisplayInlineFragment],
+    text_runs: &[TextRun],
     shaped_line: &gpui::ShapedLine,
     row_style: RowDisplayStyle,
     wrap_width: gpui::Pixels,
+    has_inline_atoms: bool,
+    window: &mut Window,
     cx: &mut App,
 ) -> Vec<VisualDisplayRow> {
     let mut rows = Vec::new();
@@ -372,9 +378,12 @@ pub(super) fn forced_break_visual_rows_with_wrap(
             &mut top,
             display_text,
             fragments,
+            text_runs,
             shaped_line,
             row_style,
             wrap_width,
+            has_inline_atoms,
+            window,
             cx,
             start..break_index,
             Some(break_index),
@@ -387,9 +396,12 @@ pub(super) fn forced_break_visual_rows_with_wrap(
         &mut top,
         display_text,
         fragments,
+        text_runs,
         shaped_line,
         row_style,
         wrap_width,
+        has_inline_atoms,
+        window,
         cx,
         start..display_text.len(),
         None,
@@ -403,9 +415,12 @@ fn push_wrapped_forced_break_segment(
     top: &mut gpui::Pixels,
     display_text: &str,
     fragments: &[DisplayInlineFragment],
+    text_runs: &[TextRun],
     shaped_line: &gpui::ShapedLine,
     row_style: RowDisplayStyle,
     wrap_width: gpui::Pixels,
+    has_inline_atoms: bool,
+    window: &mut Window,
     cx: &mut App,
     display_range: Range<usize>,
     trailing_break: Option<usize>,
@@ -423,15 +438,30 @@ fn push_wrapped_forced_break_segment(
             top: px(0.),
         }]
     } else {
-        visual_rows_for_display_range(
-            display_text,
-            fragments,
-            shaped_line,
-            row_style,
-            wrap_width,
-            cx,
-            display_range.clone(),
-        )
+        let shaped_rows = (!has_inline_atoms)
+            .then(|| {
+                visual_rows_for_shaped_display_range(
+                    display_text,
+                    text_runs,
+                    shaped_line,
+                    row_style,
+                    wrap_width,
+                    window,
+                    display_range.clone(),
+                )
+            })
+            .flatten();
+        shaped_rows.unwrap_or_else(|| {
+            visual_rows_for_display_range(
+                display_text,
+                fragments,
+                shaped_line,
+                row_style,
+                wrap_width,
+                cx,
+                display_range.clone(),
+            )
+        })
     };
 
     if let Some(last) = segment_rows.last_mut() {
@@ -444,6 +474,113 @@ fn push_wrapped_forced_break_segment(
         *top += row.height;
         rows.push(row);
     }
+}
+
+fn visual_rows_for_shaped_display_range(
+    display_text: &str,
+    text_runs: &[TextRun],
+    shaped_line: &gpui::ShapedLine,
+    row_style: RowDisplayStyle,
+    wrap_width: gpui::Pixels,
+    window: &mut Window,
+    display_range: Range<usize>,
+) -> Option<Vec<VisualDisplayRow>> {
+    let segment_text = display_text.get(display_range.clone())?;
+    let text_runs = text_runs_for_display_range(text_runs, &display_range);
+    let wrapped_lines = window
+        .text_system()
+        .shape_text(
+            SharedString::from(segment_text.to_string()),
+            row_style.text_size,
+            &text_runs,
+            Some(wrap_width),
+            None,
+        )
+        .ok()?;
+    let wrapped_line = wrapped_lines.first()?;
+
+    Some(visual_rows_for_wrapped_line_in_display_range(
+        wrapped_line,
+        shaped_line,
+        row_style,
+        display_range.start,
+    ))
+}
+
+fn text_runs_for_display_range(
+    text_runs: &[TextRun],
+    display_range: &Range<usize>,
+) -> Vec<TextRun> {
+    let mut range_runs = Vec::new();
+    let mut run_start = 0;
+    for run in text_runs {
+        let run_end = run_start + run.len;
+        let start = run_start.max(display_range.start);
+        let end = run_end.min(display_range.end);
+        if start < end {
+            let mut run = run.clone();
+            run.len = end - start;
+            range_runs.push(run);
+        }
+        run_start = run_end;
+    }
+
+    if range_runs.is_empty() {
+        text_runs_for_segment_lengths([(0, DisplayTextStyle::default())])
+    } else {
+        range_runs
+    }
+}
+
+fn visual_rows_for_wrapped_line_in_display_range(
+    wrapped_line: &gpui::WrappedLine,
+    shaped_line: &gpui::ShapedLine,
+    row_style: RowDisplayStyle,
+    display_range_start: usize,
+) -> Vec<VisualDisplayRow> {
+    let mut rows = Vec::new();
+    let mut start = 0;
+    let mut top = px(0.);
+
+    for wrap_boundary in wrapped_line.wrap_boundaries() {
+        let Some(glyph) = wrap_boundary_glyph(wrapped_line, *wrap_boundary) else {
+            return vec![VisualDisplayRow {
+                line_start_x: display_x_for_offset(&[], shaped_line, display_range_start),
+                height: row_style.line_height,
+                display_range: display_range_start..display_range_start + wrapped_line.len(),
+                top: px(0.),
+            }];
+        };
+        let boundary_index = wrapped_line.text.floor_char_boundary(glyph.index);
+        if boundary_index < start || boundary_index > wrapped_line.len() {
+            return vec![VisualDisplayRow {
+                line_start_x: display_x_for_offset(&[], shaped_line, display_range_start),
+                height: row_style.line_height,
+                display_range: display_range_start..display_range_start + wrapped_line.len(),
+                top: px(0.),
+            }];
+        }
+        if boundary_index == start {
+            continue;
+        }
+
+        rows.push(VisualDisplayRow {
+            line_start_x: display_x_for_offset(&[], shaped_line, display_range_start + start),
+            height: row_style.line_height,
+            display_range: display_range_start + start..display_range_start + boundary_index,
+            top,
+        });
+        start = boundary_index;
+        top += row_style.line_height;
+    }
+
+    rows.push(VisualDisplayRow {
+        line_start_x: display_x_for_offset(&[], shaped_line, display_range_start + start),
+        height: row_style.line_height,
+        display_range: display_range_start + start..display_range_start + wrapped_line.len(),
+        top,
+    });
+    rows
 }
 
 fn visual_rows_for_display_range(

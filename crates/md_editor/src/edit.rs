@@ -6,7 +6,7 @@ use super::rendered_element::{
 };
 use super::{
     MarkdownEditorMode,
-    rendered_index::RenderedDisplayIndex,
+    rendered_index::{RenderedDisplayIndex, RenderedDisplayItemKind},
     selection::{
         HorizontalDirection, clip_selection_in_text_snapshot, collapsed_selection,
         selection_byte_range_in_text_snapshot, selection_for_source_range,
@@ -44,16 +44,78 @@ pub(crate) fn insert_newline_in_mode(
     mode: MarkdownEditorMode,
 ) -> (Selection<Point>, Option<md_text::TransactionId>) {
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
-    let insert_text = match mode {
-        MarkdownEditorMode::Source => {
-            let current_line_indent =
-                current_line_indent_in_text_snapshot(buffer.as_text_snapshot(), selection.head());
-            format!("\n{current_line_indent}")
-        }
-        MarkdownEditorMode::Rendered => "\n\n".to_string(),
-    };
+    if mode == MarkdownEditorMode::Rendered {
+        return insert_rendered_newline(buffer, &selection);
+    }
 
+    let current_line_indent =
+        current_line_indent_in_text_snapshot(buffer.as_text_snapshot(), selection.head());
+    let insert_text = format!("\n{current_line_indent}");
     replace_selection(buffer, &selection, &insert_text)
+}
+
+fn insert_rendered_newline(
+    buffer: &mut Buffer,
+    selection: &Selection<Point>,
+) -> (Selection<Point>, Option<md_text::TransactionId>) {
+    let insertion = rendered_newline_insertion(buffer, selection);
+    let range_start =
+        selection_byte_range_in_text_snapshot(buffer.as_text_snapshot(), selection).start;
+    let (mut selection, transaction_id) = replace_selection(buffer, selection, insertion.text);
+    if insertion.cursor_delta != insertion.text.len() {
+        let cursor = buffer
+            .as_text_snapshot()
+            .offset_to_point(range_start + insertion.cursor_delta);
+        selection = collapsed_selection(cursor);
+    }
+    (selection, transaction_id)
+}
+
+struct RenderedNewlineInsertion {
+    text: &'static str,
+    cursor_delta: usize,
+}
+
+fn rendered_newline_insertion(
+    buffer: &mut Buffer,
+    selection: &Selection<Point>,
+) -> RenderedNewlineInsertion {
+    let default = RenderedNewlineInsertion {
+        text: "\n\n",
+        cursor_delta: "\n\n".len(),
+    };
+    if !selection.is_empty() {
+        return default;
+    }
+
+    let snapshot = buffer.snapshot();
+    let text_snapshot = snapshot.as_text_snapshot();
+    let cursor = selection.head();
+    let source_offset = text_snapshot.point_to_offset(cursor);
+    let index = RenderedDisplayIndex::build(&snapshot);
+    let Some(item_index) = index.item_index_for_source_offset(&snapshot, source_offset) else {
+        return default;
+    };
+    let Some(item) = index.item(item_index) else {
+        return default;
+    };
+    if !matches!(
+        item.kind,
+        RenderedDisplayItemKind::Paragraph | RenderedDisplayItemKind::Heading
+    ) || source_offset != item.source_range.end
+    {
+        return default;
+    }
+
+    let next_row = item.row_range.end;
+    if next_row < text_snapshot.row_count() as usize && source_row_is_blank(&snapshot, next_row) {
+        return default;
+    }
+
+    RenderedNewlineInsertion {
+        text: "\n\n\n",
+        cursor_delta: "\n\n".len(),
+    }
 }
 
 pub(crate) fn insert_soft_break_in_mode(

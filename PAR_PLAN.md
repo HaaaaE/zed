@@ -29,7 +29,19 @@
   - `cargo test -p md_editor canonical_empty_paragraph --lib`
   - `cargo test -p md_editor --lib`
   - `cargo check -p updraft_editor`
-- 剩余主要工作：Rendered 模式段尾连续 Enter 的光标语义细化；空段删除后更完整的跨段合并和光标收敛。
+
+### 2026-05-31
+
+- 已细化 rendered 段尾 Enter：段尾后已有 separator 时创建一个可见空段；最终段尾没有 separator 时补足规范 blank run，并把光标放到生成的 `EmptyParagraph` 上。
+- 已新增最终段尾连续 Enter 测试，确认第一次 Enter 创建可见空段，第二次 Enter 继续增长为空段序列并保持光标在新增空段上。
+- 已修正 softbreak 分段内的 wrap 路径：无 inline atom 的段内视觉换行现在复用普通文本 `shape_text(..., Some(wrap_width))` 的折行测量，保证 `Shift+Enter` 造成的视觉分行和挤压造成的自动分行采用同一套宽度/样式计算。
+- 已加强 softbreak wrap 测试，除确认 softbreak 前后都能产生视觉行外，也逐行校验实际测量宽度不超过当前 wrap width。
+- 验证通过：
+  - `cargo test -p md_editor rendered_enter_at_ --lib`
+  - `cargo test -p md_editor rendered_consecutive_enter_at_final_paragraph_end_grows_empty_paragraphs --lib`
+  - `cargo test -p md_editor rendered_soft_break_ --lib`
+  - `cargo test -p md_editor --lib`
+- 剩余主要工作：跨段 selection 删除的最小规范 blank run 重建；对 `PAR_PLAN.md` 全量要求做完成审计。
 
 ## Key Changes
 

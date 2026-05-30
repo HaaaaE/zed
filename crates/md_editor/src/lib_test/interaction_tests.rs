@@ -2759,6 +2759,72 @@ fn rendered_enter_splits_paragraph_with_canonical_separator() {
 }
 
 #[test]
+fn rendered_enter_at_paragraph_end_creates_empty_paragraph_before_next_paragraph() {
+    let mut buffer = Buffer::local("a\n\nb\n");
+    let selection = collapsed_selection(Point::new(0, 1));
+
+    let (selection, transaction_id) =
+        insert_newline_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "a\n\n\n\nb\n");
+    assert_eq!(selection, collapsed_selection(Point::new(2, 0)));
+    assert!(transaction_id.is_some());
+
+    let snapshot = buffer.snapshot();
+    let index = rendered_display_index_for_tests(&snapshot);
+    let empty_paragraph_count = (0..index.item_count())
+        .filter_map(|item_index| index.item(item_index))
+        .filter(|item| item.kind == rendered_index::RenderedDisplayItemKind::EmptyParagraph)
+        .count();
+    assert_eq!(empty_paragraph_count, 1);
+}
+
+#[test]
+fn rendered_enter_at_final_paragraph_end_creates_visible_empty_paragraph() {
+    let mut buffer = Buffer::local("a");
+    let selection = collapsed_selection(Point::new(0, 1));
+
+    let (selection, transaction_id) =
+        insert_newline_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "a\n\n\n");
+    assert_eq!(selection, collapsed_selection(Point::new(2, 0)));
+    assert!(transaction_id.is_some());
+
+    let snapshot = buffer.snapshot();
+    let index = rendered_display_index_for_tests(&snapshot);
+    let empty_paragraph_count = (0..index.item_count())
+        .filter_map(|item_index| index.item(item_index))
+        .filter(|item| item.kind == rendered_index::RenderedDisplayItemKind::EmptyParagraph)
+        .count();
+    assert_eq!(empty_paragraph_count, 1);
+}
+
+#[test]
+fn rendered_consecutive_enter_at_final_paragraph_end_grows_empty_paragraphs() {
+    let mut buffer = Buffer::local("a");
+    let selection = collapsed_selection(Point::new(0, 1));
+
+    let (selection, first_transaction_id) =
+        insert_newline_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+    let (selection, second_transaction_id) =
+        insert_newline_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "a\n\n\n\n\n");
+    assert_eq!(selection, collapsed_selection(Point::new(4, 0)));
+    assert!(first_transaction_id.is_some());
+    assert!(second_transaction_id.is_some());
+
+    let snapshot = buffer.snapshot();
+    let index = rendered_display_index_for_tests(&snapshot);
+    let empty_paragraph_count = (0..index.item_count())
+        .filter_map(|item_index| index.item(item_index))
+        .filter(|item| item.kind == rendered_index::RenderedDisplayItemKind::EmptyParagraph)
+        .count();
+    assert_eq!(empty_paragraph_count, 2);
+}
+
+#[test]
 fn rendered_shift_enter_inserts_soft_break() {
     let mut buffer = Buffer::local("ab");
     let selection = collapsed_selection(Point::new(0, 1));

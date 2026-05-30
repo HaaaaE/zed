@@ -408,6 +408,21 @@ fn rendered_soft_break_segments_still_wrap(cx: &mut gpui::TestAppContext) {
             "expected visual rows after the soft break: {:?}",
             text_layout.visual_rows
         );
+        let wrap_width = text_wrap_width_for_mode(window, editor.mode);
+        for visual_row in &text_layout.visual_rows {
+            let row_width = display_x_for_offset(
+                &text_layout.fragments,
+                &text_layout.shaped_line,
+                visual_row.display_range.end,
+            ) - visual_row.line_start_x;
+            assert!(
+                row_width <= wrap_width,
+                "soft-break visual row exceeded wrap width: {:?}, width {:?}, wrap {:?}",
+                visual_row,
+                row_width,
+                wrap_width
+            );
+        }
     });
 }
 
