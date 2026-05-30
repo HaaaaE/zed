@@ -257,7 +257,14 @@ pub(super) fn text_layout_for_display_row_inputs(
     let cacheable =
         apply_inline_atom_measurements(&mut fragments, inputs, row_style, inline_atom_measurements);
     let visual_rows = if display_text.contains('\n') {
-        forced_break_visual_rows(display_text, &fragments, &inputs.shaped_line, row_style)
+        forced_break_visual_rows_with_wrap(
+            display_text,
+            &fragments,
+            &inputs.shaped_line,
+            row_style,
+            wrap_width,
+            cx,
+        )
     } else if inputs.has_inline_atoms {
         visual_rows_for_fragments(
             display_text,
@@ -312,6 +319,7 @@ pub(super) fn unwrapped_visual_rows_if_fits(
     (shaped_line_width <= wrap_width).then(|| fallback_visual_rows(text_len, fragments, row_style))
 }
 
+#[cfg(test)]
 pub(super) fn forced_break_visual_rows(
     display_text: &str,
     fragments: &[DisplayInlineFragment],
@@ -344,6 +352,245 @@ pub(super) fn forced_break_visual_rows(
     });
 
     rows
+}
+
+pub(super) fn forced_break_visual_rows_with_wrap(
+    display_text: &str,
+    fragments: &[DisplayInlineFragment],
+    shaped_line: &gpui::ShapedLine,
+    row_style: RowDisplayStyle,
+    wrap_width: gpui::Pixels,
+    cx: &mut App,
+) -> Vec<VisualDisplayRow> {
+    let mut rows = Vec::new();
+    let mut top = px(0.);
+    let mut start = 0;
+
+    for (break_index, _) in display_text.match_indices('\n') {
+        push_wrapped_forced_break_segment(
+            &mut rows,
+            &mut top,
+            display_text,
+            fragments,
+            shaped_line,
+            row_style,
+            wrap_width,
+            cx,
+            start..break_index,
+            Some(break_index),
+        );
+        start = break_index + 1;
+    }
+
+    push_wrapped_forced_break_segment(
+        &mut rows,
+        &mut top,
+        display_text,
+        fragments,
+        shaped_line,
+        row_style,
+        wrap_width,
+        cx,
+        start..display_text.len(),
+        None,
+    );
+
+    rows
+}
+
+fn push_wrapped_forced_break_segment(
+    rows: &mut Vec<VisualDisplayRow>,
+    top: &mut gpui::Pixels,
+    display_text: &str,
+    fragments: &[DisplayInlineFragment],
+    shaped_line: &gpui::ShapedLine,
+    row_style: RowDisplayStyle,
+    wrap_width: gpui::Pixels,
+    cx: &mut App,
+    display_range: Range<usize>,
+    trailing_break: Option<usize>,
+) {
+    let trailing_end = trailing_break.map_or(display_range.end, |break_index| break_index + 1);
+    let mut segment_rows = if display_range.is_empty() {
+        vec![VisualDisplayRow {
+            line_start_x: display_x_for_offset(fragments, shaped_line, display_range.start),
+            height: visual_row_height_for_range(
+                fragments,
+                &(display_range.start..trailing_end),
+                row_style,
+            ),
+            display_range: display_range.start..trailing_end,
+            top: px(0.),
+        }]
+    } else {
+        visual_rows_for_display_range(
+            display_text,
+            fragments,
+            shaped_line,
+            row_style,
+            wrap_width,
+            cx,
+            display_range.clone(),
+        )
+    };
+
+    if let Some(last) = segment_rows.last_mut() {
+        last.display_range.end = trailing_end;
+        last.height = visual_row_height_for_range(fragments, &last.display_range, row_style);
+    }
+
+    for mut row in segment_rows {
+        row.top = *top;
+        *top += row.height;
+        rows.push(row);
+    }
+}
+
+fn visual_rows_for_display_range(
+    display_text: &str,
+    fragments: &[DisplayInlineFragment],
+    shaped_line: &gpui::ShapedLine,
+    row_style: RowDisplayStyle,
+    wrap_width: gpui::Pixels,
+    cx: &mut App,
+    display_range: Range<usize>,
+) -> Vec<VisualDisplayRow> {
+    let Some(line_fragments) =
+        line_fragments_for_wrapping_range(display_text, fragments, &display_range)
+    else {
+        return fallback_visual_rows_for_display_range(
+            fragments,
+            shaped_line,
+            row_style,
+            display_range,
+        );
+    };
+
+    let mut rows = Vec::new();
+    let mut start = display_range.start;
+    let mut top = px(0.);
+    let mut line_wrapper = cx
+        .text_system()
+        .line_wrapper(font(EDITOR_FONT_FAMILY), row_style.text_size);
+
+    for boundary in line_wrapper.wrap_line(&line_fragments, wrap_width) {
+        let Some(boundary_index) =
+            display_offset_for_wrapping_index(fragments, &display_range, boundary.ix)
+        else {
+            return fallback_visual_rows_for_display_range(
+                fragments,
+                shaped_line,
+                row_style,
+                display_range,
+            );
+        };
+        let boundary_index = display_text.floor_char_boundary(atomic_wrap_boundary_index(
+            fragments,
+            boundary_index,
+            start,
+        ));
+        if boundary_index < start || boundary_index > display_range.end {
+            return fallback_visual_rows_for_display_range(
+                fragments,
+                shaped_line,
+                row_style,
+                display_range,
+            );
+        }
+        if boundary_index == start {
+            continue;
+        }
+
+        let row_range = start..boundary_index;
+        let height = visual_row_height_for_range(fragments, &row_range, row_style);
+        rows.push(VisualDisplayRow {
+            line_start_x: display_x_for_offset(fragments, shaped_line, start),
+            display_range: row_range,
+            top,
+            height,
+        });
+        start = boundary_index;
+        top += height;
+    }
+
+    let row_range = start..display_range.end;
+    rows.push(VisualDisplayRow {
+        line_start_x: display_x_for_offset(fragments, shaped_line, start),
+        height: visual_row_height_for_range(fragments, &row_range, row_style),
+        display_range: row_range,
+        top,
+    });
+    rows
+}
+
+fn fallback_visual_rows_for_display_range(
+    fragments: &[DisplayInlineFragment],
+    shaped_line: &gpui::ShapedLine,
+    row_style: RowDisplayStyle,
+    display_range: Range<usize>,
+) -> Vec<VisualDisplayRow> {
+    vec![VisualDisplayRow {
+        line_start_x: display_x_for_offset(fragments, shaped_line, display_range.start),
+        height: visual_row_height_for_range(fragments, &display_range, row_style),
+        display_range,
+        top: px(0.),
+    }]
+}
+
+fn line_fragments_for_wrapping_range<'a>(
+    display_text: &'a str,
+    fragments: &'a [DisplayInlineFragment],
+    display_range: &Range<usize>,
+) -> Option<Vec<LineFragment<'a>>> {
+    let mut line_fragments = Vec::new();
+    for fragment in fragments {
+        match fragment {
+            DisplayInlineFragment::Text(segment) => {
+                let start = segment.display_range.start.max(display_range.start);
+                let end = segment.display_range.end.min(display_range.end);
+                if start < end {
+                    line_fragments.push(LineFragment::text(display_text.get(start..end)?));
+                }
+            }
+            DisplayInlineFragment::Atom(atom)
+                if ranges_overlap(&atom.display_range, display_range) =>
+            {
+                let text = display_text.get(atom.display_range.clone())?;
+                if !text.is_empty() {
+                    line_fragments.push(LineFragment::element(atom.width.max(px(1.)), text.len()));
+                }
+            }
+            DisplayInlineFragment::Atom(_) => {}
+        }
+    }
+    Some(line_fragments)
+}
+
+fn display_offset_for_wrapping_index(
+    fragments: &[DisplayInlineFragment],
+    display_range: &Range<usize>,
+    wrapping_index: usize,
+) -> Option<usize> {
+    let mut consumed = 0;
+    for fragment in fragments {
+        let fragment_range = match fragment {
+            DisplayInlineFragment::Text(segment) => &segment.display_range,
+            DisplayInlineFragment::Atom(atom) => &atom.display_range,
+        };
+        let start = fragment_range.start.max(display_range.start);
+        let end = fragment_range.end.min(display_range.end);
+        if start >= end {
+            continue;
+        }
+
+        let len = end - start;
+        if wrapping_index <= consumed + len {
+            return Some(start + wrapping_index.saturating_sub(consumed));
+        }
+        consumed += len;
+    }
+
+    (wrapping_index == consumed).then_some(display_range.end)
 }
 
 pub(super) fn display_fragments_for_text_layout(

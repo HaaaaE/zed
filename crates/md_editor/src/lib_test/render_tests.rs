@@ -345,6 +345,72 @@ fn rendered_soft_break_caret_stays_inside_paragraph_item(cx: &mut gpui::TestAppC
     });
 }
 
+#[gpui::test]
+fn rendered_soft_break_segments_still_wrap(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(140.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(
+            "alpha beta gamma delta epsilon zeta\nsecond visual line\n\nnext\n",
+            cx,
+        );
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        let snapshot = editor.buffer.snapshot();
+        let index = rendered_display_index_for_tests(&snapshot);
+        let paragraph_item = index
+            .item_index_for_source_row(0)
+            .expect("paragraph item should exist");
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, paragraph_item, editor.mode, &display_row_state)
+            .expect("paragraph display row should exist");
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            text_wrap_width_for_mode(window, editor.mode),
+            false,
+            window,
+            cx,
+        );
+        let DisplayRowLayout::Text(text_layout) = row_layout else {
+            panic!("expected paragraph text layout");
+        };
+        let soft_break = display_row.text.find('\n').expect("expected soft break");
+
+        assert!(
+            text_layout.visual_rows.len() > 2,
+            "soft-break layout should also wrap within each segment: {:?}",
+            text_layout.visual_rows
+        );
+        assert!(
+            text_layout
+                .visual_rows
+                .iter()
+                .any(|visual_row| visual_row.display_range.end < soft_break),
+            "expected a wrapped visual row before the soft break: {:?}",
+            text_layout.visual_rows
+        );
+        assert!(
+            text_layout
+                .visual_rows
+                .iter()
+                .any(|visual_row| visual_row.display_range.start > soft_break),
+            "expected visual rows after the soft break: {:?}",
+            text_layout.visual_rows
+        );
+    });
+}
+
 #[test]
 fn fragment_text_for_visual_row_clips_to_visible_range() {
     let visual_row = VisualDisplayRow {
