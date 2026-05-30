@@ -873,6 +873,7 @@ fn collect_block_style_ranges_for_row(
             | MarkdownBlockKind::OrderedList
             | MarkdownBlockKind::UnorderedList
             | MarkdownBlockKind::ListItem
+            | MarkdownBlockKind::TaskListItem { .. }
             | MarkdownBlockKind::HtmlBlock
             | MarkdownBlockKind::LinkReferenceDefinition => {}
         }

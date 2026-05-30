@@ -354,6 +354,34 @@ fn rendered_display_rows_track_nested_list_indent() {
 }
 
 #[test]
+fn rendered_display_rows_track_task_list_indent() {
+    let source = "body\n> - [ ] quoted\n- outer\n  - [x] nested\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+
+    let rows = display_rows_in_mode(
+        &snapshot,
+        1..4,
+        Some(&collapsed_selection(Point::new(0, 0))),
+        MarkdownEditorMode::Rendered,
+    );
+
+    assert_eq!(
+        rows.iter().map(|row| row.text.as_str()).collect::<Vec<_>>(),
+        vec!["\u{2610} quoted", "outer", "\u{2611} nested"]
+    );
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.rendered_indent_level)
+            .collect::<Vec<_>>(),
+        vec![2, 1, 2]
+    );
+    assert_eq!(rows[0].rendered_indent_width(), px(48.));
+    assert_eq!(rows[1].rendered_indent_width(), px(24.));
+    assert_eq!(rows[2].rendered_indent_width(), px(48.));
+}
+
+#[test]
 fn rendered_display_rows_keep_inline_atom_boundaries_inactive() {
     let mut buffer = Buffer::local("Before $x + y$ after\n");
     let snapshot = buffer.snapshot();

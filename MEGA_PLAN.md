@@ -487,6 +487,37 @@
 - `markdown_wysiwyg` 模块拆分。
 - 300KB mixed GFM fixture 与最终验证。
 
+### 2026-05-30：Task list item 语义与 editor 回归
+
+已完成：
+
+- `MarkdownBlockKind` 增加 `TaskListItem { checked }`，把 GFM task list item 从普通 `ListItem` 中显式区分出来。
+- list item 解析会在 list marker 之后识别合法 task marker：`[ ]`、`[x]`、`[X]`；`[ ]` 标记 unchecked，`[x]` / `[X]` 标记 checked。
+- task marker 后如果还有同一行内容，必须跟空格或 tab；因此 `- [ ]todo` 仍保持普通 `ListItem`，`content_range` 为 `[ ]todo`。
+- 合法 task item 的 `content_range` 从 task marker 后的内容开始，不包含 list marker 或 `[ ]` / `[x]` marker；`marker_ranges` 仍只记录 list marker，task marker 继续由 replacement projection 负责。
+- `md_editor` 的 rendered indentation 和 block style match 已接入 `TaskListItem`，引用内 task item、nested task item 的缩进层级继续正确计算。
+- 新增 editor 回归，覆盖引用内 task checkbox 点击 toggle，确认 `> - [ ] todo` 会切成 `> - [x] todo` 且光标保持不跳动。
+- 已核对 `NOTICE` / license 边界：本批没有跨 crate/license 移动代码，不需要修改 `NOTICE`。
+
+验证：
+
+- `cargo test -p markdown_wysiwyg parses_task_list_item_semantics -- --nocapture`：passed。
+- `cargo test -p markdown_wysiwyg parses_blockquotes_and_list_containers_without_losing_nested_blocks -- --nocapture`：passed。
+- `cargo test -p markdown_wysiwyg`：39 passed。
+- `cargo test -p md_editor rendered_display_rows -- --nocapture`：21 passed。
+- `cargo test -p md_editor rendered_task_checkbox -- --nocapture`：4 passed。
+- `cargo test -p md_editor`：207 passed，保留既有 `move_selection_right` dead_code warning。
+- `cargo check -p updraft_editor`：passed，保留既有 selection dead_code warnings。
+- `git diff --check`：passed，仅有 Windows line-ending 提示。
+- `cargo perf-test -p md_editor -- --quiet --json=20260530-task-list-item-semantics`：passed，34 段 timeline。
+- `cargo perf-test -p md_editor -- --quiet --json=20260530-task-list-item-semantics-rerun`：passed，34 段 timeline。
+- perf 两次 run 相对 `.perf-runs/20260530-scroll-segments.md_editor.json` 都显示 important category 下降，但下降形状覆盖 context/window、source scroll、rendered scroll、prepare 等无关 segment，且 small session SD 明显偏高；本批不更新 baseline，也不把该全局变慢归因于 task list item 语义改动。
+
+后续仍未完成：
+
+- `markdown_wysiwyg` 模块拆分。
+- 300KB mixed GFM fixture 与最终验证。
+
 ## 关键改动
 
 - 重构 `crates/markdown_wysiwyg`：

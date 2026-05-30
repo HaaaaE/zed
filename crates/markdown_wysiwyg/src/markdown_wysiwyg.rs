@@ -98,6 +98,7 @@ pub enum MarkdownBlockKind {
     OrderedList,
     UnorderedList,
     ListItem,
+    TaskListItem { checked: bool },
     IndentedCodeBlock,
     FencedCodeBlock,
     HtmlBlock,
@@ -1719,18 +1720,63 @@ fn list_item_block(source: &str, node: Node<'_>) -> MarkdownBlock {
     let content_start = marker_range
         .as_ref()
         .map_or(source_range.start, |range| range.end);
+    let task_marker = task_list_marker_after_list_marker(source, content_start, source_range.end);
+    let (kind, content_start) = if let Some((checked, task_content_start)) = task_marker {
+        (
+            MarkdownBlockKind::TaskListItem { checked },
+            task_content_start,
+        )
+    } else {
+        (MarkdownBlockKind::ListItem, content_start)
+    };
     let content_range = trim_line_end(source, content_start..source_range.end);
     let marker_ranges = marker_range.into_iter().collect();
 
     MarkdownBlock {
         id: node_id(node),
-        kind: MarkdownBlockKind::ListItem,
+        kind,
         source_range,
         content_range,
         marker_ranges,
         row_range: row_range_for_node(node),
         tagfilter_disallowed: false,
     }
+}
+
+fn task_list_marker_after_list_marker(
+    source: &str,
+    content_start: usize,
+    source_end: usize,
+) -> Option<(bool, usize)> {
+    let bytes = source.as_bytes();
+    let marker_end = content_start.checked_add(3)?;
+    if marker_end > source_end {
+        return None;
+    }
+    if bytes[content_start] != b'[' || bytes[content_start + 2] != b']' {
+        return None;
+    }
+
+    let checked = match bytes[content_start + 1] {
+        b' ' => false,
+        b'x' | b'X' => true,
+        _ => return None,
+    };
+
+    let line_end = source[content_start..source_end]
+        .find('\n')
+        .map_or(source_end, |offset| content_start + offset);
+    let trimmed_line_end = trim_line_end(source, content_start..line_end).end;
+    if marker_end < trimmed_line_end && !matches!(bytes[marker_end], b' ' | b'\t') {
+        return None;
+    }
+
+    let mut task_content_start = marker_end;
+    while task_content_start < source_end && matches!(bytes[task_content_start], b' ' | b'\t') {
+        task_content_start += 1;
+    }
+
+    Some((checked, task_content_start))
 }
 
 fn list_source_starts_ordered_marker(source: &str, range: Range<usize>) -> bool {
@@ -2274,13 +2320,23 @@ mod tests {
         let list_item_sources = tree
             .blocks()
             .iter()
-            .filter(|block| block.kind == MarkdownBlockKind::ListItem)
+            .filter(|block| {
+                matches!(
+                    block.kind,
+                    MarkdownBlockKind::ListItem | MarkdownBlockKind::TaskListItem { .. }
+                )
+            })
             .map(block_source)
             .collect::<Vec<_>>();
         let list_item_marker_sources = tree
             .blocks()
             .iter()
-            .filter(|block| block.kind == MarkdownBlockKind::ListItem)
+            .filter(|block| {
+                matches!(
+                    block.kind,
+                    MarkdownBlockKind::ListItem | MarkdownBlockKind::TaskListItem { .. }
+                )
+            })
             .map(marker_sources)
             .collect::<Vec<_>>();
         assert!(
@@ -2328,6 +2384,51 @@ mod tests {
                 && block.source_range.start >= blockquote.source_range.start
                 && block.source_range.end <= blockquote.source_range.end
         }));
+    }
+
+    #[test]
+    fn parses_task_list_item_semantics() {
+        let source = "- [ ] todo\n- [x] done\n- [X] cap\n- [ ]todo\n> - [x] quoted\n\n- outer\n  - [ ] nested\n";
+        let tree = MarkdownSyntaxTree::parse(source);
+        let item_text =
+            |block: &MarkdownBlock| &source[trim_line_end(source, block.source_range.clone())];
+        let content_text =
+            |block: &MarkdownBlock| &source[trim_line_end(source, block.content_range.clone())];
+
+        let task_items = tree
+            .blocks()
+            .iter()
+            .filter_map(|block| match block.kind {
+                MarkdownBlockKind::TaskListItem { checked } => Some((block, checked)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(task_items.len(), 5);
+        assert!(task_items.iter().any(|(block, checked)| {
+            !checked && item_text(block) == "- [ ] todo" && content_text(block) == "todo"
+        }));
+        assert!(task_items.iter().any(|(block, checked)| {
+            *checked && item_text(block) == "- [x] done" && content_text(block) == "done"
+        }));
+        assert!(task_items.iter().any(|(block, checked)| {
+            *checked && item_text(block) == "- [X] cap" && content_text(block) == "cap"
+        }));
+        assert!(task_items.iter().any(|(block, checked)| {
+            *checked && item_text(block) == "- [x] quoted" && content_text(block) == "quoted"
+        }));
+        assert!(task_items.iter().any(|(block, checked)| {
+            !checked && item_text(block) == "  - [ ] nested" && content_text(block) == "nested"
+        }));
+
+        let invalid = tree
+            .blocks()
+            .iter()
+            .find(|block| {
+                block.kind == MarkdownBlockKind::ListItem && item_text(block) == "- [ ]todo"
+            })
+            .expect("expected invalid task marker to remain a plain list item");
+        assert_eq!(content_text(invalid), "[ ]todo");
     }
 
     #[test]

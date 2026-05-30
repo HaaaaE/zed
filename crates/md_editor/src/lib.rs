@@ -2164,7 +2164,9 @@ fn rendered_indent_level_for_display_row(markdown_blocks: &[MarkdownBlock], row:
         .filter(|block| {
             matches!(
                 block.kind,
-                MarkdownBlockKind::BlockQuote | MarkdownBlockKind::ListItem
+                MarkdownBlockKind::BlockQuote
+                    | MarkdownBlockKind::ListItem
+                    | MarkdownBlockKind::TaskListItem { .. }
             ) && block.row_range.contains(&(row as usize))
         })
         .count()

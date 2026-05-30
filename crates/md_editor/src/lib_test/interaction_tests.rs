@@ -1593,6 +1593,37 @@ fn rendered_task_checkbox_click_toggles_checked_marker(cx: &mut gpui::TestAppCon
 }
 
 #[gpui::test]
+fn rendered_task_checkbox_click_toggles_quoted_marker(cx: &mut gpui::TestAppContext) {
+    let source = "> - [ ] todo\nnext\n";
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(source, cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(1, 0));
+        editor
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(320.), px(200.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    let (click_x, _) = editor.update_in(cx, |editor, window, cx| {
+        rendered_task_checkbox_click_positions(editor, window, cx, source, "[ ]", "\u{2610}")
+    });
+    let click = gpui::point(click_x, default_row_metrics().line_height * 0.5);
+    cx.simulate_mouse_down(click, MouseButton::Left, gpui::Modifiers::none());
+    cx.simulate_mouse_up(click, MouseButton::Left, gpui::Modifiers::none());
+
+    editor.read_with(cx, |editor, _| {
+        assert_eq!(editor.serialized_text(), "> - [x] todo\nnext\n");
+        assert_eq!(editor.cursor(), Point::new(1, 0));
+    });
+}
+
+#[gpui::test]
 fn rendered_task_checkbox_click_outside_glyph_keeps_source_text(cx: &mut gpui::TestAppContext) {
     let source = "- [ ] todo\nnext\n";
     let cx = cx.add_empty_window();
