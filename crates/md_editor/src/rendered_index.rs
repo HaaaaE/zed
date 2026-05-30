@@ -8,14 +8,12 @@ pub(crate) struct DisplayItemId(pub(crate) u64);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum RenderedDisplayItemKind {
-    SourceRow,
     Paragraph,
-    PipeTableRow,
-    FencedCodeBlock,
-    IndentedCodeBlock,
-    ThematicBreak,
-    LinkReferenceDefinition,
-    HtmlBlock,
+    Heading,
+    EmptyParagraph,
+    StructuredBlock,
+    TableRow,
+    SourceFallback,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -32,6 +30,15 @@ pub(crate) struct RenderedDisplayIndex {
     version: md_text::Global,
     items: Vec<RenderedDisplayItem>,
     row_to_item: Vec<Option<usize>>,
+    #[cfg(test)]
+    blank_row_roles: Vec<Option<BlankRowRole>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BlankRowRole {
+    Separator,
+    EmptyParagraph,
+    IgnoredExtra,
 }
 
 impl RenderedDisplayIndex {
@@ -40,10 +47,10 @@ impl RenderedDisplayIndex {
         let row_count = snapshot.row_count() as usize;
         let mut items = Vec::new();
         let mut covered_rows = vec![false; row_count];
+        let mut blank_row_roles = vec![None; row_count];
 
         for block in snapshot.syntax_tree().blocks() {
             if block.kind == MarkdownBlockKind::Blank {
-                mark_rows_covered(&mut covered_rows, block.row_range.clone());
                 continue;
             }
 
@@ -60,7 +67,7 @@ impl RenderedDisplayIndex {
                 continue;
             }
 
-            if kind == RenderedDisplayItemKind::PipeTableRow {
+            if kind == RenderedDisplayItemKind::TableRow {
                 for row in block.row_range.clone() {
                     let source_range = super::row_source_range(snapshot, row as u32);
                     push_item(
@@ -100,13 +107,23 @@ impl RenderedDisplayIndex {
             }
         }
 
+        assign_blank_row_roles(snapshot, &covered_rows, &mut blank_row_roles);
+
         for row in 0..row_count {
             if covered_rows[row] {
                 continue;
             }
             let source_range = super::row_source_range(snapshot, row as u32);
             if source_range_is_blank(snapshot, source_range.clone()) {
-                covered_rows[row] = true;
+                if blank_row_roles[row] == Some(BlankRowRole::EmptyParagraph) {
+                    push_item(
+                        &mut items,
+                        &mut covered_rows,
+                        source_range,
+                        row..row + 1,
+                        RenderedDisplayItemKind::EmptyParagraph,
+                    );
+                }
                 continue;
             }
             push_item(
@@ -114,7 +131,7 @@ impl RenderedDisplayIndex {
                 &mut covered_rows,
                 source_range,
                 row..row + 1,
-                RenderedDisplayItemKind::SourceRow,
+                RenderedDisplayItemKind::SourceFallback,
             );
         }
 
@@ -131,12 +148,14 @@ impl RenderedDisplayIndex {
                 }
             }
         }
-        fill_collapsed_row_mappings(&mut row_to_item);
+        fill_blank_row_mappings(&mut row_to_item, &blank_row_roles);
 
         Arc::new(Self {
             version,
             items,
             row_to_item,
+            #[cfg(test)]
+            blank_row_roles,
         })
     }
 
@@ -156,6 +175,11 @@ impl RenderedDisplayIndex {
         self.row_to_item.get(row).copied().flatten()
     }
 
+    #[cfg(test)]
+    pub(crate) fn blank_row_role_for_source_row(&self, row: usize) -> Option<BlankRowRole> {
+        self.blank_row_roles.get(row).copied().flatten()
+    }
+
     pub(crate) fn item_index_for_source_offset(
         &self,
         snapshot: &BufferSnapshot,
@@ -169,14 +193,6 @@ impl RenderedDisplayIndex {
     }
 }
 
-fn mark_rows_covered(covered_rows: &mut [bool], row_range: Range<usize>) {
-    for row in row_range {
-        if let Some(covered) = covered_rows.get_mut(row) {
-            *covered = true;
-        }
-    }
-}
-
 fn source_range_is_blank(snapshot: &BufferSnapshot, source_range: Range<usize>) -> bool {
     snapshot
         .as_text_snapshot()
@@ -184,24 +200,66 @@ fn source_range_is_blank(snapshot: &BufferSnapshot, source_range: Range<usize>) 
         .all(|chunk| chunk.trim().is_empty())
 }
 
-fn fill_collapsed_row_mappings(row_to_item: &mut [Option<usize>]) {
-    let mut previous = None;
-    for slot in row_to_item.iter_mut() {
-        if slot.is_some() {
-            previous = *slot;
-        } else {
-            *slot = previous;
+fn assign_blank_row_roles(
+    snapshot: &BufferSnapshot,
+    covered_rows: &[bool],
+    blank_row_roles: &mut [Option<BlankRowRole>],
+) {
+    let mut row = 0;
+    while row < blank_row_roles.len() {
+        if covered_rows[row]
+            || !source_range_is_blank(snapshot, super::row_source_range(snapshot, row as u32))
+        {
+            row += 1;
+            continue;
         }
-    }
 
-    let mut next = None;
-    for slot in row_to_item.iter_mut().rev() {
-        if slot.is_some() {
-            next = *slot;
+        let run_start = row;
+        while row < blank_row_roles.len()
+            && !covered_rows[row]
+            && source_range_is_blank(snapshot, super::row_source_range(snapshot, row as u32))
+        {
+            row += 1;
+        }
+
+        let run_len = row - run_start;
+        let effective_len = if run_len % 2 == 0 {
+            run_len.saturating_sub(1)
         } else {
-            *slot = next;
+            run_len
+        };
+        for offset in 0..run_len {
+            let role = if offset >= effective_len {
+                BlankRowRole::IgnoredExtra
+            } else if offset % 2 == 0 {
+                BlankRowRole::Separator
+            } else {
+                BlankRowRole::EmptyParagraph
+            };
+            blank_row_roles[run_start + offset] = Some(role);
         }
     }
+}
+
+fn fill_blank_row_mappings(
+    row_to_item: &mut [Option<usize>],
+    blank_row_roles: &[Option<BlankRowRole>],
+) {
+    let original = row_to_item.to_vec();
+    for row in 0..row_to_item.len() {
+        if row_to_item[row].is_some() || blank_row_roles.get(row).copied().flatten().is_none() {
+            continue;
+        }
+        row_to_item[row] = nearest_item_index(&original, row);
+    }
+}
+
+fn nearest_item_index(row_to_item: &[Option<usize>], row: usize) -> Option<usize> {
+    let previous = row_to_item[..row].iter().rev().find_map(|item| *item);
+    let next = row_to_item[row.saturating_add(1)..]
+        .iter()
+        .find_map(|item| *item);
+    previous.or(next)
 }
 
 fn push_item(
@@ -243,17 +301,16 @@ fn source_range_for_row_range(snapshot: &BufferSnapshot, row_range: Range<usize>
 fn item_kind_for_block(kind: MarkdownBlockKind) -> Option<RenderedDisplayItemKind> {
     Some(match kind {
         MarkdownBlockKind::Paragraph => RenderedDisplayItemKind::Paragraph,
-        MarkdownBlockKind::PipeTable => RenderedDisplayItemKind::PipeTableRow,
-        MarkdownBlockKind::FencedCodeBlock => RenderedDisplayItemKind::FencedCodeBlock,
-        MarkdownBlockKind::IndentedCodeBlock => RenderedDisplayItemKind::IndentedCodeBlock,
-        MarkdownBlockKind::ThematicBreak => RenderedDisplayItemKind::ThematicBreak,
-        MarkdownBlockKind::LinkReferenceDefinition => {
-            RenderedDisplayItemKind::LinkReferenceDefinition
+        MarkdownBlockKind::AtxHeading { .. } | MarkdownBlockKind::SetextHeading { .. } => {
+            RenderedDisplayItemKind::Heading
         }
-        MarkdownBlockKind::HtmlBlock => RenderedDisplayItemKind::HtmlBlock,
+        MarkdownBlockKind::PipeTable => RenderedDisplayItemKind::TableRow,
+        MarkdownBlockKind::FencedCodeBlock
+        | MarkdownBlockKind::IndentedCodeBlock
+        | MarkdownBlockKind::ThematicBreak
+        | MarkdownBlockKind::LinkReferenceDefinition
+        | MarkdownBlockKind::HtmlBlock => RenderedDisplayItemKind::StructuredBlock,
         MarkdownBlockKind::Blank
-        | MarkdownBlockKind::AtxHeading { .. }
-        | MarkdownBlockKind::SetextHeading { .. }
         | MarkdownBlockKind::BlockQuote
         | MarkdownBlockKind::OrderedList
         | MarkdownBlockKind::UnorderedList
@@ -300,7 +357,7 @@ pub(crate) fn source_display_item_id(source_range: &Range<usize>, row: usize) ->
     DisplayItemId(display_item_id(
         source_range,
         &(row..row.saturating_add(1)),
-        RenderedDisplayItemKind::SourceRow,
+        RenderedDisplayItemKind::SourceFallback,
     ))
 }
 

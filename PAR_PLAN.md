@@ -4,6 +4,20 @@
 
 将 rendered 模式从“源码行渲染器”改成“段序列编辑器”，但继续保留 `source row` 作为坐标、range、缓存、重测和 selection 的底层单位。GFM AST 继续提供语义/样式，不再决定 rendered 文档结构。
 
+## Progress
+
+### 2026-05-30
+
+- 已完成第一片：`RenderedDisplayIndex` 的 item 语义已改为段序列方向，当前包含 `Paragraph / Heading / EmptyParagraph / StructuredBlock / TableRow / SourceFallback`。
+- 已完成 blank run 解释：连续物理空白 source rows 按奇数规范长度渲染，偶数 run 的多余行标记为 `IgnoredExtra`，渲染阶段不改写源码。
+- 已完成 `row_to_item` 映射调整：`EmptyParagraph` 拥有自己的 item；`Separator` / `IgnoredExtra` 不生成 item，只映射到邻近可渲染 item 以维持滚动、selection reveal 和缓存定位。
+- 已新增索引测试覆盖 `A\n\nB`、`A\n\n\nB`、`A\n\n\n\nB`、`A\n\n\n\n\nB`、`A\n\n\n\n\n\nB` 的 empty paragraph 数量与 blank role。
+- 验证通过：
+  - `cargo test -p md_editor rendered_display_index --lib`
+  - `cargo test -p md_editor --lib`
+  - `cargo check -p updraft_editor`
+- 剩余主要工作：rendered 模式 Enter / Shift+Enter / Backspace / Delete 的段结构编辑；空段点击/caret 交互测试；paragraph 内普通 `\n` 的 rendered 视觉断行语义从“inactive 空格投影”切换到段内断行。
+
 ## Key Changes
 
 - 在 `rendered_index.rs` 重建 `RenderedDisplayIndex`：item 语义改为 `Paragraph / Heading / EmptyParagraph / StructuredBlock / TableRow / SourceFallback`。

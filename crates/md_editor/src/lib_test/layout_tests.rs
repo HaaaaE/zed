@@ -91,42 +91,42 @@ fn rendered_display_index_groups_paragraphs_and_keeps_structured_rows_addressabl
             (
                 1,
                 3..4,
-                rendered_index::RenderedDisplayItemKind::PipeTableRow
+                rendered_index::RenderedDisplayItemKind::TableRow
             ),
             (
                 2,
                 4..5,
-                rendered_index::RenderedDisplayItemKind::PipeTableRow
+                rendered_index::RenderedDisplayItemKind::TableRow
             ),
             (
                 3,
                 5..6,
-                rendered_index::RenderedDisplayItemKind::PipeTableRow
+                rendered_index::RenderedDisplayItemKind::TableRow
             ),
             (
                 4,
                 7..8,
-                rendered_index::RenderedDisplayItemKind::FencedCodeBlock
+                rendered_index::RenderedDisplayItemKind::StructuredBlock
             ),
             (
                 5,
                 8..9,
-                rendered_index::RenderedDisplayItemKind::FencedCodeBlock
+                rendered_index::RenderedDisplayItemKind::StructuredBlock
             ),
             (
                 6,
                 9..10,
-                rendered_index::RenderedDisplayItemKind::FencedCodeBlock
+                rendered_index::RenderedDisplayItemKind::StructuredBlock
             ),
             (
                 7,
                 10..11,
-                rendered_index::RenderedDisplayItemKind::LinkReferenceDefinition
+                rendered_index::RenderedDisplayItemKind::StructuredBlock
             ),
             (
                 8,
                 11..12,
-                rendered_index::RenderedDisplayItemKind::HtmlBlock
+                rendered_index::RenderedDisplayItemKind::StructuredBlock
             ),
         ]
     );
@@ -141,7 +141,7 @@ fn rendered_display_index_groups_paragraphs_and_keeps_structured_rows_addressabl
 }
 
 #[test]
-fn rendered_display_index_collapses_blank_rows_between_blocks() {
+fn rendered_display_index_maps_single_blank_row_as_separator() {
     let mut buffer = Buffer::local(
         "# GFM Feature Test\n\nThis file is a manual fixture for checking GFM support.\n",
     );
@@ -156,13 +156,85 @@ fn rendered_display_index_collapses_blank_rows_between_blocks() {
     assert_eq!(
         items,
         vec![
-            (0..1, rendered_index::RenderedDisplayItemKind::SourceRow),
+            (0..1, rendered_index::RenderedDisplayItemKind::Heading),
             (2..3, rendered_index::RenderedDisplayItemKind::Paragraph),
         ]
     );
     assert_eq!(index.item_index_for_source_row(0), Some(0));
     assert_eq!(index.item_index_for_source_row(1), Some(0));
     assert_eq!(index.item_index_for_source_row(2), Some(1));
+    assert_eq!(
+        index.blank_row_role_for_source_row(1),
+        Some(rendered_index::BlankRowRole::Separator)
+    );
+}
+
+#[test]
+fn rendered_display_index_assigns_empty_paragraphs_from_blank_runs() {
+    let cases = [
+        ("A\n\nB", 0, vec![rendered_index::BlankRowRole::Separator]),
+        (
+            "A\n\n\nB",
+            0,
+            vec![
+                rendered_index::BlankRowRole::Separator,
+                rendered_index::BlankRowRole::IgnoredExtra,
+            ],
+        ),
+        (
+            "A\n\n\n\nB",
+            1,
+            vec![
+                rendered_index::BlankRowRole::Separator,
+                rendered_index::BlankRowRole::EmptyParagraph,
+                rendered_index::BlankRowRole::Separator,
+            ],
+        ),
+        (
+            "A\n\n\n\n\nB",
+            1,
+            vec![
+                rendered_index::BlankRowRole::Separator,
+                rendered_index::BlankRowRole::EmptyParagraph,
+                rendered_index::BlankRowRole::Separator,
+                rendered_index::BlankRowRole::IgnoredExtra,
+            ],
+        ),
+        (
+            "A\n\n\n\n\n\nB",
+            2,
+            vec![
+                rendered_index::BlankRowRole::Separator,
+                rendered_index::BlankRowRole::EmptyParagraph,
+                rendered_index::BlankRowRole::Separator,
+                rendered_index::BlankRowRole::EmptyParagraph,
+                rendered_index::BlankRowRole::Separator,
+            ],
+        ),
+    ];
+
+    for (source, expected_empty_count, expected_roles) in cases {
+        let mut buffer = Buffer::local(source);
+        let snapshot = buffer.snapshot();
+        let index = rendered_display_index_for_tests(&snapshot);
+        let empty_items = (0..index.item_count())
+            .filter_map(|ix| index.item(ix))
+            .filter(|item| item.kind == rendered_index::RenderedDisplayItemKind::EmptyParagraph)
+            .collect::<Vec<_>>();
+        let roles = (1..=expected_roles.len())
+            .map(|row| index.blank_row_role_for_source_row(row))
+            .collect::<Vec<_>>();
+
+        assert_eq!(empty_items.len(), expected_empty_count, "{source:?}");
+        assert_eq!(
+            roles,
+            expected_roles.into_iter().map(Some).collect::<Vec<_>>(),
+            "{source:?}"
+        );
+        for item in empty_items {
+            assert_eq!(index.item_index_for_source_row(item.row_range.start), Some(item.index));
+        }
+    }
 }
 
 #[test]
