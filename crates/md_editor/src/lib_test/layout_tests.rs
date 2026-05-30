@@ -1,5 +1,31 @@
 use super::test_support::*;
 
+fn test_text_run(len: usize) -> TextRun {
+    TextRun {
+        len,
+        font: font(EDITOR_FONT_FAMILY),
+        color: md_theme::editor_palette().text,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }
+}
+
+#[test]
+fn text_runs_are_normalized_to_utf8_boundaries() {
+    let text = "本详细设计文档旨在为 \"面向海洋环境现象识别与多要素智能分析系统\" 提供完整的技术实施指南。文档以工程化视角构建系统开发框架，重点阐述算法实现细节、功能模块设计及业务逻辑，具体覆盖数据接入、模型推理、可视化展示与系统运维等内容。";
+    assert!(text.len() > 265);
+    let invalid_boundary = (1..text.len())
+        .find(|index| !text.is_char_boundary(*index))
+        .expect("test text should contain multibyte characters");
+
+    let runs = text_runs_on_char_boundaries(text, &[test_text_run(invalid_boundary)]);
+
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].len, text.len());
+    assert!(text.is_char_boundary(runs[0].len));
+}
+
 #[test]
 fn display_rows_preserve_empty_lines_and_final_empty_row() {
     let mut buffer = Buffer::local("alpha\n\nbeta\n");

@@ -113,3 +113,14 @@ pub(crate) struct StyledDisplaySegment {
     pub(crate) text: String,
     pub(crate) style: DisplayTextStyle,
 }
+
+impl StyledDisplaySegment {
+    pub(crate) fn text_boundary_for_display_offset(&self, display_offset: usize) -> Option<usize> {
+        if display_offset < self.display_range.start || display_offset > self.display_range.end {
+            return None;
+        }
+
+        let local_offset = display_offset - self.display_range.start;
+        Some(self.text.floor_char_boundary(local_offset))
+    }
+}

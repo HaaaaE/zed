@@ -708,6 +708,53 @@ fn rendered_table_wrapping_uses_text_measurement_for_words(cx: &mut gpui::TestAp
 }
 
 #[gpui::test]
+fn rendered_table_wrapping_keeps_cjk_boundaries(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(220.), px(300.)));
+    let cjk = "本详细设计文档旨在为：面向海洋环境现象识别与多要素智能分析系统提供完整指南";
+    let source = format!("| 内容 |\n| - |\n| {cjk} |\nafter\n");
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(&source, cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(3, 0));
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, 2, editor.mode, &display_row_state)
+            .expect("display row should exist");
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            text_wrap_width(window),
+            false,
+            window,
+            cx,
+        );
+
+        let DisplayRowLayout::TableRow(table_layout) = row_layout else {
+            panic!("expected structured table row layout");
+        };
+        let cell = &table_layout.cells[0];
+        assert_eq!(cell.text, cjk);
+        assert!(cell.visual_lines.len() > 1);
+        for line_range in &cell.visual_lines {
+            assert!(cell.text.is_char_boundary(line_range.start));
+            assert!(cell.text.is_char_boundary(line_range.end));
+        }
+    });
+}
+
+#[gpui::test]
 fn rendered_table_mouse_target_maps_to_cell_source(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     cx.simulate_resize(gpui::size(px(320.), px(200.)));
@@ -1006,6 +1053,60 @@ fn rendered_mode_actions_follow_wrapped_visual_rows_with_inline_image(
 
         editor.move_up(&MoveUp, window, cx);
         assert_eq!(editor.cursor(), Point::new(0, 0));
+    });
+}
+
+#[gpui::test]
+fn rendered_cjk_text_with_replacements_shapes_on_char_boundaries(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(260.), px(240.)));
+    let source =
+        "本详细设计文档旨在为 &amp; 面向海洋环境现象识别：多要素智能分析系统提供完整指南\n";
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(source, cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
+            .expect("display row should exist");
+        assert!(display_row.text.contains('&'));
+        assert!(display_row.text.contains('：'));
+
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            text_wrap_width_for_mode(window, editor.mode),
+            false,
+            window,
+            cx,
+        );
+
+        let DisplayRowLayout::Text(text_layout) = row_layout else {
+            panic!("expected text layout");
+        };
+        for visual_row in &text_layout.visual_rows {
+            assert!(
+                display_row
+                    .text
+                    .is_char_boundary(visual_row.display_range.start)
+            );
+            assert!(
+                display_row
+                    .text
+                    .is_char_boundary(visual_row.display_range.end)
+            );
+        }
     });
 }
 

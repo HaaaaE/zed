@@ -43,6 +43,7 @@
   - inactive hard break -> forced visual break
 - 将 text layout 从单 `ShapedLine` 升级为可包含 forced breaks 的 flow layout；`VisualDisplayRow` 记录所属 shaped line，所有 `display_x_for_offset`、mouse target、selection bounds 通过 layout helper 访问，不再直接依赖单行 `shaped_line`。
 - paragraph item 的 `projection.source_to_display/display_to_source` 必须覆盖跨行 source range，包含 newline replacement、inline marker hiding、entity/escape replacement、inline atom insertion。
+- [done 2026-05-30] 修复 rendered/table wrapping 在 CJK 与 entity/escape replacement 混合文本中的 UTF-8 char boundary 对齐，避免 GPUI DirectWrite shaping 因 `TextRun` 长度落入多字节字符中间而崩溃。
 
 ### Active Reveal Policy
 

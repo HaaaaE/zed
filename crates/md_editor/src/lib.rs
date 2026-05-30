@@ -2529,6 +2529,7 @@ mod test_support {
     pub(super) use gpui::{LineFragment, TextRun, font};
 
     pub(super) use super::*;
+    pub(super) use crate::layout::text_runs_on_char_boundaries;
 
     pub(super) fn image_descriptor(
         source_range: Range<usize>,

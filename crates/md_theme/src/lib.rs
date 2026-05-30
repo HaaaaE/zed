@@ -1,5 +1,7 @@
 use gpui::{Hsla, Pixels, px};
-use md_settings::{DEFAULT_CARET_HEIGHT, DEFAULT_LINE_HEIGHT, DEFAULT_MIN_ROW_HEIGHT, DEFAULT_TEXT_SIZE};
+use md_settings::{
+    DEFAULT_CARET_HEIGHT, DEFAULT_LINE_HEIGHT, DEFAULT_MIN_ROW_HEIGHT, DEFAULT_TEXT_SIZE,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RowMetrics {

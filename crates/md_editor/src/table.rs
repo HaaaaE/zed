@@ -13,7 +13,7 @@ use md_theme::editor_palette;
 use super::{
     MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, VisualLineBoundary, clip_cursor,
     display_model::{DisplayRow, DisplayTextStyle, StyledDisplaySegment},
-    layout::{inline_style, text_runs_for_segments},
+    layout::{inline_style, text_runs_for_segments, text_runs_on_char_boundaries},
     range_contains, render_text_piece, rendered_element_source_range_is_active,
     visual_horizontal_goal,
 };
@@ -440,8 +440,8 @@ fn table_cell_segment_for_range(
         return None;
     }
 
-    let local_start = start - segment.display_range.start;
-    let local_end = end - segment.display_range.start;
+    let local_start = segment.text_boundary_for_display_offset(start)?;
+    let local_end = segment.text_boundary_for_display_offset(end)?;
     let text = segment.text.get(local_start..local_end)?.to_string();
     Some(StyledDisplaySegment {
         display_range: start..end,
@@ -534,7 +534,7 @@ fn table_cell_preferred_width(
         return TABLE_MIN_CELL_WIDTH;
     }
 
-    let text_runs = text_runs_for_segments(&segments);
+    let text_runs = text_runs_on_char_boundaries(&text, &text_runs_for_segments(&segments));
     let shaped_line = window.text_system().shape_line(
         SharedString::from(text),
         row_style.text_size,
@@ -556,7 +556,7 @@ fn table_cell_visual_lines(
     }
 
     let content_width = table_cell_content_width(width);
-    let text_runs = text_runs_for_segments(segments);
+    let text_runs = text_runs_on_char_boundaries(text, &text_runs_for_segments(segments));
     let shaped_line = window.text_system().shape_line(
         SharedString::from(text.to_string()),
         row_style.text_size,
@@ -593,9 +593,10 @@ fn table_cell_visual_lines(
         else {
             return vec![0..text.len()];
         };
-        if glyph.index > start && glyph.index <= text.len() {
-            ranges.push(start..glyph.index);
-            start = glyph.index;
+        let glyph_index = text.floor_char_boundary(glyph.index);
+        if glyph_index > start && glyph_index <= text.len() {
+            ranges.push(start..glyph_index);
+            start = glyph_index;
         }
     }
     ranges.push(start..text.len());

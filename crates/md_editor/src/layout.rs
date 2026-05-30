@@ -213,7 +213,10 @@ pub(super) fn display_row_layout_inputs_for_fragments(
     window: &mut Window,
 ) -> DisplayRowLayoutInputs {
     let segments = text_segments_for_fragments(&display_row.text, &fragments);
-    let text_runs = text_runs_for_segments(&segments);
+    let text_runs = text_runs_on_char_boundaries(
+        &display_row.text,
+        &text_runs_for_display_segments(&display_row.text, &segments),
+    );
     let shaped_line = window.text_system().shape_line(
         SharedString::from(display_row.text.clone()),
         row_style.text_size,
@@ -359,7 +362,11 @@ pub(super) fn visual_rows_for_fragments(
         .line_wrapper(font(EDITOR_FONT_FAMILY), row_style.text_size);
 
     for boundary in line_wrapper.wrap_line(&line_fragments, wrap_width) {
-        let boundary_index = atomic_wrap_boundary_index(fragments, boundary.ix, start);
+        let boundary_index = display_text.floor_char_boundary(atomic_wrap_boundary_index(
+            fragments,
+            boundary.ix,
+            start,
+        ));
         if boundary_index < start || boundary_index > display_text.len() {
             return fallback_visual_rows(display_text.len(), fragments, row_style);
         }
@@ -403,15 +410,18 @@ pub(super) fn visual_rows_for_wrapped_line(
         let Some(glyph) = wrap_boundary_glyph(wrapped_line, *wrap_boundary) else {
             return fallback_visual_rows(wrapped_line.len(), fragments, row_style);
         };
-        if glyph.index < start {
-            if atom_range_containing_display_index(fragments, glyph.index)
+        let glyph_index = wrapped_line.text.floor_char_boundary(glyph.index);
+        if glyph_index < start {
+            if atom_range_containing_display_index(fragments, glyph_index)
                 .is_some_and(|atom_range| atom_range.end <= start)
             {
                 continue;
             }
             return fallback_visual_rows(wrapped_line.len(), fragments, row_style);
         }
-        let boundary_index = atomic_wrap_boundary_index(fragments, glyph.index, start);
+        let boundary_index = wrapped_line
+            .text
+            .floor_char_boundary(atomic_wrap_boundary_index(fragments, glyph_index, start));
         if boundary_index < start {
             return fallback_visual_rows(wrapped_line.len(), fragments, row_style);
         }
@@ -477,34 +487,54 @@ pub(super) fn visual_row_height_for_range(
 }
 
 pub(super) fn text_runs_for_segments(segments: &[StyledDisplaySegment]) -> Vec<TextRun> {
+    text_runs_for_segment_lengths(
+        segments
+            .iter()
+            .map(|segment| (segment.text.len(), segment.style.clone())),
+    )
+}
+
+pub(super) fn text_runs_for_display_segments(
+    display_text: &str,
+    segments: &[StyledDisplaySegment],
+) -> Vec<TextRun> {
+    text_runs_for_segment_lengths(segments.iter().filter_map(|segment| {
+        let text = display_text.get(segment.display_range.clone())?;
+        Some((text.len(), segment.style.clone()))
+    }))
+}
+
+fn text_runs_for_segment_lengths(
+    segments: impl IntoIterator<Item = (usize, DisplayTextStyle)>,
+) -> Vec<TextRun> {
     let palette = editor_palette();
     let mut runs = Vec::new();
 
-    for segment in segments {
-        if segment.text.is_empty() {
+    for (len, style) in segments {
+        if len == 0 {
             continue;
         }
 
         let mut run_font = font(EDITOR_FONT_FAMILY);
-        if let Some(font_weight) = segment.style.font_weight {
+        if let Some(font_weight) = style.font_weight {
             run_font.weight = font_weight;
         }
-        if segment.style.italic {
+        if style.italic {
             run_font.style = FontStyle::Italic;
         }
 
-        let color = segment.style.color.unwrap_or(palette.text);
+        let color = style.color.unwrap_or(palette.text);
         runs.push(TextRun {
-            len: segment.text.len(),
+            len,
             font: run_font,
             color,
-            background_color: segment.style.text_background,
-            underline: segment.style.underline.then_some(UnderlineStyle {
+            background_color: style.text_background,
+            underline: style.underline.then_some(UnderlineStyle {
                 thickness: px(1.),
                 color: Some(color),
                 wavy: false,
             }),
-            strikethrough: segment.style.line_through.then_some(StrikethroughStyle {
+            strikethrough: style.line_through.then_some(StrikethroughStyle {
                 thickness: px(1.),
                 color: Some(color),
             }),
@@ -523,6 +553,40 @@ pub(super) fn text_runs_for_segments(segments: &[StyledDisplaySegment]) -> Vec<T
     }
 
     runs
+}
+
+pub(super) fn text_runs_on_char_boundaries(text: &str, runs: &[TextRun]) -> Vec<TextRun> {
+    if runs.is_empty() {
+        return Vec::new();
+    }
+
+    let mut normalized = Vec::with_capacity(runs.len());
+    let mut start = 0;
+    let mut desired_end = 0usize;
+    for (index, run) in runs.iter().enumerate() {
+        desired_end = desired_end.saturating_add(run.len);
+        let end = if index == runs.len() - 1 || desired_end >= text.len() {
+            text.len()
+        } else {
+            text.floor_char_boundary(desired_end)
+        };
+        if end <= start {
+            continue;
+        }
+
+        let mut run = run.clone();
+        run.len = end - start;
+        normalized.push(run);
+        start = end;
+    }
+
+    if start < text.len()
+        && let Some(last) = normalized.last_mut()
+    {
+        last.len += text.len() - start;
+    }
+
+    normalized
 }
 
 pub(super) fn display_inline_fragments(
@@ -669,6 +733,9 @@ pub(super) fn text_segments_for_fragments(
 
 pub(super) fn segment_text(display_text: &str, segment: &StyledDisplaySegment) -> Option<String> {
     if !segment.text.is_empty() || segment.display_range.is_empty() {
+        if let Some(text) = display_text.get(segment.display_range.clone()) {
+            return Some(text.to_string());
+        }
         return Some(segment.text.clone());
     }
 

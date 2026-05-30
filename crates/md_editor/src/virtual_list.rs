@@ -10,11 +10,10 @@
 #![allow(dead_code)]
 
 use gpui::{
-    AnyElement, App, AvailableSpace, Bounds, ContentMask, DispatchPhase, Edges, Element, EntityId,
-    ElementId, FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId,
-    IntoElement, LayoutId,
-    Overflow, Pixels, Point, Refineable as _, ScrollDelta, ScrollWheelEvent, Size, Style,
-    StyleRefinement, Styled, Window, point, px, size,
+    AnyElement, App, AvailableSpace, Bounds, ContentMask, DispatchPhase, Edges, Element, ElementId,
+    EntityId, FocusHandle, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId,
+    IntoElement, LayoutId, Overflow, Pixels, Point, Refineable as _, ScrollDelta, ScrollWheelEvent,
+    Size, Style, StyleRefinement, Styled, Window, point, px, size,
 };
 use md_sum_tree::{Bias, Dimensions, SumTree};
 use std::collections::VecDeque;
@@ -1546,4 +1545,3 @@ impl md_sum_tree::SeekTarget<'_, ListItemSummary, ListItemSummary> for Height {
         self.0.partial_cmp(&other.height).unwrap()
     }
 }
-
