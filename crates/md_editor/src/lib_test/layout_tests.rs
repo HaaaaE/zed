@@ -147,7 +147,7 @@ fn rendered_fenced_code_item_hides_fence_until_marker_is_active() {
         code_item_index,
         Some(&collapsed_selection(Point::new(5, 0))),
     );
-    assert_eq!(inactive_row.text, "let x = 1;\nlet y = 2;\n");
+    assert_eq!(inactive_row.text, "let x = 1; let y = 2; ");
     assert_eq!(inactive_row.source_row_range, 1..5);
 
     let active_fence_row = rendered_display_row_for_item_for_tests(

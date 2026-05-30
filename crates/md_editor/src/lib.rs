@@ -2273,7 +2273,6 @@ fn rendered_display_row(
         &source_text,
         &source_range,
         &projection,
-        &markdown_blocks,
         &inline_spans,
         &rendered_element_descriptors,
         MarkdownEditorMode::Rendered,
@@ -2401,7 +2400,6 @@ fn project_display_row_text(
     source_text: &str,
     row_source_range: &Range<usize>,
     projection: &MarkdownProjectionMap,
-    markdown_blocks: &[MarkdownBlock],
     inline_spans: &[MarkdownInlineSpan],
     rendered_element_descriptors: &[RenderedElementDescriptor],
     mode: MarkdownEditorMode,
@@ -2410,19 +2408,11 @@ fn project_display_row_text(
         return (project_row_text(source_text, projection), Vec::new());
     }
 
-    let rendered_code_block = markdown_blocks.iter().any(|block| {
-        matches!(
-            block.kind,
-            MarkdownBlockKind::FencedCodeBlock | MarkdownBlockKind::IndentedCodeBlock
-        )
-    });
     let mut display_text = project_row_text(source_text, projection);
-    if !rendered_code_block {
-        display_text = display_text
-            .replace("\r\n", " ")
-            .replace('\n', " ")
-            .replace('\r', " ");
-    }
+    display_text = display_text
+        .replace("\r\n", " ")
+        .replace('\n', " ")
+        .replace('\r', " ");
     let mut insertions = Vec::new();
     for span in inline_spans {
         let descriptor = rendered_element_descriptors
