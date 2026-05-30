@@ -18,6 +18,7 @@
 - 已修正 rendered paragraph item 的当前段/caret 判断：跨 source rows 的同一段现在按 `source_row_range` 识别，`Shift+Enter` 后的第二个 source row 仍在同一个段节点内显示 caret 和当前段高亮。
 - 已修正 softbreak 与自动 wrap 的组合布局：段内视觉换行仍保留，但每个 softbreak 分段内部继续按 wrap width 自动折行。
 - 已让 rendered 空段在 Backspace/Delete 下可直接删除，并新增针对性的 interaction 测试。
+- 已修正规范空段删除：删除一个 `EmptyParagraph` 时会连同后续 separator 一起收敛为单 separator，Backspace 回到前一段尾，Delete 前进到后一段首。
 - 已新增空段内 Enter 测试，覆盖从 1 个 empty paragraph 到 2 个 empty paragraphs 的 `2n + 1` blank run 序列化。
 - 已新增 rendered 空段可点击/caret 的交互测试，确认它走 Text layout 且保有可见高度。
 - 验证通过：
@@ -25,6 +26,7 @@
   - `cargo test -p md_editor enter --lib`
   - `cargo test -p md_editor rendered_soft_break_caret_stays_inside_paragraph_item --lib`
   - `cargo test -p md_editor rendered_soft_break_segments_still_wrap --lib`
+  - `cargo test -p md_editor canonical_empty_paragraph --lib`
   - `cargo test -p md_editor --lib`
   - `cargo check -p updraft_editor`
 - 剩余主要工作：Rendered 模式段尾连续 Enter 的光标语义细化；空段删除后更完整的跨段合并和光标收敛。

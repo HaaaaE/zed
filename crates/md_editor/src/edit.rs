@@ -76,14 +76,20 @@ pub(crate) fn backspace_selection_in_mode(
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
         let snapshot = buffer.snapshot();
-        if let Some(range) =
-            rendered_blank_paragraph_range_at_cursor(&snapshot, selection.head(), HorizontalDirection::Left)
-        {
-            return replace_selection(
+        if let Some(deletion) = rendered_blank_paragraph_deletion_at_cursor(
+            &snapshot,
+            selection.head(),
+            HorizontalDirection::Left,
+        ) {
+            let (mut selection, transaction_id) = replace_selection(
                 buffer,
-                &selection_for_source_range(&snapshot, selection.id, range),
+                &selection_for_source_range(&snapshot, selection.id, deletion.range),
                 "",
             );
+            if let Some(cursor) = deletion.cursor_after_delete {
+                selection = collapsed_selection(cursor);
+            }
+            return (selection, transaction_id);
         }
         let range = rendered_element_range_at_cursor(
             &snapshot,
@@ -148,14 +154,20 @@ pub(crate) fn delete_selection_in_mode(
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
         let snapshot = buffer.snapshot();
-        if let Some(range) =
-            rendered_blank_paragraph_range_at_cursor(&snapshot, selection.head(), HorizontalDirection::Right)
-        {
-            return replace_selection(
+        if let Some(deletion) = rendered_blank_paragraph_deletion_at_cursor(
+            &snapshot,
+            selection.head(),
+            HorizontalDirection::Right,
+        ) {
+            let (mut selection, transaction_id) = replace_selection(
                 buffer,
-                &selection_for_source_range(&snapshot, selection.id, range),
+                &selection_for_source_range(&snapshot, selection.id, deletion.range),
                 "",
             );
+            if let Some(cursor) = deletion.cursor_after_delete {
+                selection = collapsed_selection(cursor);
+            }
+            return (selection, transaction_id);
         }
         let range = rendered_element_range_at_cursor(
             &snapshot,
@@ -181,24 +193,71 @@ pub(crate) fn delete_selection_in_mode(
     delete_selection(buffer, &selection)
 }
 
-fn rendered_blank_paragraph_range_at_cursor(
+struct RenderedBlankParagraphDeletion {
+    range: std::ops::Range<usize>,
+    cursor_after_delete: Option<Point>,
+}
+
+fn rendered_blank_paragraph_deletion_at_cursor(
     snapshot: &BufferSnapshot,
     cursor: Point,
     direction: HorizontalDirection,
-) -> Option<std::ops::Range<usize>> {
+) -> Option<RenderedBlankParagraphDeletion> {
     let index = RenderedDisplayIndex::build(snapshot);
     let row = empty_paragraph_row_for_cursor(&index, snapshot, cursor.row as usize, direction)?;
     let item_index = index.item_index_for_source_row(row)?;
     let item = index.item(item_index)?;
-    if !matches!(item.kind, super::rendered_index::RenderedDisplayItemKind::EmptyParagraph) {
+    if !matches!(
+        item.kind,
+        super::rendered_index::RenderedDisplayItemKind::EmptyParagraph
+    ) {
         return None;
     }
 
     let text_snapshot = snapshot.as_text_snapshot();
     let start = text_snapshot.point_to_offset(Point::new(item.row_range.start as u32, 0));
-    let end_row = item.row_range.end.min(text_snapshot.row_count() as usize) as u32;
+    let end_row = empty_paragraph_delete_end_row(snapshot, item.row_range.end);
     let end = text_snapshot.point_to_offset(Point::new(end_row, 0));
-    Some(start..end)
+    Some(RenderedBlankParagraphDeletion {
+        range: start..end,
+        cursor_after_delete: match direction {
+            HorizontalDirection::Left => Some(previous_editable_point_before_row(
+                snapshot,
+                item.row_range.start,
+            )),
+            HorizontalDirection::Right => None,
+        },
+    })
+}
+
+fn empty_paragraph_delete_end_row(snapshot: &BufferSnapshot, row_after_empty: usize) -> u32 {
+    let row_count = snapshot.as_text_snapshot().row_count() as usize;
+    let mut end_row = row_after_empty.min(row_count);
+    if end_row < row_count && source_row_is_blank(snapshot, end_row) {
+        end_row += 1;
+    }
+    end_row as u32
+}
+
+fn previous_editable_point_before_row(snapshot: &BufferSnapshot, row: usize) -> Point {
+    for previous_row in (0..row).rev() {
+        if source_row_is_blank(snapshot, previous_row) {
+            continue;
+        }
+        let previous_row = previous_row as u32;
+        return Point::new(
+            previous_row,
+            snapshot.as_text_snapshot().line_len(previous_row),
+        );
+    }
+    Point::zero()
+}
+
+fn source_row_is_blank(snapshot: &BufferSnapshot, row: usize) -> bool {
+    snapshot
+        .as_text_snapshot()
+        .text_for_range(super::row_source_range(snapshot, row as u32))
+        .all(|chunk| chunk.trim().is_empty())
 }
 
 fn empty_paragraph_row_for_cursor(

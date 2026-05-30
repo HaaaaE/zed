@@ -2940,6 +2940,19 @@ fn rendered_backspace_deletes_empty_paragraph() {
 }
 
 #[test]
+fn rendered_backspace_deletes_canonical_empty_paragraph_and_returns_to_previous_paragraph() {
+    let mut buffer = Buffer::local("a\n\n\n\nb\n");
+    let selection = collapsed_selection(Point::new(2, 0));
+
+    let (selection, transaction_id) =
+        backspace_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "a\n\nb\n");
+    assert_eq!(selection, collapsed_selection(Point::new(0, 1)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
 fn rendered_delete_deletes_empty_paragraph() {
     let mut buffer = Buffer::local("a\n\n\nb\n");
     let selection = collapsed_selection(Point::new(1, 0));
@@ -2949,6 +2962,19 @@ fn rendered_delete_deletes_empty_paragraph() {
 
     assert_eq!(buffer.text(), "a\n\nb\n");
     assert_eq!(selection, collapsed_selection(Point::new(1, 0)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn rendered_delete_deletes_canonical_empty_paragraph_and_moves_to_next_paragraph() {
+    let mut buffer = Buffer::local("a\n\n\n\nb\n");
+    let selection = collapsed_selection(Point::new(1, 0));
+
+    let (selection, transaction_id) =
+        delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "a\n\nb\n");
+    assert_eq!(selection, collapsed_selection(Point::new(2, 0)));
     assert!(transaction_id.is_some());
 }
 
