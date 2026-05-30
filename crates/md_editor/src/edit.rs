@@ -6,6 +6,7 @@ use super::rendered_element::{
 };
 use super::{
     MarkdownEditorMode,
+    rendered_index::RenderedDisplayIndex,
     selection::{
         HorizontalDirection, clip_selection_in_text_snapshot, collapsed_selection,
         selection_byte_range_in_text_snapshot, selection_for_source_range,
@@ -75,6 +76,15 @@ pub(crate) fn backspace_selection_in_mode(
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
         let snapshot = buffer.snapshot();
+        if let Some(range) =
+            rendered_blank_paragraph_range_at_cursor(&snapshot, selection.head(), HorizontalDirection::Left)
+        {
+            return replace_selection(
+                buffer,
+                &selection_for_source_range(&snapshot, selection.id, range),
+                "",
+            );
+        }
         let range = rendered_element_range_at_cursor(
             &snapshot,
             selection.head(),
@@ -138,6 +148,15 @@ pub(crate) fn delete_selection_in_mode(
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
         let snapshot = buffer.snapshot();
+        if let Some(range) =
+            rendered_blank_paragraph_range_at_cursor(&snapshot, selection.head(), HorizontalDirection::Right)
+        {
+            return replace_selection(
+                buffer,
+                &selection_for_source_range(&snapshot, selection.id, range),
+                "",
+            );
+        }
         let range = rendered_element_range_at_cursor(
             &snapshot,
             selection.head(),
@@ -160,6 +179,64 @@ pub(crate) fn delete_selection_in_mode(
     }
 
     delete_selection(buffer, &selection)
+}
+
+fn rendered_blank_paragraph_range_at_cursor(
+    snapshot: &BufferSnapshot,
+    cursor: Point,
+    direction: HorizontalDirection,
+) -> Option<std::ops::Range<usize>> {
+    let index = RenderedDisplayIndex::build(snapshot);
+    let row = empty_paragraph_row_for_cursor(&index, snapshot, cursor.row as usize, direction)?;
+    let item_index = index.item_index_for_source_row(row)?;
+    let item = index.item(item_index)?;
+    if !matches!(item.kind, super::rendered_index::RenderedDisplayItemKind::EmptyParagraph) {
+        return None;
+    }
+
+    let text_snapshot = snapshot.as_text_snapshot();
+    let start = text_snapshot.point_to_offset(Point::new(item.row_range.start as u32, 0));
+    let end_row = item.row_range.end.min(text_snapshot.row_count() as usize) as u32;
+    let end = text_snapshot.point_to_offset(Point::new(end_row, 0));
+    Some(start..end)
+}
+
+fn empty_paragraph_row_for_cursor(
+    index: &RenderedDisplayIndex,
+    snapshot: &BufferSnapshot,
+    row: usize,
+    direction: HorizontalDirection,
+) -> Option<usize> {
+    if index
+        .item_index_for_source_row(row)
+        .and_then(|item_index| index.item(item_index))
+        .is_some_and(|item| {
+            matches!(
+                item.kind,
+                super::rendered_index::RenderedDisplayItemKind::EmptyParagraph
+            )
+        })
+    {
+        return Some(row);
+    }
+
+    let neighbor = match direction {
+        HorizontalDirection::Left => row.checked_sub(1)?,
+        HorizontalDirection::Right => {
+            let next = row.saturating_add(1);
+            (next < snapshot.as_text_snapshot().row_count() as usize).then_some(next)?
+        }
+    };
+    index
+        .item_index_for_source_row(neighbor)
+        .and_then(|item_index| index.item(item_index))
+        .is_some_and(|item| {
+            matches!(
+                item.kind,
+                super::rendered_index::RenderedDisplayItemKind::EmptyParagraph
+            )
+        })
+        .then_some(neighbor)
 }
 
 pub fn delete_selection(

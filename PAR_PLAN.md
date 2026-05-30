@@ -15,12 +15,13 @@
 - 已完成第二片：新增 `InsertSoftBreak` action 和默认 `shift-enter` keybinding；Source 模式 Enter 仍保留自动缩进；Rendered 模式 Enter 先落基础段分割，写入规范 separator `\n\n`；Rendered 模式 Shift+Enter 写入普通 `\n` 作为段内软断行。
 - 已新增编辑测试覆盖 rendered Enter、rendered Shift+Enter、Source Enter 自动缩进。
 - 已将 rendered paragraph 内普通 `\n` 的显示从空格改为视觉断行，和 `Shift+Enter` 的输入语义对齐。
+- 已让 rendered 空段在 Backspace/Delete 下可直接删除，并新增针对性的 interaction 测试。
 - 验证通过：
   - `cargo test -p md_editor rendered_display_index --lib`
   - `cargo test -p md_editor enter --lib`
   - `cargo test -p md_editor --lib`
   - `cargo check -p updraft_editor`
-- 剩余主要工作：Rendered 模式连续 Enter / 空段 Enter 的 `2n + 1` blank run 规范化；Backspace / Delete 的空段删除和跨段合并；空段点击/caret 交互测试。
+- 剩余主要工作：Rendered 模式连续 Enter / 空段 Enter 的 `2n + 1` blank run 规范化；空段点击/caret 交互测试；空段删除后更完整的跨段合并和光标收敛。
 
 ## Key Changes
 
