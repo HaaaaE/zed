@@ -38,3 +38,12 @@ pub(crate) fn rendered_item_index_for_cursor(
     let source_offset = snapshot.as_text_snapshot().point_to_offset(cursor);
     rendered_index.item_index_for_source_offset(snapshot, source_offset)
 }
+
+pub(crate) fn rendered_item_index_for_cursor_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    rendered_index: &RenderedDisplayIndex,
+    cursor: Point,
+) -> Option<usize> {
+    let cursor = snapshot.clip_point(cursor, md_text::Bias::Left);
+    rendered_index.item_index_for_source_row(cursor.row as usize)
+}

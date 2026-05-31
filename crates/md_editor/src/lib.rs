@@ -446,7 +446,7 @@ impl MarkdownEditor {
         self.rendered_drag_projection_state = None;
         self.clear_display_row_cache();
         self.clear_row_layout_cache();
-        self.sync_display_list_state(row_count_before, &self.selection.clone());
+        self.sync_display_list_state(row_count_before, &self.selection.clone(), None, false);
         self.reveal_cursor_row();
         cx.notify();
     }
@@ -576,8 +576,11 @@ impl MarkdownEditor {
         &mut self,
         row_count_before: usize,
         previous_selection: &Selection<Point>,
+        row_count_after: Option<usize>,
+        skip_selection_sync: bool,
     ) {
-        let row_count_after = self.display_item_count_for_mode(self.mode);
+        let row_count_after =
+            row_count_after.unwrap_or_else(|| self.display_item_count_for_mode(self.mode));
         if row_count_before != row_count_after {
             if let Some((old_range, count)) = row_count_change_splice(
                 row_count_before,
@@ -592,7 +595,9 @@ impl MarkdownEditor {
             }
             return;
         }
-        self.sync_rendered_rows_for_selection_change(previous_selection);
+        if !skip_selection_sync {
+            self.sync_rendered_rows_for_selection_change(previous_selection);
+        }
     }
 
     fn remeasure_rendered_items_for_selection_change(
@@ -696,6 +701,23 @@ impl MarkdownEditor {
                 self.buffer.as_text_snapshot(),
                 &self.selection,
             );
+        }
+    }
+
+    fn reveal_cursor_row_with_rendered_index(&mut self, index: Option<&RenderedDisplayIndex>) {
+        if self.mode == MarkdownEditorMode::Rendered
+            && let Some(index) = index
+        {
+            let cursor =
+                clip_cursor_in_text_snapshot(self.buffer.as_text_snapshot(), self.selection.head());
+            let item_index = display_space::rendered_item_index_for_cursor_in_text_snapshot(
+                self.buffer.as_text_snapshot(),
+                index,
+                cursor,
+            );
+            reveal_selection_item(&self.display_list_state, item_index);
+        } else {
+            self.reveal_cursor_row();
         }
     }
 }

@@ -512,6 +512,82 @@ impl RenderedDisplayIndex {
         }))
     }
 
+    pub fn update_after_plain_text_edit(
+        &self,
+        text_snapshot: &TextBufferSnapshot,
+        edit_summary: &BufferEditSummary,
+    ) -> Option<Arc<Self>> {
+        if edit_summary.row_delta != 0
+            || edit_summary.old_affected_rows != edit_summary.new_affected_rows
+            || edit_summary.new_affected_rows.len() != 1
+            || self.row_to_item.len() != text_snapshot.row_count() as usize
+            || self.blank_row_roles.len() != text_snapshot.row_count() as usize
+        {
+            return None;
+        }
+
+        let row = edit_summary.new_affected_rows.start;
+        let item_index = self.item_index_for_source_row(row)?;
+        let old_item = self.item(item_index)?;
+        if old_item.kind != RenderedDisplayItemKind::Paragraph
+            || old_item.row_range != (row..row + 1)
+            || edit_summary.old_range.start <= old_item.source_range.start
+            || edit_summary.old_range.end > old_item.source_range.end
+            || self.blank_row_roles.get(row).copied().flatten().is_some()
+            || !source_row_is_isolated_in_text_snapshot(text_snapshot, row)
+        {
+            return None;
+        }
+
+        let new_source_range = row_source_range_in_text_snapshot(text_snapshot, row as u32);
+        if source_range_is_blank_in_text_snapshot(text_snapshot, new_source_range.clone()) {
+            return None;
+        }
+
+        let byte_delta = edit_summary.byte_delta;
+        let shift_offset = |offset: usize| -> Option<usize> {
+            if byte_delta >= 0 {
+                offset.checked_add(byte_delta as usize)
+            } else {
+                offset.checked_sub(byte_delta.unsigned_abs())
+            }
+        };
+
+        let mut items = self.items.clone();
+        for item in &mut items {
+            if item.index == item_index {
+                item.source_range = new_source_range.clone();
+                item.id = DisplayItemId(display_item_id(
+                    &item.source_range,
+                    &item.row_range,
+                    item.kind,
+                ));
+            } else if item.source_range.start >= old_item.source_range.end {
+                item.source_range =
+                    shift_offset(item.source_range.start)?..shift_offset(item.source_range.end)?;
+                item.id = DisplayItemId(display_item_id(
+                    &item.source_range,
+                    &item.row_range,
+                    item.kind,
+                ));
+            }
+        }
+
+        #[cfg(any(test, feature = "test-support"))]
+        RENDERED_DISPLAY_INDEX_STATS.with(|stats| {
+            let mut value = stats.get();
+            value.incremental_updates += 1;
+            stats.set(value);
+        });
+
+        Some(Arc::new(Self {
+            version: text_snapshot.version().clone(),
+            items,
+            row_to_item: self.row_to_item.clone(),
+            blank_row_roles: self.blank_row_roles.clone(),
+        }))
+    }
+
     #[cfg(any(test, feature = "test-support"))]
     pub fn reset_stats_for_tests() {
         RENDERED_DISPLAY_INDEX_STATS.with(|stats| stats.set(RenderedDisplayIndexStats::default()));
@@ -640,6 +716,21 @@ fn source_row_is_blank_in_text_snapshot(snapshot: &TextBufferSnapshot, row: usiz
     snapshot
         .text_for_range(row_source_range_in_text_snapshot(snapshot, row as u32))
         .all(|chunk| chunk.trim().is_empty())
+}
+
+fn source_range_is_blank_in_text_snapshot(
+    snapshot: &TextBufferSnapshot,
+    source_range: Range<usize>,
+) -> bool {
+    snapshot
+        .text_for_range(source_range)
+        .all(|chunk| chunk.trim().is_empty())
+}
+
+fn source_row_is_isolated_in_text_snapshot(snapshot: &TextBufferSnapshot, row: usize) -> bool {
+    let row_count = snapshot.row_count() as usize;
+    (row == 0 || source_row_is_blank_in_text_snapshot(snapshot, row - 1))
+        && (row + 1 >= row_count || source_row_is_blank_in_text_snapshot(snapshot, row + 1))
 }
 
 fn previous_nonblank_row_before_blank_run(

@@ -495,6 +495,8 @@ impl MarkdownEditor {
         invalidation: EditLayoutInvalidation,
         cx: &mut Context<Self>,
     ) {
+        let mut local_row_count_after = None;
+        let mut local_rendered_index = None;
         let local_edit_invalidation = if changed {
             match invalidation {
                 EditLayoutInvalidation::LocalSourceSelection { edit_summary } => {
@@ -503,21 +505,31 @@ impl MarkdownEditor {
                             (self.display_item_count_for_mode(self.mode), None)
                         }
                         MarkdownEditorMode::Rendered => {
-                            let snapshot = self.buffer.snapshot();
                             let existing_index = self.display_cache.rendered_display_index.clone();
                             let index = if let (Some(existing_index), Some(edit_summary)) =
                                 (existing_index, edit_summary.as_ref())
                             {
-                                existing_index
-                                    .update_after_edit(&snapshot, edit_summary)
-                                    .unwrap_or_else(|| self.rendered_display_index(&snapshot))
+                                if let Some(index) = existing_index.update_after_plain_text_edit(
+                                    self.buffer.as_text_snapshot(),
+                                    edit_summary,
+                                ) {
+                                    index
+                                } else {
+                                    let snapshot = self.buffer.snapshot();
+                                    existing_index
+                                        .update_after_edit(&snapshot, edit_summary)
+                                        .unwrap_or_else(|| self.rendered_display_index(&snapshot))
+                                }
                             } else {
+                                let snapshot = self.buffer.snapshot();
                                 self.rendered_display_index(&snapshot)
                             };
                             self.display_cache.rendered_display_index = Some(index.clone());
                             (index.item_count(), Some(index))
                         }
                     };
+                    local_row_count_after = Some(row_count_after);
+                    local_rendered_index = rendered_index.clone();
                     let byte_delta = edit_summary.as_ref().map(|summary| summary.byte_delta);
                     local_edit_invalidation_rows(
                         self.mode,
@@ -568,13 +580,18 @@ impl MarkdownEditor {
                 self.clear_row_layout_cache();
             }
         }
-        self.sync_display_list_state(row_count_before, previous_selection);
+        self.sync_display_list_state(
+            row_count_before,
+            previous_selection,
+            local_row_count_after,
+            local_edit_invalidation.is_some(),
+        );
         if let Some((rows, _)) = local_edit_invalidation {
             self.display_list_state.remeasure_items(rows);
         } else if changed && self.mode == MarkdownEditorMode::Rendered {
             self.remeasure_rendered_items_for_selection_change(previous_selection);
         }
-        self.reveal_cursor_row();
+        self.reveal_cursor_row_with_rendered_index(local_rendered_index.as_deref());
         if changed {
             self.emit_dirty_state(cx);
         } else {

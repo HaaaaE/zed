@@ -2877,6 +2877,7 @@ fn rendered_length_preserving_single_item_edit_keeps_other_display_rows(
             .expect("row 2 should exist");
 
         RenderedDisplayIndex::reset_stats_for_tests();
+        let syntax_version_before_edit = editor.buffer.cached_syntax_version_for_tests();
         let row_count_before = editor.display_list_state.item_count();
         let (selection, summary) = replace_selection(&mut editor.buffer, &editor.selection, "X");
         let summary = summary.expect("edit should produce summary");
@@ -2897,6 +2898,11 @@ fn rendered_length_preserving_single_item_edit_keeps_other_display_rows(
                 full_builds: 0,
                 incremental_updates: 1,
             }
+        );
+        assert_eq!(
+            editor.buffer.cached_syntax_version_for_tests(),
+            syntax_version_before_edit,
+            "rendered plain text edit should not refresh markdown syntax during edit invalidation"
         );
 
         let snapshot = editor.buffer.snapshot();

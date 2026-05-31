@@ -38,6 +38,11 @@
     - 更新 affected item，并按 byte delta 平移后续 item source offsets；复杂结构编辑返回 fallback。
     - editor rendered edit 通知路径先尝试 cached index 增量更新，再 fallback full build。
     - 已通过 `cargo test -p md_projection`、`cargo test -p md_editor` 和 `cargo check -p updraft_editor`。
+  - [x] Rendered 普通文本输入避开 syntax refresh：
+    - 对已缓存 rendered index 的孤立普通段落单行编辑，先用 `TextBufferSnapshot` 更新 rendered index，不再为了 edit invalidation 立即调用 `buffer.snapshot()`。
+    - 本地局部 edit 复用已计算的 rendered row count/index 做 list state sync 和 cursor reveal，避免后续 sync/reveal 再次触发 syntax refresh。
+    - 回归测试断言 rendered 普通输入不 full build rendered index，且 edit invalidation 阶段不刷新 Markdown syntax。
+    - 已通过 `cargo test -p md_projection`、`cargo test -p md_editor` 和 `cargo check -p updraft_editor`。
   - [ ] 待完成：Markdown syntax tree 基于 edit summary 的增量 reparse，移除 old/new 全文复制热路径。
   - [ ] 待完成：`RenderedDisplayIndex::update_after_edit` 扩展到 dirty row window、blank-run/list/table/code-fence 等结构边界编辑。
   - [x] md_editor perf suite 普通 rendered edit 回归场景：
