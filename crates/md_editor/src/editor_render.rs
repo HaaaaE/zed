@@ -1,4 +1,5 @@
 use super::*;
+use crate::display_model::RenderedBackgroundKind;
 
 impl Render for MarkdownEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -96,8 +97,9 @@ impl Render for MarkdownEditor {
                             window,
                             _cx,
                         );
-                        let row_min_height = row_layout.row_min_height(row_style);
-                        let content_min_height = row_layout.content_min_height(row_style);
+                        let row_min_height = row_layout.row_min_height(row_style, &display_row);
+                        let content_min_height =
+                            row_layout.content_min_height(row_style, &display_row);
                         let row_contents = render_display_row_layout(
                             &snapshot,
                             &display_row,
@@ -184,6 +186,7 @@ fn render_editor_row(
     cx: &mut Context<MarkdownEditor>,
 ) -> gpui::AnyElement {
     let palette = editor_palette();
+    let content_padding = display_row.presentation.content_padding;
 
     div()
         .id(display_row.row as usize)
@@ -227,10 +230,36 @@ fn render_editor_row(
                 .flex()
                 .flex_col()
                 .relative()
+                .pt(px(f32::from(content_padding.top)))
+                .pb(px(f32::from(content_padding.bottom)))
                 .text_size(row_style.text_size)
                 .line_height(row_style.line_height)
                 .min_h(content_min_height)
+                .children(render_row_background(display_row))
                 .children(row_contents),
         )
         .into_any_element()
+}
+
+fn render_row_background(display_row: &DisplayRow) -> Vec<gpui::AnyElement> {
+    let Some(background) = display_row.presentation.background else {
+        return Vec::new();
+    };
+
+    let palette = editor_palette();
+    let color = match background {
+        RenderedBackgroundKind::CodeBlock => palette.fenced_code_background,
+        RenderedBackgroundKind::BlockQuote => return Vec::new(),
+    };
+
+    vec![
+        div()
+            .absolute()
+            .left(display_row.rendered_indent_width())
+            .top_0()
+            .bottom_0()
+            .w_full()
+            .bg(color)
+            .into_any_element(),
+    ]
 }

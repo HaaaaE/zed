@@ -103,22 +103,32 @@ impl DisplayItemLayout {
         }
     }
 
-    pub(super) fn row_min_height(&self, row_style: RowDisplayStyle) -> gpui::Pixels {
-        match self {
+    pub(super) fn row_min_height(
+        &self,
+        row_style: RowDisplayStyle,
+        display_row: &DisplayRow,
+    ) -> gpui::Pixels {
+        let vertical_padding = display_row.vertical_content_padding();
+        (match self {
             Self::Text(text_layout) => row_style.min_height.max(text_layout.height(row_style)),
             Self::Block(block_layout) if block_layout.height() == px(0.) => px(0.),
             Self::Block(block_layout) => row_style.min_height.max(block_layout.height()),
             Self::TableRow(table_layout) => row_style.min_height.max(table_layout.height()),
-        }
+        }) + vertical_padding
     }
 
-    pub(super) fn content_min_height(&self, row_style: RowDisplayStyle) -> gpui::Pixels {
-        match self {
+    pub(super) fn content_min_height(
+        &self,
+        row_style: RowDisplayStyle,
+        display_row: &DisplayRow,
+    ) -> gpui::Pixels {
+        let vertical_padding = display_row.vertical_content_padding();
+        (match self {
             Self::Text(text_layout) => text_layout.height(row_style),
             Self::Block(block_layout) if block_layout.height() == px(0.) => px(0.),
             Self::Block(block_layout) => row_style.min_height.max(block_layout.height()),
             Self::TableRow(table_layout) => row_style.min_height.max(table_layout.height()),
-        }
+        }) + vertical_padding
     }
 }
 

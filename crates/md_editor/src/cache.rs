@@ -876,7 +876,10 @@ impl MarkdownEditor {
             );
             self.display_list_state.set_item_size_hint(
                 item,
-                gpui::size(gpui::px(0.), row_layout.row_min_height(row_style)),
+                gpui::size(
+                    gpui::px(0.),
+                    row_layout.row_min_height(row_style, &display_row),
+                ),
             );
         }
 

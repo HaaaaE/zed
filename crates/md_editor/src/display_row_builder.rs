@@ -159,8 +159,12 @@ pub(crate) fn rendered_display_row(
     );
     let heading_level = heading_level_for_display_row(&markdown_blocks, row);
     let rendered_indent_level = rendered_indent_level_for_display_row(&markdown_blocks, row);
-    let presentation =
-        rendered_item_presentation_for_display_row(&markdown_blocks, rendered_indent_level, row);
+    let presentation = rendered_item_presentation_for_display_row(
+        &markdown_blocks,
+        rendered_indent_level,
+        &source_range,
+        row,
+    );
     let adornments =
         rendered_adornments_for_display_row(&markdown_blocks, &source_text, &source_range, row);
     DisplayRow {
@@ -231,16 +235,34 @@ pub(crate) fn source_display_row_in_text_snapshot(
 fn rendered_item_presentation_for_display_row(
     markdown_blocks: &[MarkdownBlock],
     blockquote_depth: u16,
+    source_range: &Range<usize>,
     row: u32,
 ) -> RenderedItemPresentation {
-    let has_code_block = markdown_blocks.iter().any(|block| {
+    let code_block = markdown_blocks.iter().find(|block| {
         matches!(
             block.kind,
             MarkdownBlockKind::FencedCodeBlock | MarkdownBlockKind::IndentedCodeBlock
-        ) && block.row_range.contains(&(row as usize))
+        ) && ranges_overlap(&block.content_range, source_range)
     });
-    if has_code_block {
+    if let Some(block) = code_block {
+        let row = row as usize;
+        let first_content_row = match block.kind {
+            MarkdownBlockKind::FencedCodeBlock => block.row_range.start.saturating_add(1),
+            MarkdownBlockKind::IndentedCodeBlock => block.row_range.start,
+            _ => block.row_range.start,
+        };
+        let last_content_row = match block.kind {
+            MarkdownBlockKind::FencedCodeBlock => block.row_range.end.saturating_sub(2),
+            MarkdownBlockKind::IndentedCodeBlock => block.row_range.end.saturating_sub(1),
+            _ => block.row_range.end.saturating_sub(1),
+        };
         return RenderedItemPresentation {
+            content_padding: crate::display_model::RenderedPadding {
+                top: if row == first_content_row { 3 } else { 0 },
+                right: 12,
+                bottom: if row == last_content_row { 3 } else { 0 },
+                left: 12,
+            },
             background: Some(crate::display_model::RenderedBackgroundKind::CodeBlock),
             container: Some(RenderedContainerKind::CodeBlock),
             ..Default::default()

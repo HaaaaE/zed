@@ -554,3 +554,6 @@ Acceptance:
 - Phase 5 Tab/Shift+Tab 完成：list item 内 Tab 插入缩进，Shift+Tab 反缩进；非 list 保留原 tab 行为。
 - 更新 regression test 覆盖 rendered Tab/Shift+Tab list indent/outdent。
 - 验证：`cargo test -p md_editor --lib` 通过；`cargo test -p md_settings` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。
+- Phase 6 完成：fenced/indented code content rows 使用 `RenderedItemPresentation` 获得连续 code block background、horizontal padding、首尾 vertical padding；content origin/wrap width 和 row height 消费 presentation padding；inactive fence/info row 继续隐藏，active fence row 继续 reveal source text。
+- 更新 regression test 覆盖 code content row padding/background/container metadata、inactive/active fence row 不获得 code container presentation、多行 code block 只在首尾行加入 vertical padding。
+- 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。

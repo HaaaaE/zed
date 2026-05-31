@@ -214,6 +214,9 @@ fn rendered_fenced_code_keeps_content_rows_editable_and_hides_inactive_fences() 
     let code_item_index = index
         .item_index_for_source_row(2)
         .expect("code content item");
+    let final_code_item_index = index
+        .item_index_for_source_row(3)
+        .expect("final code content item");
 
     let code_row = rendered_display_row_for_item_for_tests(
         &snapshot,
@@ -222,6 +225,29 @@ fn rendered_fenced_code_keeps_content_rows_editable_and_hides_inactive_fences() 
     );
     assert_eq!(code_row.text, "let x = 1;");
     assert_eq!(code_row.source_row_range, 2..3);
+    assert_eq!(
+        code_row.presentation.container,
+        Some(RenderedContainerKind::CodeBlock)
+    );
+    assert_eq!(
+        code_row.presentation.background,
+        Some(RenderedBackgroundKind::CodeBlock)
+    );
+    assert_eq!(code_row.presentation.content_padding.left, 12);
+    assert_eq!(code_row.presentation.content_padding.right, 12);
+    assert_eq!(code_row.presentation.content_padding.top, 3);
+    assert_eq!(code_row.presentation.content_padding.bottom, 0);
+    assert_eq!(code_row.content_origin_x(), px(12.));
+    assert_eq!(code_row.content_wrap_width(px(120.)), px(96.));
+
+    let final_code_row = rendered_display_row_for_item_for_tests(
+        &snapshot,
+        final_code_item_index,
+        Some(&collapsed_selection(Point::new(5, 0))),
+    );
+    assert_eq!(final_code_row.text, "let y = 2;");
+    assert_eq!(final_code_row.presentation.content_padding.top, 0);
+    assert_eq!(final_code_row.presentation.content_padding.bottom, 3);
 
     let inactive_fence_row = rendered_display_row_for_item_for_tests(
         &snapshot,
@@ -229,6 +255,7 @@ fn rendered_fenced_code_keeps_content_rows_editable_and_hides_inactive_fences() 
         Some(&collapsed_selection(Point::new(5, 0))),
     );
     assert_eq!(inactive_fence_row.text, "");
+    assert_eq!(inactive_fence_row.presentation.container, None);
     assert!(matches!(
         rendered_source_block_layout_for_tests(
             &snapshot,
@@ -252,6 +279,7 @@ fn rendered_fenced_code_keeps_content_rows_editable_and_hides_inactive_fences() 
     );
     assert_eq!(active_fence_row.text, "```rust");
     assert_eq!(active_fence_row.source_row_range, 1..2);
+    assert_eq!(active_fence_row.presentation.container, None);
 }
 
 #[test]
@@ -714,8 +742,9 @@ fn rendered_display_rows_derive_container_presentation() {
         rows[0].presentation.container,
         Some(RenderedContainerKind::BlockQuote { depth: 1 })
     );
+    assert_eq!(rows[1].presentation.container, None);
     assert_eq!(
-        rows[1].presentation.container,
+        rows[2].presentation.container,
         Some(RenderedContainerKind::CodeBlock)
     );
     assert_eq!(
@@ -1739,8 +1768,8 @@ fn rendered_link_reference_definition_uses_zero_height_inactive_block_layout() {
     assert_eq!(row.text, source);
     assert_eq!(block_layout.source_range(), &(0..source.len()));
     assert_eq!(block_layout.height(), px(0.));
-    assert_eq!(row_layout.row_min_height(row_style), px(0.));
-    assert_eq!(row_layout.content_min_height(row_style), px(0.));
+    assert_eq!(row_layout.row_min_height(row_style, &row), px(0.));
+    assert_eq!(row_layout.content_min_height(row_style, &row), px(0.));
     assert!(row_layout.cacheable());
     assert!(matches!(
         block_layout,

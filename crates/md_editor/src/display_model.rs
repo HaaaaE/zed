@@ -54,11 +54,20 @@ impl DisplayRow {
     }
 
     pub(crate) fn content_origin_x(&self) -> Pixels {
-        self.rendered_indent_width()
+        self.rendered_indent_width() + px(f32::from(self.presentation.content_padding.left))
     }
 
     pub(crate) fn content_wrap_width(&self, wrap_width: Pixels) -> Pixels {
-        (wrap_width - self.content_origin_x()).max(px(1.))
+        (wrap_width
+            - self.content_origin_x()
+            - px(f32::from(self.presentation.content_padding.right)))
+        .max(px(1.))
+    }
+
+    pub(crate) fn vertical_content_padding(&self) -> Pixels {
+        px(f32::from(
+            self.presentation.content_padding.top + self.presentation.content_padding.bottom,
+        ))
     }
 
     pub(crate) fn source_to_display(&self, source_offset: usize) -> usize {
