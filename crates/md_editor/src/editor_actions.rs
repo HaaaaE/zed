@@ -487,18 +487,25 @@ impl MarkdownEditor {
         invalidation: EditLayoutInvalidation,
         cx: &mut Context<Self>,
     ) {
-        let row_count_after = self.buffer.as_text_snapshot().row_count() as usize;
-        let local_source_edit_invalidation = if changed {
+        let local_edit_invalidation = if changed {
             match invalidation {
                 EditLayoutInvalidation::LocalSourceSelection { byte_delta } => {
-                    local_source_edit_invalidation_rows(
+                    let row_count_after = self.display_item_count_for_mode(self.mode);
+                    let rendered_index = if self.mode == MarkdownEditorMode::Rendered {
+                        let snapshot = self.buffer.snapshot();
+                        Some(self.rendered_display_index(&snapshot))
+                    } else {
+                        None
+                    };
+                    local_edit_invalidation_rows(
                         self.mode,
                         row_count_before,
                         row_count_after,
                         previous_selection,
                         &self.selection,
+                        rendered_index.as_deref(),
                     )
-                    .map(|rows| LocalSourceEditInvalidation { rows, byte_delta })
+                    .map(|rows| (rows, byte_delta))
                 }
                 EditLayoutInvalidation::Conservative => None,
             }
@@ -507,22 +514,41 @@ impl MarkdownEditor {
         };
 
         if changed {
-            if self.mode == MarkdownEditorMode::Rendered {
-                self.clear_table_layout_cache();
-            }
-            if let Some(invalidation) = local_source_edit_invalidation.as_ref() {
+            if let Some((rows, byte_delta)) = local_edit_invalidation.as_ref() {
                 let version = self.buffer.as_text_snapshot().version().clone();
-                self.rekey_source_rows_for_local_edit(invalidation, version);
-                self.clear_row_layout_input_cache_for_rows(invalidation.rows.clone());
-                self.clear_row_layout_cache_for_rows(invalidation.rows.clone());
+                match self.mode {
+                    MarkdownEditorMode::Source => {
+                        let invalidation = LocalSourceEditInvalidation {
+                            rows: rows.clone(),
+                            byte_delta: *byte_delta,
+                        };
+                        self.rekey_source_rows_for_local_edit(&invalidation, version);
+                    }
+                    MarkdownEditorMode::Rendered => {
+                        let invalidation = LocalRenderedEditInvalidation {
+                            rows: rows.clone(),
+                            byte_delta: *byte_delta,
+                        };
+                        self.rekey_rendered_rows_for_local_edit(&invalidation, version);
+                    }
+                }
+                self.clear_display_row_cache_for_row_ranges(std::slice::from_ref(rows));
+                self.clear_row_layout_input_cache_for_rows(rows.clone());
+                self.clear_row_layout_cache_for_rows(rows.clone());
+                if self.mode == MarkdownEditorMode::Rendered {
+                    self.clear_table_layout_cache();
+                }
             } else {
+                if self.mode == MarkdownEditorMode::Rendered {
+                    self.clear_table_layout_cache();
+                }
                 self.clear_display_row_cache();
                 self.clear_row_layout_cache();
             }
         }
         self.sync_display_list_state(row_count_before, previous_selection);
-        if let Some(invalidation) = local_source_edit_invalidation {
-            self.display_list_state.remeasure_items(invalidation.rows);
+        if let Some((rows, _)) = local_edit_invalidation {
+            self.display_list_state.remeasure_items(rows);
         } else if changed && self.mode == MarkdownEditorMode::Rendered {
             self.remeasure_rendered_items_for_selection_change(previous_selection);
         }

@@ -11,3 +11,9 @@ pub(crate) struct LocalSourceEditInvalidation {
     pub(crate) rows: Range<usize>,
     pub(crate) byte_delta: Option<isize>,
 }
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LocalRenderedEditInvalidation {
+    pub(crate) rows: Range<usize>,
+    pub(crate) byte_delta: Option<isize>,
+}

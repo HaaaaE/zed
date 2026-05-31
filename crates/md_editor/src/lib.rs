@@ -85,7 +85,9 @@ use inline_atom::{
 #[cfg(test)]
 use inline_layout::display_inline_row_inputs;
 use interaction::{mouse_target_for_text_layout, task_checkbox_source_range_for_text_layout_click};
-use invalidation::{EditLayoutInvalidation, LocalSourceEditInvalidation};
+use invalidation::{
+    EditLayoutInvalidation, LocalRenderedEditInvalidation, LocalSourceEditInvalidation,
+};
 use layout::{
     DisplayRowLayout, DisplayRowLayoutInputs, DisplayRowTextLayout, RowDisplayStyle,
     RowLayoutCacheKey, RowLayoutInputCacheKey, VisualDisplayRow, row_display_style_for_display_row,
@@ -710,31 +712,55 @@ fn buffer_byte_delta(before_len: usize, after_len: usize) -> Option<isize> {
     after_len.checked_sub(before_len)
 }
 
-fn local_source_edit_invalidation_rows(
+fn local_edit_invalidation_rows(
     mode: MarkdownEditorMode,
     row_count_before: usize,
     row_count_after: usize,
     previous_selection: &Selection<Point>,
     current_selection: &Selection<Point>,
+    rendered_index: Option<&RenderedDisplayIndex>,
 ) -> Option<Range<usize>> {
-    if mode != MarkdownEditorMode::Source || row_count_before != row_count_after {
+    if row_count_before != row_count_after {
         return None;
     }
 
-    let row = previous_selection.start.row;
-    if previous_selection.end.row != row
-        || current_selection.start.row != row
-        || current_selection.end.row != row
-    {
-        return None;
-    }
+    match mode {
+        MarkdownEditorMode::Source => {
+            let row = previous_selection.start.row;
+            if previous_selection.end.row != row
+                || current_selection.start.row != row
+                || current_selection.end.row != row
+            {
+                return None;
+            }
 
-    let row = row as usize;
-    if row >= row_count_after {
-        return None;
-    }
+            let row = row as usize;
+            if row >= row_count_after {
+                return None;
+            }
 
-    Some(row..row.saturating_add(1))
+            Some(row..row.saturating_add(1))
+        }
+        MarkdownEditorMode::Rendered => {
+            let index = rendered_index?;
+            let rows = [
+                previous_selection.start.row,
+                previous_selection.end.row,
+                current_selection.start.row,
+                current_selection.end.row,
+            ];
+            let item_index = index.item_index_for_source_row(rows[0] as usize)?;
+            if rows
+                .into_iter()
+                .any(|row| index.item_index_for_source_row(row as usize) != Some(item_index))
+            {
+                return None;
+            }
+
+            let item = index.item(item_index)?;
+            Some(item.row_range.clone())
+        }
+    }
 }
 
 fn row_count_change_splice(

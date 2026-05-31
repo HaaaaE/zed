@@ -14,7 +14,9 @@ use super::{
     DisplayRowLayoutInputs, DisplayRowTextLayout, DisplayTableLayout, InlineAtomMeasurementKey,
     InlineAtomMeasurementState, MarkdownEditor, MarkdownEditorMode, RowDisplayStyle,
     RowLayoutCacheKey, RowLayoutInputCacheKey, TableLayoutCacheKey, clip_selection,
-    invalidation::LocalSourceEditInvalidation, layout::DisplayRowCacheKey, ranges_overlap,
+    invalidation::{LocalRenderedEditInvalidation, LocalSourceEditInvalidation},
+    layout::DisplayRowCacheKey,
+    ranges_overlap,
 };
 use crate::display_row_builder::{rendered_display_row, source_display_row_in_text_snapshot};
 use crate::layout::{
@@ -106,6 +108,15 @@ impl DisplayCacheStore {
         self.rekey_source_layout_inputs_for_local_edit(invalidation, version);
     }
 
+    pub(crate) fn rekey_rendered_rows_for_local_edit(
+        &mut self,
+        invalidation: &LocalRenderedEditInvalidation,
+        version: md_text::Global,
+    ) {
+        self.rekey_rendered_display_rows_for_local_edit(invalidation, version.clone());
+        self.rekey_rendered_layout_inputs_for_local_edit(invalidation, version);
+    }
+
     pub(crate) fn rendered_index(
         &mut self,
         snapshot: &BufferSnapshot,
@@ -177,6 +188,75 @@ impl DisplayCacheStore {
                     RowLayoutInputCacheKey {
                         version: version.clone(),
                         item_id: source_display_item_id(&key.source_range, row),
+                        ..key
+                    },
+                    inputs,
+                ))
+            })
+            .collect();
+    }
+
+    fn rendered_row_can_survive_local_edit(
+        invalidation: &LocalRenderedEditInvalidation,
+        source_row_range: &Range<usize>,
+    ) -> bool {
+        if ranges_overlap(&invalidation.rows, source_row_range) {
+            return false;
+        }
+
+        invalidation.byte_delta == Some(0) || source_row_range.end <= invalidation.rows.start
+    }
+
+    fn rekey_rendered_display_rows_for_local_edit(
+        &mut self,
+        invalidation: &LocalRenderedEditInvalidation,
+        version: md_text::Global,
+    ) {
+        self.display_row_cache = self
+            .display_row_cache
+            .drain()
+            .filter_map(|(key, display_row)| {
+                if key.mode != MarkdownEditorMode::Rendered
+                    || !Self::rendered_row_can_survive_local_edit(
+                        invalidation,
+                        &key.source_row_range,
+                    )
+                {
+                    return None;
+                }
+
+                Some((
+                    DisplayRowCacheKey {
+                        version: version.clone(),
+                        ..key
+                    },
+                    display_row,
+                ))
+            })
+            .collect();
+    }
+
+    fn rekey_rendered_layout_inputs_for_local_edit(
+        &mut self,
+        invalidation: &LocalRenderedEditInvalidation,
+        version: md_text::Global,
+    ) {
+        self.row_layout_input_cache = self
+            .row_layout_input_cache
+            .drain()
+            .filter_map(|(key, inputs)| {
+                if key.mode != MarkdownEditorMode::Rendered
+                    || !Self::rendered_row_can_survive_local_edit(
+                        invalidation,
+                        &key.source_row_range,
+                    )
+                {
+                    return None;
+                }
+
+                Some((
+                    RowLayoutInputCacheKey {
+                        version: version.clone(),
                         ..key
                     },
                     inputs,
@@ -337,6 +417,15 @@ impl MarkdownEditor {
     ) {
         self.display_cache
             .rekey_source_rows_for_local_edit(invalidation, version);
+    }
+
+    pub(crate) fn rekey_rendered_rows_for_local_edit(
+        &mut self,
+        invalidation: &LocalRenderedEditInvalidation,
+        version: md_text::Global,
+    ) {
+        self.display_cache
+            .rekey_rendered_rows_for_local_edit(invalidation, version);
     }
 
     pub(crate) fn clear_display_row_cache_for_row_ranges(&mut self, row_ranges: &[Range<usize>]) {

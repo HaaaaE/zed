@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 
 use md_buffer::BufferSnapshot;
 use md_projection::{
@@ -71,10 +71,29 @@ pub(crate) struct RenderedEditPlan {
     pub(crate) normalize_blank_run_after_delete: bool,
 }
 
+struct RenderedEditContext<'a> {
+    snapshot: &'a BufferSnapshot,
+    index: Arc<RenderedDisplayIndex>,
+    topology: RenderedTopology<'a>,
+}
+
+impl<'a> RenderedEditContext<'a> {
+    fn new(snapshot: &'a BufferSnapshot) -> Self {
+        let index = RenderedDisplayIndex::build(snapshot);
+        let topology = RenderedTopology::new(snapshot, index.clone());
+        Self {
+            snapshot,
+            index,
+            topology,
+        }
+    }
+}
+
 pub(crate) fn plan_rendered_insert_paragraph_break(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Option<RenderedEditPlan> {
+    let context = RenderedEditContext::new(snapshot);
     if !selection.is_empty() {
         return Some(replace_selection_plan(
             snapshot,
@@ -89,7 +108,7 @@ pub(crate) fn plan_rendered_insert_paragraph_break(
         range,
         replacement,
         cursor_offset,
-    }) = rendered_semantic_position(snapshot, cursor, RenderedEditIntent::InsertParagraphBreak)
+    }) = rendered_semantic_position(&context, cursor, RenderedEditIntent::InsertParagraphBreak)
     {
         return Some(single_edit_plan_from_offset(
             snapshot,
@@ -110,7 +129,7 @@ pub(crate) fn plan_rendered_insert_paragraph_break(
         ));
     }
 
-    if let Some(position) = newline_run_position_at_cursor(snapshot, cursor) {
+    if let Some(position) = newline_run_position_at_cursor(&context, cursor) {
         match position {
             RenderedSemanticPosition::SoftBreakBoundary { run, .. } => {
                 return Some(canonical_newline_run_plan(
@@ -154,7 +173,7 @@ pub(crate) fn plan_rendered_insert_paragraph_break(
         }
     }
 
-    let insertion = rendered_plain_paragraph_break_insertion(snapshot, cursor);
+    let insertion = rendered_plain_paragraph_break_insertion(&context, cursor);
     Some(replace_selection_plan(
         snapshot,
         selection,
@@ -167,6 +186,7 @@ pub(crate) fn plan_rendered_insert_soft_break(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Option<RenderedEditPlan> {
+    let context = RenderedEditContext::new(snapshot);
     if !selection.is_empty() {
         return Some(replace_selection_plan(
             snapshot,
@@ -178,7 +198,7 @@ pub(crate) fn plan_rendered_insert_soft_break(
 
     let cursor = selection.head();
     if let Some(position) =
-        rendered_semantic_position(snapshot, cursor, RenderedEditIntent::InsertSoftBreak)
+        rendered_semantic_position(&context, cursor, RenderedEditIntent::InsertSoftBreak)
     {
         match position {
             RenderedSemanticPosition::SoftBreakBoundary { run, .. } => {
@@ -202,8 +222,7 @@ pub(crate) fn plan_rendered_insert_soft_break(
                 return Some(move_only_plan(Point::new(run.left_point.row + 1, 0)));
             }
             RenderedSemanticPosition::EmptyParagraph { run, .. } => {
-                let kind = RenderedTopology::new(snapshot, RenderedDisplayIndex::build(snapshot))
-                    .classify_newline_run(&run);
+                let kind = context.topology.classify_newline_run(&run);
                 let has_slot = matches!(
                     kind,
                     RenderedNewlineRunKind::EmptyParagraphs {
@@ -236,13 +255,14 @@ pub(crate) fn plan_rendered_delete_backward(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Option<RenderedEditPlan> {
+    let context = RenderedEditContext::new(snapshot);
     if !selection.is_empty() {
         return Some(delete_rendered_selection_plan(snapshot, selection));
     }
 
     let cursor = selection.head();
     let position =
-        rendered_semantic_position(snapshot, cursor, RenderedEditIntent::DeleteBackward)?;
+        rendered_semantic_position(&context, cursor, RenderedEditIntent::DeleteBackward)?;
     match position {
         RenderedSemanticPosition::LinePrefix {
             range,
@@ -281,12 +301,13 @@ pub(crate) fn plan_rendered_delete_forward(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Option<RenderedEditPlan> {
+    let context = RenderedEditContext::new(snapshot);
     if !selection.is_empty() {
         return Some(delete_rendered_selection_plan(snapshot, selection));
     }
 
     let cursor = selection.head();
-    let position = rendered_semantic_position(snapshot, cursor, RenderedEditIntent::DeleteForward)?;
+    let position = rendered_semantic_position(&context, cursor, RenderedEditIntent::DeleteForward)?;
     match position {
         RenderedSemanticPosition::SoftBreakBoundary { run, .. }
         | RenderedSemanticPosition::ParagraphBoundary { run, .. } => {
@@ -311,11 +332,12 @@ pub(crate) fn plan_rendered_delete_forward(
     }
 }
 
-pub(crate) fn rendered_semantic_position(
-    snapshot: &BufferSnapshot,
+fn rendered_semantic_position(
+    context: &RenderedEditContext<'_>,
     cursor: Point,
     intent: RenderedEditIntent,
 ) -> Option<RenderedSemanticPosition> {
+    let snapshot = context.snapshot;
     match intent {
         RenderedEditIntent::InsertParagraphBreak => {
             if let Some(exit) = rendered_line_exit_at_cursor(snapshot, cursor) {
@@ -325,9 +347,9 @@ pub(crate) fn rendered_semantic_position(
                     cursor_offset: exit.cursor_offset_after_edit,
                 });
             }
-            newline_run_position_at_cursor(snapshot, cursor)
+            newline_run_position_at_cursor(context, cursor)
         }
-        RenderedEditIntent::InsertSoftBreak => newline_run_position_at_cursor(snapshot, cursor),
+        RenderedEditIntent::InsertSoftBreak => newline_run_position_at_cursor(context, cursor),
         RenderedEditIntent::DeleteBackward => {
             if let Some(removal) = rendered_line_prefix_removal_at_cursor(snapshot, cursor) {
                 return Some(RenderedSemanticPosition::LinePrefix {
@@ -336,7 +358,7 @@ pub(crate) fn rendered_semantic_position(
                     cursor_offset: removal.cursor_offset_after_edit,
                 });
             }
-            newline_run_position_for_delete(snapshot, cursor, HorizontalDirection::Left)
+            newline_run_position_for_delete(context, cursor, HorizontalDirection::Left)
                 .or_else(|| {
                     rendered_element_range_at_cursor(snapshot, cursor, HorizontalDirection::Left)
                         .map(|range| RenderedSemanticPosition::RenderedElement { range })
@@ -351,7 +373,7 @@ pub(crate) fn rendered_semantic_position(
                 })
         }
         RenderedEditIntent::DeleteForward => {
-            newline_run_position_for_delete(snapshot, cursor, HorizontalDirection::Right)
+            newline_run_position_for_delete(context, cursor, HorizontalDirection::Right)
                 .or_else(|| {
                     rendered_element_range_at_cursor(snapshot, cursor, HorizontalDirection::Right)
                         .map(|range| RenderedSemanticPosition::RenderedElement { range })
@@ -369,45 +391,47 @@ pub(crate) fn rendered_semantic_position(
 }
 
 fn newline_run_position_at_cursor(
-    snapshot: &BufferSnapshot,
+    context: &RenderedEditContext<'_>,
     cursor: Point,
 ) -> Option<RenderedSemanticPosition> {
+    let snapshot = context.snapshot;
     let text_snapshot = snapshot.as_text_snapshot();
     let cursor = text_snapshot.clip_point(cursor, md_text::Bias::Left);
-    let index = RenderedDisplayIndex::build(snapshot);
-    let topology = RenderedTopology::new(snapshot, index.clone());
     let run = if source_row_is_blank(snapshot, cursor.row as usize) {
-        topology.newline_run_containing_row(cursor.row as usize)
+        context.topology.newline_run_containing_row(cursor.row as usize)
     } else {
-        topology.newline_run_after_line_end(cursor)
+        context.topology.newline_run_after_line_end(cursor)
     }?;
-    if !newline_run_is_between_editable_items(&index, &run) && !run_ends_at_document_tail(&run) {
+    if !newline_run_is_between_editable_items(&context.index, &run)
+        && !run_ends_at_document_tail(&run)
+    {
         return None;
     }
-    Some(position_for_newline_run(&topology, run, cursor))
+    Some(position_for_newline_run(&context.topology, run, cursor))
 }
 
 fn newline_run_position_for_delete(
-    snapshot: &BufferSnapshot,
+    context: &RenderedEditContext<'_>,
     cursor: Point,
     direction: HorizontalDirection,
 ) -> Option<RenderedSemanticPosition> {
+    let snapshot = context.snapshot;
     let text_snapshot = snapshot.as_text_snapshot();
     let cursor = text_snapshot.clip_point(cursor, md_text::Bias::Left);
-    let index = RenderedDisplayIndex::build(snapshot);
-    let topology = RenderedTopology::new(snapshot, index.clone());
     let run = if source_row_is_blank(snapshot, cursor.row as usize) {
-        topology.newline_run_containing_row(cursor.row as usize)
+        context.topology.newline_run_containing_row(cursor.row as usize)
     } else {
         match direction {
-            HorizontalDirection::Left => topology.newline_run_before_line_start(cursor),
-            HorizontalDirection::Right => topology.newline_run_after_line_end(cursor),
+            HorizontalDirection::Left => context.topology.newline_run_before_line_start(cursor),
+            HorizontalDirection::Right => context.topology.newline_run_after_line_end(cursor),
         }
     }?;
-    if !newline_run_is_between_editable_items(&index, &run) && !run_ends_at_document_tail(&run) {
+    if !newline_run_is_between_editable_items(&context.index, &run)
+        && !run_ends_at_document_tail(&run)
+    {
         return None;
     }
-    Some(position_for_newline_run(&topology, run, cursor))
+    Some(position_for_newline_run(&context.topology, run, cursor))
 }
 
 fn position_for_newline_run(
@@ -513,9 +537,10 @@ struct RenderedNewlineInsertion {
 }
 
 fn rendered_plain_paragraph_break_insertion(
-    snapshot: &BufferSnapshot,
+    context: &RenderedEditContext<'_>,
     cursor: Point,
 ) -> RenderedNewlineInsertion {
+    let snapshot = context.snapshot;
     if let Some(insertion) =
         rendered_line_continuation_insertion(snapshot.as_text_snapshot(), cursor)
     {
@@ -524,14 +549,16 @@ fn rendered_plain_paragraph_break_insertion(
 
     let text_snapshot = snapshot.as_text_snapshot();
     let source_offset = text_snapshot.point_to_offset(cursor);
-    let index = RenderedDisplayIndex::build(snapshot);
-    let Some(item_index) = index.item_index_for_source_offset(snapshot, source_offset) else {
+    let Some(item_index) = context
+        .index
+        .item_index_for_source_offset(snapshot, source_offset)
+    else {
         return RenderedNewlineInsertion {
             text: "\n\n".to_string(),
             cursor_delta: 2,
         };
     };
-    let Some(item) = index.item(item_index) else {
+    let Some(item) = context.index.item(item_index) else {
         return RenderedNewlineInsertion {
             text: "\n\n".to_string(),
             cursor_delta: 2,

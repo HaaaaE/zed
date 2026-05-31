@@ -2685,12 +2685,13 @@ fn source_single_row_edit_invalidates_only_that_row() {
     let current_selection = collapsed_selection(Point::new(4, 8));
 
     assert_eq!(
-        local_source_edit_invalidation_rows(
+        local_edit_invalidation_rows(
             MarkdownEditorMode::Source,
             12,
             12,
             &previous_selection,
             &current_selection,
+            None,
         ),
         Some(4..5)
     );
@@ -2847,6 +2848,72 @@ fn source_length_preserving_single_row_edit_keeps_later_display_rows(
 }
 
 #[gpui::test]
+fn rendered_length_preserving_single_item_edit_keeps_other_display_rows(
+    cx: &mut gpui::TestAppContext,
+) {
+    let editor = cx.update(|cx| cx.new(|cx| MarkdownEditor::for_text("one\n\ntwo\n\nthree", cx)));
+
+    editor.update(cx, |editor, cx| {
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+
+        let mode = editor.mode;
+        let previous_selection = Selection {
+            id: 7,
+            start: Point::new(2, 1),
+            end: Point::new(2, 2),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        editor.selection = previous_selection.clone();
+
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state = rendered_projection_state(&snapshot, Some(&editor.selection), mode);
+        let row_0 = editor
+            .cached_display_row(&snapshot, 0, mode, &display_row_state)
+            .expect("row 0 should exist");
+        let row_1 = editor
+            .cached_display_row(&snapshot, 1, mode, &display_row_state)
+            .expect("row 1 should exist");
+        let row_2 = editor
+            .cached_display_row(&snapshot, 2, mode, &display_row_state)
+            .expect("row 2 should exist");
+
+        let row_count_before = editor.display_list_state.item_count();
+        let buffer_len_before = editor.buffer.len();
+        let (selection, transaction_id) =
+            replace_selection(&mut editor.buffer, &editor.selection, "X");
+        assert!(transaction_id.is_some());
+        let byte_delta = buffer_byte_delta(buffer_len_before, editor.buffer.len());
+        editor.selection = selection;
+
+        editor.notify_after_edit(
+            true,
+            row_count_before,
+            &previous_selection,
+            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+            cx,
+        );
+
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state = rendered_projection_state(&snapshot, Some(&editor.selection), mode);
+        let cached_row_0 = editor
+            .cached_display_row(&snapshot, 0, mode, &display_row_state)
+            .expect("row 0 should exist after edit");
+        let cached_row_1 = editor
+            .cached_display_row(&snapshot, 1, mode, &display_row_state)
+            .expect("row 1 should exist after edit");
+        let cached_row_2 = editor
+            .cached_display_row(&snapshot, 2, mode, &display_row_state)
+            .expect("row 2 should exist after edit");
+
+        assert!(Arc::ptr_eq(&row_0, &cached_row_0));
+        assert!(!Arc::ptr_eq(&row_1, &cached_row_1));
+        assert!(Arc::ptr_eq(&row_2, &cached_row_2));
+        assert_eq!(cached_row_1.text, "tXo");
+    });
+}
+
+#[gpui::test]
 fn source_undo_redo_single_row_edit_keeps_later_display_rows(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     let editor = cx.new(|cx| MarkdownEditor::for_text("one\ntwo\nthree", cx));
@@ -2954,7 +3021,7 @@ fn source_undo_redo_single_row_edit_keeps_later_display_rows(cx: &mut gpui::Test
 }
 
 #[test]
-fn local_edit_invalidation_stays_conservative_for_cross_row_or_rendered_edits() {
+fn local_edit_invalidation_stays_conservative_for_cross_row_or_count_changing_edits() {
     let previous_selection = Selection {
         id: 7,
         start: Point::new(4, 2),
@@ -2965,34 +3032,25 @@ fn local_edit_invalidation_stays_conservative_for_cross_row_or_rendered_edits() 
     let current_selection = collapsed_selection(Point::new(4, 8));
 
     assert_eq!(
-        local_source_edit_invalidation_rows(
+        local_edit_invalidation_rows(
             MarkdownEditorMode::Source,
             12,
             12,
             &previous_selection,
             &current_selection,
+            None,
         ),
         None
     );
 
     assert_eq!(
-        local_source_edit_invalidation_rows(
-            MarkdownEditorMode::Rendered,
-            12,
-            12,
-            &collapsed_selection(Point::new(4, 2)),
-            &current_selection,
-        ),
-        None
-    );
-
-    assert_eq!(
-        local_source_edit_invalidation_rows(
+        local_edit_invalidation_rows(
             MarkdownEditorMode::Source,
             12,
             13,
             &collapsed_selection(Point::new(4, 2)),
             &current_selection,
+            None,
         ),
         None
     );
