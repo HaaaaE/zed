@@ -85,3 +85,6 @@
   - rendered edit planning 增加带 `RenderedDisplayIndex` 的路径；编辑器动作在 Render 模式下把当前 cached index 传入 newline/backspace/delete planning，避免 planning 阶段额外 `RenderedDisplayIndex::build`。
   - `rendered_enter_delete` perf helper 现在断言 apply 阶段 `full_builds = 0` 且发生 incremental update。
   - 已验证：`cargo fmt --check`、`cargo test -p md_editor rendered_enter_continues_unordered_task_ordered_and_blockquote_lines`、`cargo test -p md_editor --profile release-fast --lib --no-run --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]'`。
+  - `Buffer` 现在维护与 cached syntax 同步的 source string；普通单编辑会增量更新这份 source，`refresh_syntax_tree` 的 incremental reparse 不再调用 `self.text.snapshot().text()` 做全文 source copy。
+  - `BufferSyntaxStats` 回归更新为 incremental syntax refresh 时 `full_source_copies = 0`。
+  - 已验证：`cargo test -p md_buffer`、`cargo test -p md_editor rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build`、`cargo check -p updraft_editor`、`cargo test -p md_editor --profile release-fast --lib --no-run --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]'`。

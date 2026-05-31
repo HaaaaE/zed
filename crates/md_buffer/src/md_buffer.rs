@@ -48,6 +48,7 @@ pub struct Buffer {
     preview_version: Global,
     cached_syntax_tree: Arc<MarkdownSyntaxTree>,
     cached_syntax_version: Global,
+    cached_syntax_source: String,
     pending_incremental_reparse: Option<PendingIncrementalReparse>,
 }
 
@@ -80,7 +81,8 @@ pub struct BufferEditSummary {
 impl Buffer {
     pub fn local<T: Into<String>>(base_text: T) -> Self {
         let text = TextBuffer::new(ReplicaId::LOCAL, next_buffer_id(), base_text.into());
-        let cached_syntax_tree = Arc::new(parse_markdown(text.snapshot()));
+        let cached_syntax_source = text.snapshot().text();
+        let cached_syntax_tree = Arc::new(parse_markdown_source(&cached_syntax_source));
         let saved_version = text.version();
         let preview_version = saved_version.clone();
         let cached_syntax_version = saved_version.clone();
@@ -90,6 +92,7 @@ impl Buffer {
             preview_version,
             cached_syntax_tree,
             cached_syntax_version,
+            cached_syntax_source,
             pending_incremental_reparse: None,
         }
     }
@@ -101,7 +104,8 @@ impl Buffer {
             line_ending,
             base_text_normalized,
         );
-        let cached_syntax_tree = Arc::new(parse_markdown(text.snapshot()));
+        let cached_syntax_source = text.snapshot().text();
+        let cached_syntax_tree = Arc::new(parse_markdown_source(&cached_syntax_source));
         let saved_version = text.version();
         let preview_version = saved_version.clone();
         let cached_syntax_version = saved_version.clone();
@@ -111,6 +115,7 @@ impl Buffer {
             preview_version,
             cached_syntax_tree,
             cached_syntax_version,
+            cached_syntax_source,
             pending_incremental_reparse: None,
         }
     }
@@ -431,6 +436,9 @@ impl Buffer {
             } else {
                 None
             };
+        let incremental_source_edit = incremental_reparse_syntax_tree
+            .as_ref()
+            .and_then(|_| edits.first().cloned());
 
         let (operation, patch) = self.text.edit(edits);
         let timestamp = operation.timestamp();
@@ -439,12 +447,16 @@ impl Buffer {
             .peek_undo_stack()
             .map(|entry| entry.transaction_id());
         let summary = summarize_patch(&old_snapshot, self.text.snapshot(), patch, transaction_id);
-        self.pending_incremental_reparse =
-            incremental_reparse_syntax_tree.map(|syntax_tree| PendingIncrementalReparse {
+        self.pending_incremental_reparse = incremental_reparse_syntax_tree.map(|syntax_tree| {
+            if let Some((range, new_text)) = incremental_source_edit {
+                self.cached_syntax_source.replace_range(range, &new_text);
+            }
+            PendingIncrementalReparse {
                 old_range: summary.old_range.clone(),
                 new_range: summary.new_range.clone(),
                 syntax_tree,
-            });
+            }
+        });
         Some((timestamp, summary))
     }
 
@@ -456,20 +468,20 @@ impl Buffer {
         self.cached_syntax_tree =
             if let Some(pending_incremental_reparse) = self.pending_incremental_reparse.take() {
                 record_incremental_syntax_refresh();
-                record_full_source_copy();
-                let new_source = self.text.snapshot().text();
                 Arc::new(
                     pending_incremental_reparse
                         .syntax_tree
                         .reparse_after_edit_range(
                             pending_incremental_reparse.old_range,
                             pending_incremental_reparse.new_range,
-                            &new_source,
+                            &self.cached_syntax_source,
                         ),
                 )
             } else {
                 record_full_syntax_refresh();
-                Arc::new(parse_markdown(self.text.snapshot()))
+                let source = snapshot_text_with_stats(self.text.snapshot());
+                self.cached_syntax_source = source;
+                Arc::new(parse_markdown_source(&self.cached_syntax_source))
             };
         self.cached_syntax_version = current_version;
     }
@@ -522,10 +534,14 @@ fn next_buffer_id() -> BufferId {
     }
 }
 
-fn parse_markdown(snapshot: &TextBufferSnapshot) -> MarkdownSyntaxTree {
+fn parse_markdown_source(source: &str) -> MarkdownSyntaxTree {
     record_full_syntax_parse();
+    MarkdownSyntaxTree::parse(source)
+}
+
+fn snapshot_text_with_stats(snapshot: &TextBufferSnapshot) -> String {
     record_full_source_copy();
-    MarkdownSyntaxTree::parse(&snapshot.text())
+    snapshot.text()
 }
 
 #[cfg(any(test, feature = "test-support", perf_enabled))]
@@ -721,7 +737,7 @@ mod tests {
                 full_parses: 0,
                 full_refreshes: 0,
                 incremental_refreshes: 1,
-                full_source_copies: 1,
+                full_source_copies: 0,
             }
         );
         assert_eq!(
