@@ -143,6 +143,8 @@ use selection::{move_selection_left, move_vertical};
 use table::{DisplayTableLayout, DisplayTableRowLayout, TableLayoutCacheKey};
 #[cfg(test)]
 use virtual_list::ListOffset;
+#[cfg(any(test, perf_enabled))]
+use virtual_list::MdListStateStats;
 use virtual_list::{ListAlignment, ListSizingBehavior, MdListState, md_list};
 #[cfg(test)]
 use visual_row::{

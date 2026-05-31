@@ -27,6 +27,16 @@ impl MdListState {
         this
     }
 
+    #[cfg(any(test, perf_enabled))]
+    pub(crate) fn reset_stats_for_tests() {
+        MD_LIST_STATE_STATS.with(|stats| stats.set(MdListStateStats::default()));
+    }
+
+    #[cfg(any(test, perf_enabled))]
+    pub(crate) fn stats_for_tests() -> MdListStateStats {
+        MD_LIST_STATE_STATS.with(std::cell::Cell::get)
+    }
+
     /// Set the size hint used for items that have not been measured yet.
     ///
     /// This helps long variable-height lists maintain a reasonable total-height
@@ -107,6 +117,7 @@ impl MdListState {
     /// Use this when item heights may have changed (e.g., font size changes)
     /// but the number and identity of items remains the same.
     pub fn remeasure(&self) {
+        record_full_remeasure();
         let count = self.item_count();
         self.remeasure_items(0..count);
     }
@@ -119,6 +130,7 @@ impl MdListState {
     /// height may be different (e.g., streaming text, tool results
     /// loading), but the item itself still exists at the same index.
     pub fn remeasure_items(&self, range: Range<usize>) {
+        record_item_remeasure(range.clone());
         let state = &mut *self.0.borrow_mut();
 
         // If the scroll-top item falls within the remeasured range,

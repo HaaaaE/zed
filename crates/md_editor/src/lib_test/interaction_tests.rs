@@ -2960,6 +2960,7 @@ fn rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build(
 
             RenderedDisplayIndex::reset_stats_for_tests();
             md_buffer::Buffer::reset_syntax_stats_for_tests();
+            MdListState::reset_stats_for_tests();
             let syntax_version_before_edit = editor.buffer.cached_syntax_version_for_tests();
             let row_count_before = editor.display_list_state.item_count();
             let (selection, summary) = replace_selection(&mut editor.buffer, &editor.selection, to);
@@ -2988,6 +2989,15 @@ fn rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build(
                 md_buffer::Buffer::syntax_stats_for_tests(),
                 md_buffer::BufferSyntaxStats::default(),
                 "rendered plain text edit should not parse or copy full source for {source:?}"
+            );
+            assert_eq!(
+                MdListState::stats_for_tests(),
+                MdListStateStats {
+                    full_remeasures: 0,
+                    item_remeasure_calls: 1,
+                    remeasured_items: 1,
+                },
+                "rendered plain text edit should only remeasure the affected item for {source:?}"
             );
             assert_eq!(
                 editor.buffer.cached_syntax_version_for_tests(),

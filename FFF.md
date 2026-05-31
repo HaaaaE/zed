@@ -71,3 +71,8 @@
   - 已验证：`cargo test -p md_projection`、`cargo test -p md_editor rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build`、`cargo test -p md_editor rendered_length_preserving_single_item_edit_keeps_other_display_rows`。
   - 给 `md_buffer` 增加 `BufferSyntaxStats`，开始计数 full parse、full syntax refresh、incremental syntax refresh、full source copy；普通 rendered text edit 回归现在同时断言 syntax stats 全为 0。
   - 已验证：`cargo test -p md_buffer single_edit_defers_incremental_reparse_until_syntax_is_requested`、`cargo test -p md_editor rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build`、`cargo check -p updraft_editor`。
+
+- 2026-06-01:
+  - 给 `MdListState` 增加 remeasure stats，开始计数 full remeasure、局部 remeasure 调用次数和 item 数。
+  - 普通 Render 文本编辑回归现在同时断言 `full_remeasures = 0`，且只局部 remeasure 当前 item。
+  - 已验证：`cargo fmt --check`、`cargo test -p md_editor rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build`、`cargo check -p updraft_editor`。

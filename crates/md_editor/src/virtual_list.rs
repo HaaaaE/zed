@@ -62,6 +62,52 @@ impl std::fmt::Debug for MdListState {
     }
 }
 
+#[cfg(any(test, perf_enabled))]
+thread_local! {
+    static MD_LIST_STATE_STATS: std::cell::Cell<MdListStateStats> =
+        const { std::cell::Cell::new(MdListStateStats {
+            full_remeasures: 0,
+            item_remeasure_calls: 0,
+            remeasured_items: 0,
+        }) };
+}
+
+#[cfg(any(test, perf_enabled))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct MdListStateStats {
+    pub full_remeasures: usize,
+    pub item_remeasure_calls: usize,
+    pub remeasured_items: usize,
+}
+
+#[cfg(any(test, perf_enabled))]
+fn update_md_list_state_stats(update: impl FnOnce(&mut MdListStateStats)) {
+    MD_LIST_STATE_STATS.with(|stats| {
+        let mut value = stats.get();
+        update(&mut value);
+        stats.set(value);
+    });
+}
+
+#[cfg(any(test, perf_enabled))]
+fn record_full_remeasure() {
+    update_md_list_state_stats(|stats| stats.full_remeasures += 1);
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+fn record_full_remeasure() {}
+
+#[cfg(any(test, perf_enabled))]
+fn record_item_remeasure(range: Range<usize>) {
+    update_md_list_state_stats(|stats| {
+        stats.item_remeasure_calls += 1;
+        stats.remeasured_items += range.len();
+    });
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+fn record_item_remeasure(_: Range<usize>) {}
+
 struct StateInner {
     last_layout_bounds: Option<Bounds<Pixels>>,
     last_padding: Option<Edges<Pixels>>,
