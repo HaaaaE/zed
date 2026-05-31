@@ -42,9 +42,26 @@ fn parse_inline_trees(
     let mut inline_trees = Vec::new();
     let mut inline_tree_by_parent_id = HashMap::new();
     let inline_parent_nodes = inline_parent_nodes(block_tree);
+    let old_inline_tree_by_parent_range = old_tree.map(|tree| {
+        tree.inline_trees()
+            .iter()
+            .enumerate()
+            .map(|(index, inline_tree)| {
+                (
+                    (inline_tree.parent_range.start, inline_tree.parent_range.end),
+                    index,
+                )
+            })
+            .collect::<HashMap<_, _>>()
+    });
 
     for parent_node in inline_parent_nodes {
-        if let Some(inline_tree) = reusable_inline_tree(old_tree, parent_node, changed_range) {
+        if let Some(inline_tree) = reusable_inline_tree(
+            old_tree,
+            old_inline_tree_by_parent_range.as_ref(),
+            parent_node,
+            changed_range,
+        ) {
             inline_tree_by_parent_id.insert(parent_node.id(), inline_trees.len());
             inline_trees.push(inline_tree.clone());
             continue;
@@ -64,7 +81,12 @@ fn parse_inline_trees(
         let inline_tree = inline_parser
             .parse(
                 source,
-                old_inline_tree_for_parent(old_tree, parent_node).map(|tree| &tree.tree),
+                old_inline_tree_for_parent(
+                    old_tree,
+                    old_inline_tree_by_parent_range.as_ref(),
+                    parent_node,
+                )
+                .map(|tree| &tree.tree),
             )
             .expect("tree-sitter markdown inline parser was cancelled");
         inline_tree_by_parent_id.insert(parent_node.id(), inline_trees.len());
@@ -80,10 +102,12 @@ fn parse_inline_trees(
 
 fn reusable_inline_tree<'a>(
     old_tree: Option<&'a MarkdownParseTree>,
+    old_inline_tree_by_parent_range: Option<&HashMap<(usize, usize), usize>>,
     parent_node: Node<'_>,
     changed_range: Option<&std::ops::Range<usize>>,
 ) -> Option<&'a MarkdownInlineTree> {
-    let inline_tree = old_inline_tree_for_parent(old_tree, parent_node)?;
+    let inline_tree =
+        old_inline_tree_for_parent(old_tree, old_inline_tree_by_parent_range, parent_node)?;
     if inline_tree.parent_range != parent_node.byte_range() {
         return None;
     }
@@ -95,12 +119,22 @@ fn reusable_inline_tree<'a>(
 
 fn old_inline_tree_for_parent<'a>(
     old_tree: Option<&'a MarkdownParseTree>,
+    old_inline_tree_by_parent_range: Option<&HashMap<(usize, usize), usize>>,
     parent_node: Node<'_>,
 ) -> Option<&'a MarkdownInlineTree> {
     let old_tree = old_tree?;
-    old_tree
+    if let Some(inline_tree) = old_tree
         .inline_tree_by_parent_id
         .get(&parent_node.id())
+        .and_then(|index| old_tree.inline_trees.get(*index))
+    {
+        return Some(inline_tree);
+    }
+
+    old_inline_tree_by_parent_range
+        .and_then(|index_by_range| {
+            index_by_range.get(&(parent_node.start_byte(), parent_node.end_byte()))
+        })
         .and_then(|index| old_tree.inline_trees.get(*index))
 }
 
