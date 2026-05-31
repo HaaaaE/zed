@@ -478,6 +478,14 @@ impl MdListState {
         self.0.borrow().items.summary().count
     }
 
+    #[cfg(test)]
+    pub(crate) fn item_size_for_tests(&self, item_ix: usize) -> Option<Size<Pixels>> {
+        let state = self.0.borrow();
+        let mut cursor = state.items.cursor::<Count>(());
+        cursor.seek(&Count(item_ix), Bias::Right);
+        cursor.item().and_then(|item| item.size())
+    }
+
     /// Whether the MdList is scrolled to the end, or `None` if the MdList is
     /// not scrollable or the total content height is not yet known.
     pub fn is_scrolled_to_end(&self) -> Option<bool> {

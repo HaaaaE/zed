@@ -1122,6 +1122,288 @@ fn rendered_mode_actions_follow_wrapped_visual_rows_with_inline_image(
 }
 
 #[gpui::test]
+fn rendered_horizontal_actions_keep_directional_side_at_soft_wrap_boundary(
+    cx: &mut gpui::TestAppContext,
+) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(110.), px(240.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("alpha beta gamma delta epsilon\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        let snapshot = editor.buffer.snapshot();
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
+            .expect("display row should exist");
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            text_wrap_width_for_mode(window, editor.mode),
+            false,
+            window,
+            cx,
+        );
+        let DisplayRowLayout::Text(text_layout) = row_layout else {
+            panic!("expected wrapped text layout");
+        };
+        assert!(
+            text_layout.visual_rows.len() >= 2,
+            "expected wrapped rows, got {:?}",
+            text_layout.visual_rows
+        );
+        let boundary = point_for_display_offset(
+            &snapshot,
+            &display_row,
+            &text_layout,
+            text_layout.visual_rows[0].display_range.end,
+        );
+        let before_boundary = move_left(&snapshot, boundary);
+        let after_boundary = move_right(&snapshot, boundary);
+
+        editor.set_cursor(before_boundary);
+        editor.move_right(&MoveRight, window, cx);
+        assert_eq!(editor.cursor(), boundary);
+        assert!(matches!(
+            editor.selection.goal,
+            SelectionGoal::WrappedHorizontalPosition((0, _))
+        ));
+
+        editor.set_cursor(after_boundary);
+        editor.move_left(&MoveLeft, window, cx);
+        assert_eq!(editor.cursor(), boundary);
+        assert!(matches!(
+            editor.selection.goal,
+            SelectionGoal::WrappedHorizontalPosition((1, _))
+        ));
+    });
+}
+
+#[gpui::test]
+fn rendered_horizontal_actions_cross_forced_soft_break_edges(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("a\nb\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_cursor(Point::new(0, 1));
+        editor.move_right(&MoveRight, window, cx);
+        assert_eq!(editor.cursor(), Point::new(1, 0));
+        assert!(
+            matches!(
+                editor.selection.goal,
+                SelectionGoal::WrappedHorizontalPosition((1, _))
+            ),
+            "goal {:?}",
+            editor.selection.goal
+        );
+
+        editor.set_cursor(Point::new(1, 1));
+        editor.move_left(&MoveLeft, window, cx);
+        assert_eq!(editor.cursor(), Point::new(1, 0));
+        assert!(
+            matches!(
+                editor.selection.goal,
+                SelectionGoal::WrappedHorizontalPosition((1, _))
+            ),
+            "goal {:?}",
+            editor.selection.goal
+        );
+
+        editor.move_left(&MoveLeft, window, cx);
+        assert_eq!(editor.cursor(), Point::new(0, 1));
+        assert!(
+            matches!(
+                editor.selection.goal,
+                SelectionGoal::WrappedHorizontalPosition((0, _))
+            ),
+            "goal {:?}",
+            editor.selection.goal
+        );
+    });
+}
+
+#[gpui::test]
+fn rendered_horizontal_actions_cross_eof_soft_break_edges(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("first\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(1, 0));
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.insert_soft_break(&InsertSoftBreak, window, cx);
+        assert_eq!(editor.cursor(), Point::new(2, 0));
+
+        editor.move_left(&MoveLeft, window, cx);
+        assert_eq!(editor.cursor(), Point::new(1, 0));
+        assert!(
+            matches!(
+                editor.selection.goal,
+                SelectionGoal::WrappedHorizontalPosition((1, _))
+            ),
+            "goal {:?}",
+            editor.selection.goal
+        );
+
+        editor.move_left(&MoveLeft, window, cx);
+        assert_eq!(editor.cursor(), Point::new(0, "first".len() as u32));
+        assert!(
+            matches!(
+                editor.selection.goal,
+                SelectionGoal::WrappedHorizontalPosition((0, _))
+            ),
+            "goal {:?}",
+            editor.selection.goal
+        );
+
+        editor.move_right(&MoveRight, window, cx);
+        assert_eq!(editor.cursor(), Point::new(1, 0));
+        assert!(
+            matches!(
+                editor.selection.goal,
+                SelectionGoal::WrappedHorizontalPosition((1, _))
+            ),
+            "goal {:?}",
+            editor.selection.goal
+        );
+
+        editor.move_right(&MoveRight, window, cx);
+        assert_eq!(editor.cursor(), Point::new(2, 0));
+        assert!(
+            matches!(
+                editor.selection.goal,
+                SelectionGoal::WrappedHorizontalPosition((2, _))
+            ),
+            "goal {:?}",
+            editor.selection.goal
+        );
+    });
+}
+
+#[gpui::test]
+fn rendered_shift_enter_at_paragraph_end_remeasures_visible_item(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("first", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(0, "first".len() as u32));
+        editor
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(320.), px(200.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    let before_height = editor.read_with(cx, |editor, _| {
+        editor
+            .display_list_state
+            .item_size_for_tests(0)
+            .expect("paragraph should be measured before edit")
+            .height
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.insert_soft_break(&InsertSoftBreak, window, cx);
+        assert_eq!(editor.cursor(), Point::new(1, 0));
+        assert!(
+            editor.display_list_state.item_size_for_tests(0).is_none(),
+            "edited rendered item should be queued for remeasurement"
+        );
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(320.), px(200.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    editor.read_with(cx, |editor, _| {
+        let after_height = editor
+            .display_list_state
+            .item_size_for_tests(0)
+            .expect("paragraph should be remeasured after edit")
+            .height;
+        assert!(
+            after_height > before_height,
+            "expected trailing soft break to increase item height: before {before_height:?}, after {after_height:?}"
+        );
+    });
+}
+
+#[gpui::test]
+fn rendered_shift_enter_from_eof_row_remeasures_visible_item(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("first\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(1, 0));
+        editor
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(320.), px(200.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    let before_height = editor.read_with(cx, |editor, _| {
+        editor
+            .display_list_state
+            .item_size_for_tests(0)
+            .expect("paragraph should be measured before edit")
+            .height
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.insert_soft_break(&InsertSoftBreak, window, cx);
+        assert_eq!(editor.cursor(), Point::new(2, 0));
+        assert!(
+            editor.display_list_state.item_size_for_tests(0).is_none(),
+            "edited rendered item should be queued for remeasurement"
+        );
+    });
+
+    cx.draw(
+        gpui::point(px(0.), px(0.)),
+        gpui::size(px(320.), px(200.)),
+        |_, _| editor.clone().into_any_element(),
+    );
+
+    editor.read_with(cx, |editor, _| {
+        let after_height = editor
+            .display_list_state
+            .item_size_for_tests(0)
+            .expect("paragraph should be remeasured after edit")
+            .height;
+        assert!(
+            after_height > before_height,
+            "expected trailing soft break to increase item height: before {before_height:?}, after {after_height:?}"
+        );
+    });
+}
+
+#[gpui::test]
 fn rendered_cjk_text_with_replacements_shapes_on_char_boundaries(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     cx.simulate_resize(gpui::size(px(260.), px(240.)));

@@ -180,6 +180,7 @@ pub(crate) fn move_right_in_text_snapshot(snapshot: &TextBufferSnapshot, cursor:
     )
 }
 
+#[cfg(test)]
 pub fn move_vertical(snapshot: &BufferSnapshot, cursor: Point, delta_rows: i32) -> Point {
     move_vertical_in_text_snapshot(snapshot.as_text_snapshot(), cursor, delta_rows)
 }
@@ -267,7 +268,7 @@ pub(crate) fn move_selection_left_in_mode(
     mode: MarkdownEditorMode,
 ) -> Selection<Point> {
     if mode == MarkdownEditorMode::Source {
-        return move_selection_left_in_text_snapshot(snapshot.as_text_snapshot(), selection);
+        return move_selection_left(snapshot, selection);
     }
 
     let selection = clip_selection(snapshot, selection);
@@ -289,7 +290,7 @@ pub(crate) fn move_selection_right_in_mode(
     mode: MarkdownEditorMode,
 ) -> Selection<Point> {
     if mode == MarkdownEditorMode::Source {
-        return move_selection_right_in_text_snapshot(snapshot.as_text_snapshot(), selection);
+        return move_selection_right(snapshot, selection);
     }
 
     let selection = clip_selection(snapshot, selection);

@@ -346,6 +346,199 @@ fn rendered_soft_break_caret_stays_inside_paragraph_item(cx: &mut gpui::TestAppC
 }
 
 #[gpui::test]
+fn rendered_trailing_soft_break_caret_gets_empty_visual_row(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("first", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(0, "first".len() as u32));
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.insert_soft_break(&InsertSoftBreak, window, cx);
+        assert_eq!(editor.buffer.text(), "first\n");
+        assert_eq!(editor.cursor(), Point::new(1, 0));
+
+        let snapshot = editor.buffer.snapshot();
+        let index = rendered_display_index_for_tests(&snapshot);
+        let paragraph_item = index
+            .item_index_for_source_row(1)
+            .expect("trailing soft-break row should map to paragraph item");
+        assert_eq!(paragraph_item, 0);
+
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, paragraph_item, editor.mode, &display_row_state)
+            .expect("paragraph display row should exist");
+        assert_eq!(display_row.source_row_range, 0..2);
+        assert_eq!(display_row.text, "first\n");
+
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            text_wrap_width_for_mode(window, editor.mode),
+            false,
+            window,
+            cx,
+        );
+        let DisplayRowLayout::Text(text_layout) = row_layout else {
+            panic!("expected paragraph text layout");
+        };
+        assert_eq!(
+            text_layout
+                .visual_rows
+                .iter()
+                .map(|visual_row| visual_row.display_range.clone())
+                .collect::<Vec<_>>(),
+            vec![0.."first\n".len(), "first\n".len().."first\n".len()]
+        );
+        assert!(
+            caret_position_for_visual_row(
+                snapshot.as_text_snapshot(),
+                &display_row,
+                &selection,
+                &text_layout,
+                1,
+                &text_layout.visual_rows[1],
+            )
+            .is_some()
+        );
+    });
+}
+
+#[gpui::test]
+fn rendered_trailing_soft_break_from_eof_row_gets_empty_visual_row(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("first\n", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(1, 0));
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.insert_soft_break(&InsertSoftBreak, window, cx);
+        assert_eq!(editor.buffer.text(), "first\n\n");
+        assert_eq!(editor.cursor(), Point::new(2, 0));
+
+        let snapshot = editor.buffer.snapshot();
+        let index = rendered_display_index_for_tests(&snapshot);
+        let paragraph_item = index
+            .item_index_for_source_row(2)
+            .expect("eof soft-break row should map to paragraph item");
+        assert_eq!(paragraph_item, 0);
+
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, paragraph_item, editor.mode, &display_row_state)
+            .expect("paragraph display row should exist");
+        assert_eq!(display_row.source_row_range, 0..3);
+        assert_eq!(display_row.text, "first\n\n");
+
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            text_wrap_width_for_mode(window, editor.mode),
+            false,
+            window,
+            cx,
+        );
+        let DisplayRowLayout::Text(text_layout) = row_layout else {
+            panic!("expected paragraph text layout");
+        };
+        assert!(
+            caret_position_for_visual_row(
+                snapshot.as_text_snapshot(),
+                &display_row,
+                &selection,
+                &text_layout,
+                2,
+                &text_layout.visual_rows[2],
+            )
+            .is_some()
+        );
+    });
+}
+
+#[gpui::test]
+fn rendered_trailing_soft_break_before_next_paragraph_gets_empty_visual_row(
+    cx: &mut gpui::TestAppContext,
+) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("first\n\nnext", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(0, "first".len() as u32));
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.insert_soft_break(&InsertSoftBreak, window, cx);
+        assert_eq!(editor.buffer.text(), "first\n\n\nnext");
+        assert_eq!(editor.cursor(), Point::new(1, 0));
+
+        let snapshot = editor.buffer.snapshot();
+        let index = rendered_display_index_for_tests(&snapshot);
+        let paragraph_item = index
+            .item_index_for_source_row(1)
+            .expect("trailing soft-break row should map to previous paragraph item");
+        assert_eq!(paragraph_item, 0);
+
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, paragraph_item, editor.mode, &display_row_state)
+            .expect("paragraph display row should exist");
+        assert_eq!(display_row.source_row_range, 0..2);
+        assert_eq!(display_row.text, "first\n");
+
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            text_wrap_width_for_mode(window, editor.mode),
+            false,
+            window,
+            cx,
+        );
+        let DisplayRowLayout::Text(text_layout) = row_layout else {
+            panic!("expected paragraph text layout");
+        };
+        assert!(
+            caret_position_for_visual_row(
+                snapshot.as_text_snapshot(),
+                &display_row,
+                &selection,
+                &text_layout,
+                1,
+                &text_layout.visual_rows[1],
+            )
+            .is_some()
+        );
+    });
+}
+
+#[gpui::test]
 fn rendered_soft_break_segments_still_wrap(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     cx.simulate_resize(gpui::size(px(140.), px(200.)));

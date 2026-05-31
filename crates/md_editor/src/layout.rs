@@ -119,6 +119,7 @@ pub(super) struct DisplayRowCacheKey {
 pub(super) struct DisplayRowProjectionState {
     pub(super) active_source_range: Option<Range<usize>>,
     pub(super) inactive_source_ranges: Vec<Range<usize>>,
+    pub(super) active_cursor: Option<Point>,
 }
 
 impl DisplayRowProjectionState {
@@ -131,6 +132,7 @@ impl DisplayRowProjectionState {
             return Self {
                 active_source_range: None,
                 inactive_source_ranges: Vec::new(),
+                active_cursor: None,
             };
         }
 
@@ -142,6 +144,9 @@ impl DisplayRowProjectionState {
                     inactive_rendered_element_source_ranges_for_selection(snapshot, selection)
                 })
                 .unwrap_or_default(),
+            active_cursor: selection
+                .filter(|selection| selection.is_empty())
+                .map(|selection| selection.head()),
         }
     }
 }

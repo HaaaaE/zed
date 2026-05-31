@@ -165,12 +165,17 @@ impl MarkdownEditor {
             return self.cached_source_display_row(snapshot.as_text_snapshot(), item_index);
         }
 
-        let item = self
-            .rendered_display_index(snapshot)
-            .item(item_index)?
-            .clone();
-        let (row, source_range, source_row_range) =
-            super::rendered_item_display_source_range(snapshot, &item, display_row_state);
+        let index = self.rendered_display_index(snapshot);
+        let item = index.item(item_index)?.clone();
+        let active_cursor_maps_to_item = display_row_state.active_cursor.is_some_and(|cursor| {
+            index.item_index_for_source_row(cursor.row as usize) == Some(item_index)
+        });
+        let (row, source_range, source_row_range) = super::rendered_item_display_source_range(
+            snapshot,
+            &item,
+            display_row_state,
+            active_cursor_maps_to_item,
+        );
         let active_projection_source_ranges = snapshot
             .syntax_tree()
             .active_projection_source_ranges_for_source_range(

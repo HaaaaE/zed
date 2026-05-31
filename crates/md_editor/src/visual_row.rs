@@ -288,6 +288,12 @@ pub(super) fn visual_row_index_containing_caret(
     display_offset: usize,
     text_len: usize,
 ) -> Option<usize> {
+    if let Some(index) = visual_rows.iter().position(|visual_row| {
+        visual_row.display_range.is_empty() && visual_row.display_range.start == display_offset
+    }) {
+        return Some(index);
+    }
+
     visual_rows
         .iter()
         .position(|visual_row| visual_row_contains_caret(visual_row, display_offset, text_len))

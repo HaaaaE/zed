@@ -88,21 +88,9 @@ fn rendered_display_index_groups_paragraphs_and_keeps_structured_rows_addressabl
         items,
         vec![
             (0, 0..2, rendered_index::RenderedDisplayItemKind::Paragraph),
-            (
-                1,
-                3..4,
-                rendered_index::RenderedDisplayItemKind::TableRow
-            ),
-            (
-                2,
-                4..5,
-                rendered_index::RenderedDisplayItemKind::TableRow
-            ),
-            (
-                3,
-                5..6,
-                rendered_index::RenderedDisplayItemKind::TableRow
-            ),
+            (1, 3..4, rendered_index::RenderedDisplayItemKind::TableRow),
+            (2, 4..5, rendered_index::RenderedDisplayItemKind::TableRow),
+            (3, 5..6, rendered_index::RenderedDisplayItemKind::TableRow),
             (
                 4,
                 7..8,
@@ -232,7 +220,10 @@ fn rendered_display_index_assigns_empty_paragraphs_from_blank_runs() {
             "{source:?}"
         );
         for item in empty_items {
-            assert_eq!(index.item_index_for_source_row(item.row_range.start), Some(item.index));
+            assert_eq!(
+                index.item_index_for_source_row(item.row_range.start),
+                Some(item.index)
+            );
         }
     }
 }
@@ -266,13 +257,19 @@ fn rendered_merged_paragraph_projects_across_source_rows() {
     assert_eq!(row.source_to_display(newline), "first bold".len());
     assert_eq!(row.source_to_display(newline + 1), "first bold\n".len());
     assert_eq!(row.source_to_display(continued), "first bold\n".len());
-    assert_eq!(row.source_to_display(entity), "first bold\ncontinued ".len());
+    assert_eq!(
+        row.source_to_display(entity),
+        "first bold\ncontinued ".len()
+    );
     assert_eq!(
         row.source_to_display(escaped),
         "first bold\ncontinued & escaped ".len()
     );
     assert_eq!(row.display_to_source("first bold\n".len()), newline + 1);
-    assert_eq!(row.display_to_source("first bold\ncontinued ".len()), entity);
+    assert_eq!(
+        row.display_to_source("first bold\ncontinued ".len()),
+        entity
+    );
 }
 
 #[test]

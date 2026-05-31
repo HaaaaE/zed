@@ -97,29 +97,30 @@ use rendered_element::{
     rendered_element_descriptor_for_inline_span_in_row, rendered_element_source_range_is_active,
 };
 use rendered_index::{DisplayItemId, RenderedDisplayIndex, RenderedDisplayItem};
-#[cfg(test)]
-use selection::{HorizontalDirection, move_horizontal_in_mode, move_selection_left, move_vertical};
 use selection::{
-    apply_rendered_active_source_range_change, apply_text_wrap_width_change,
+    HorizontalDirection, apply_rendered_active_source_range_change, apply_text_wrap_width_change,
     clip_cursor_in_text_snapshot, clip_selection_in_text_snapshot, collapsed_selection,
-    collapsed_selection_with_goal, move_selection_left_in_mode,
-    move_selection_left_in_text_snapshot, move_selection_right_in_mode,
-    move_selection_right_in_text_snapshot, move_selection_to_beginning_of_line,
-    move_selection_to_beginning_of_line_in_text_snapshot, move_selection_to_end_of_line,
-    move_selection_to_end_of_line_in_text_snapshot, move_selection_vertical,
-    move_selection_vertical_in_text_snapshot, reveal_selection_head_row_in_text_snapshot,
-    reveal_selection_item, select_left_in_mode, select_left_in_text_snapshot, select_right_in_mode,
-    select_right_in_text_snapshot, select_to_beginning_of_line_in_text_snapshot,
-    select_to_end_of_line_in_text_snapshot, select_to_point_in_text_snapshot_with_goal,
-    select_to_point_with_goal, select_vertical_in_text_snapshot,
-    selection_byte_range_in_text_snapshot, selection_for_source_range, selection_without_goal,
-    source_rows_for_active_range_change, transaction_selection_state_without_goals,
+    collapsed_selection_with_goal, move_horizontal_in_mode, move_left_in_text_snapshot,
+    move_right_in_text_snapshot, move_selection_left_in_mode, move_selection_left_in_text_snapshot,
+    move_selection_right_in_mode, move_selection_right_in_text_snapshot,
+    move_selection_to_beginning_of_line, move_selection_to_beginning_of_line_in_text_snapshot,
+    move_selection_to_end_of_line, move_selection_to_end_of_line_in_text_snapshot,
+    move_selection_vertical, move_selection_vertical_in_text_snapshot,
+    reveal_selection_head_row_in_text_snapshot, reveal_selection_item, select_left_in_mode,
+    select_left_in_text_snapshot, select_right_in_mode, select_right_in_text_snapshot,
+    select_to_beginning_of_line_in_text_snapshot, select_to_end_of_line_in_text_snapshot,
+    select_to_point_in_text_snapshot_with_goal, select_to_point_with_goal,
+    select_vertical_in_text_snapshot, selection_byte_range_in_text_snapshot,
+    selection_for_source_range, selection_without_goal, source_rows_for_active_range_change,
+    transaction_selection_state_without_goals,
 };
 pub use selection::{
     clip_cursor, clip_selection, move_left, move_right, move_to_beginning_of_line,
     move_to_end_of_line, select_left, select_right, select_to_beginning_of_line,
     select_to_end_of_line, select_to_point, select_vertical, selection_byte_range,
 };
+#[cfg(test)]
+use selection::{move_selection_left, move_vertical};
 use table::{DisplayTableLayout, DisplayTableRowLayout, TableLayoutCacheKey};
 #[cfg(test)]
 use virtual_list::ListOffset;
@@ -535,31 +536,17 @@ impl MarkdownEditor {
         self.reveal_cursor_row();
     }
 
-    pub fn move_left(&mut self, _: &MoveLeft, _: &mut Window, cx: &mut Context<Self>) {
+    pub fn move_left(&mut self, _: &MoveLeft, window: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
-        self.selection = match self.mode {
-            MarkdownEditorMode::Source => move_selection_left_in_text_snapshot(
-                self.buffer.as_text_snapshot(),
-                &self.selection,
-            ),
-            MarkdownEditorMode::Rendered => {
-                move_selection_left_in_mode(&self.buffer.snapshot(), &self.selection, self.mode)
-            }
-        };
+        self.selection =
+            self.move_selection_visual_horizontal(window, cx, HorizontalDirection::Left, false);
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
-    pub fn move_right(&mut self, _: &MoveRight, _: &mut Window, cx: &mut Context<Self>) {
+    pub fn move_right(&mut self, _: &MoveRight, window: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
-        self.selection = match self.mode {
-            MarkdownEditorMode::Source => move_selection_right_in_text_snapshot(
-                self.buffer.as_text_snapshot(),
-                &self.selection,
-            ),
-            MarkdownEditorMode::Rendered => {
-                move_selection_right_in_mode(&self.buffer.snapshot(), &self.selection, self.mode)
-            }
-        };
+        self.selection =
+            self.move_selection_visual_horizontal(window, cx, HorizontalDirection::Right, false);
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
@@ -599,29 +586,17 @@ impl MarkdownEditor {
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
-    pub fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
+    pub fn select_left(&mut self, _: &SelectLeft, window: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
-        self.selection = match self.mode {
-            MarkdownEditorMode::Source => {
-                select_left_in_text_snapshot(self.buffer.as_text_snapshot(), &self.selection)
-            }
-            MarkdownEditorMode::Rendered => {
-                select_left_in_mode(&self.buffer.snapshot(), &self.selection, self.mode)
-            }
-        };
+        self.selection =
+            self.move_selection_visual_horizontal(window, cx, HorizontalDirection::Left, true);
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
-    pub fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
+    pub fn select_right(&mut self, _: &SelectRight, window: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
-        self.selection = match self.mode {
-            MarkdownEditorMode::Source => {
-                select_right_in_text_snapshot(self.buffer.as_text_snapshot(), &self.selection)
-            }
-            MarkdownEditorMode::Rendered => {
-                select_right_in_mode(&self.buffer.snapshot(), &self.selection, self.mode)
-            }
-        };
+        self.selection =
+            self.move_selection_visual_horizontal(window, cx, HorizontalDirection::Right, true);
         self.notify_after_selection_change(&previous_selection, cx);
     }
 
@@ -635,6 +610,107 @@ impl MarkdownEditor {
         let previous_selection = self.selection.clone();
         self.selection = self.move_selection_visual_vertical(window, cx, 1, true);
         self.notify_after_selection_change(&previous_selection, cx);
+    }
+
+    fn move_selection_visual_horizontal(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        direction: HorizontalDirection,
+        extend_selection: bool,
+    ) -> Selection<Point> {
+        if self.mode == MarkdownEditorMode::Source {
+            return self.move_source_selection_visual_horizontal(
+                window,
+                cx,
+                direction,
+                extend_selection,
+            );
+        }
+
+        let snapshot = self.buffer.snapshot();
+        let selection = clip_selection(&snapshot, &self.selection);
+        let fallback = if extend_selection {
+            match direction {
+                HorizontalDirection::Left => select_left_in_mode(&snapshot, &selection, self.mode),
+                HorizontalDirection::Right => {
+                    select_right_in_mode(&snapshot, &selection, self.mode)
+                }
+            }
+        } else {
+            match direction {
+                HorizontalDirection::Left => {
+                    move_selection_left_in_mode(&snapshot, &selection, self.mode)
+                }
+                HorizontalDirection::Right => {
+                    move_selection_right_in_mode(&snapshot, &selection, self.mode)
+                }
+            }
+        };
+        if !extend_selection && !selection.is_empty() {
+            return fallback;
+        }
+
+        let Some((target, goal)) =
+            self.visual_horizontal_target_point(&snapshot, &selection, direction, window, cx)
+        else {
+            return fallback;
+        };
+
+        if extend_selection {
+            let mut updated = selection.clone();
+            updated.set_head(target, goal);
+            updated
+        } else {
+            let mut updated = selection.clone();
+            updated.collapse_to(target, goal);
+            updated
+        }
+    }
+
+    fn move_source_selection_visual_horizontal(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        direction: HorizontalDirection,
+        extend_selection: bool,
+    ) -> Selection<Point> {
+        let snapshot = self.buffer.text_snapshot();
+        let selection = clip_selection_in_text_snapshot(&snapshot, &self.selection);
+        let fallback = if extend_selection {
+            match direction {
+                HorizontalDirection::Left => select_left_in_text_snapshot(&snapshot, &selection),
+                HorizontalDirection::Right => select_right_in_text_snapshot(&snapshot, &selection),
+            }
+        } else {
+            match direction {
+                HorizontalDirection::Left => {
+                    move_selection_left_in_text_snapshot(&snapshot, &selection)
+                }
+                HorizontalDirection::Right => {
+                    move_selection_right_in_text_snapshot(&snapshot, &selection)
+                }
+            }
+        };
+        if !extend_selection && !selection.is_empty() {
+            return fallback;
+        }
+
+        let Some((target, goal)) = self
+            .source_visual_horizontal_target_point(&snapshot, &selection, direction, window, cx)
+        else {
+            return fallback;
+        };
+
+        if extend_selection {
+            let mut updated = selection.clone();
+            updated.set_head(target, goal);
+            updated
+        } else {
+            let mut updated = selection.clone();
+            updated.collapse_to(target, goal);
+            updated
+        }
     }
 
     fn move_selection_visual_vertical(
@@ -809,6 +885,45 @@ impl MarkdownEditor {
         }
     }
 
+    fn source_visual_horizontal_target_point(
+        &mut self,
+        snapshot: &TextBufferSnapshot,
+        selection: &Selection<Point>,
+        direction: HorizontalDirection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<(Point, SelectionGoal)> {
+        let cursor = clip_cursor_in_text_snapshot(snapshot, selection.head());
+        let target = match direction {
+            HorizontalDirection::Left => move_left_in_text_snapshot(snapshot, cursor),
+            HorizontalDirection::Right => move_right_in_text_snapshot(snapshot, cursor),
+        };
+        let display_row = self.cached_source_display_row(snapshot, target.row as usize)?;
+        let row_style = default_row_metrics().into();
+        let wrap_width = text_wrap_width_for_mode(window, self.mode);
+        let text_layout =
+            self.cached_source_text_layout(&display_row, row_style, wrap_width, false, window, cx);
+        let source_offset = snapshot.point_to_offset(target);
+        let display_offset = display_row
+            .source_to_display(source_offset)
+            .min(text_layout.text_len);
+        let visual_row_index = visual_row_index_for_horizontal_movement(
+            &text_layout.visual_rows,
+            &display_row.text,
+            display_offset,
+            text_layout.text_len,
+            direction,
+        )?;
+        let visual_row = &text_layout.visual_rows[visual_row_index];
+        let target_x = display_x_for_offset(
+            &text_layout.fragments,
+            &text_layout.shaped_line,
+            display_offset,
+        ) - visual_row.line_start_x;
+
+        Some((target, visual_horizontal_goal(visual_row_index, target_x)))
+    }
+
     fn source_visual_line_boundary_target_point(
         &mut self,
         snapshot: &TextBufferSnapshot,
@@ -948,6 +1063,68 @@ impl MarkdownEditor {
                 visual_horizontal_goal(target_visual_row_index, desired_x),
             )
         })
+    }
+
+    fn visual_horizontal_target_point(
+        &mut self,
+        snapshot: &BufferSnapshot,
+        selection: &Selection<Point>,
+        direction: HorizontalDirection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<(Point, SelectionGoal)> {
+        let cursor = clip_cursor(snapshot, selection.head());
+        let target = move_horizontal_in_mode(snapshot, cursor, self.mode, direction);
+        let source_offset = snapshot.as_text_snapshot().point_to_offset(target);
+        let target_selection = collapsed_selection(target);
+        let display_row_state =
+            DisplayRowProjectionState::new(snapshot, Some(&target_selection), self.mode);
+        let item_index = self.display_item_index_for_cursor(snapshot, target, self.mode)?;
+        let display_row =
+            self.cached_display_row(snapshot, item_index, self.mode, &display_row_state)?;
+        let row_style = row_display_style_for_display_row(snapshot, &display_row, self.mode);
+        let wrap_width = text_wrap_width_for_mode(window, self.mode);
+        let layout = self.cached_row_layout(
+            snapshot,
+            &display_row,
+            &target_selection,
+            self.mode,
+            row_style,
+            wrap_width,
+            false,
+            window,
+            cx,
+        );
+
+        match layout {
+            DisplayRowLayout::Text(text_layout) => {
+                let display_offset = display_row
+                    .source_to_display(source_offset)
+                    .min(text_layout.text_len);
+                let visual_row_index = visual_row_index_for_horizontal_movement(
+                    &text_layout.visual_rows,
+                    &display_row.text,
+                    display_offset,
+                    text_layout.text_len,
+                    direction,
+                )?;
+                let visual_row = &text_layout.visual_rows[visual_row_index];
+                let target_x = display_x_for_offset(
+                    &text_layout.fragments,
+                    &text_layout.shaped_line,
+                    display_offset,
+                ) - visual_row.line_start_x;
+                Some((target, visual_horizontal_goal(visual_row_index, target_x)))
+            }
+            DisplayRowLayout::Block(block_layout) => Some((
+                target,
+                visual_horizontal_goal(0, block_layout.visible_x_for_source_offset(source_offset)),
+            )),
+            DisplayRowLayout::TableRow(table_layout) => Some((
+                target,
+                visual_horizontal_goal(0, table_layout.visible_x_for_source_offset(source_offset)),
+            )),
+        }
     }
 
     fn visual_line_boundary_target_point(
@@ -1531,6 +1708,8 @@ impl MarkdownEditor {
         self.sync_display_list_state(row_count_before, previous_selection);
         if let Some(invalidation) = local_source_edit_invalidation {
             self.display_list_state.remeasure_items(invalidation.rows);
+        } else if changed && self.mode == MarkdownEditorMode::Rendered {
+            self.remeasure_rendered_items_for_selection_change(previous_selection);
         }
         self.reveal_cursor_row();
         if changed {
@@ -1573,6 +1752,39 @@ impl MarkdownEditor {
         self.sync_rendered_rows_for_selection_change(previous_selection);
     }
 
+    fn remeasure_rendered_items_for_selection_change(
+        &mut self,
+        previous_selection: &Selection<Point>,
+    ) {
+        let snapshot = self.buffer.snapshot();
+        let index = self.rendered_display_index(&snapshot);
+        let mut items = [
+            previous_selection.start,
+            previous_selection.end,
+            self.selection.start,
+            self.selection.end,
+        ]
+        .into_iter()
+        .filter_map(|point| {
+            let cursor = clip_cursor(&snapshot, point);
+            let source_offset = snapshot.as_text_snapshot().point_to_offset(cursor);
+            index.item_index_for_source_offset(&snapshot, source_offset)
+        })
+        .collect::<Vec<_>>();
+        items.sort_unstable();
+        items.dedup();
+
+        if items.is_empty() {
+            self.display_list_state.remeasure();
+            return;
+        }
+
+        for item in items {
+            self.display_list_state
+                .remeasure_items(item..item.saturating_add(1));
+        }
+    }
+
     fn sync_rendered_rows_for_selection_change(&mut self, previous_selection: &Selection<Point>) {
         if self.mode != MarkdownEditorMode::Rendered {
             return;
@@ -1582,9 +1794,9 @@ impl MarkdownEditor {
         let previous_active = active_source_range_for_selection(&snapshot, previous_selection);
         let current_active = active_source_range_for_selection(&snapshot, &self.selection);
         let current_goal = self.selection.goal;
-        let preserve_wrapped_visual_goal = previous_selection.head().row
-            == self.selection.head().row
-            && matches!(current_goal, SelectionGoal::WrappedHorizontalPosition(_));
+        let preserve_wrapped_visual_goal =
+            matches!(current_goal, SelectionGoal::WrappedHorizontalPosition(_))
+                && self.selection_rows_share_rendered_item(&snapshot, previous_selection);
         let active_rows = source_rows_for_active_range_change(
             &snapshot,
             previous_active.as_ref(),
@@ -1604,6 +1816,22 @@ impl MarkdownEditor {
         for rows in active_rows {
             self.display_list_state.remeasure_items(rows);
         }
+    }
+
+    fn selection_rows_share_rendered_item(
+        &mut self,
+        snapshot: &BufferSnapshot,
+        previous_selection: &Selection<Point>,
+    ) -> bool {
+        let previous_row = previous_selection.head().row;
+        let current_row = self.selection.head().row;
+        if previous_row == current_row {
+            return true;
+        }
+
+        let index = self.rendered_display_index(snapshot);
+        index.item_index_for_source_row(previous_row as usize)
+            == index.item_index_for_source_row(current_row as usize)
     }
 
     fn emit_dirty_state(&mut self, cx: &mut Context<Self>) {
@@ -2197,15 +2425,48 @@ fn rendered_display_index_for_tests(snapshot: &BufferSnapshot) -> Arc<RenderedDi
 }
 
 fn rendered_item_display_source_range(
-    _snapshot: &BufferSnapshot,
+    snapshot: &BufferSnapshot,
     item: &RenderedDisplayItem,
-    _display_row_state: &DisplayRowProjectionState,
+    display_row_state: &DisplayRowProjectionState,
+    active_cursor_maps_to_item: bool,
 ) -> (u32, Range<usize>, Range<usize>) {
-    (
-        item.row_range.start as u32,
-        item.source_range.clone(),
-        item.row_range.clone(),
-    )
+    let mut source_range = item.source_range.clone();
+    let mut source_row_range = item.row_range.clone();
+    if active_cursor_maps_to_item
+        && matches!(
+            item.kind,
+            rendered_index::RenderedDisplayItemKind::Paragraph
+                | rendered_index::RenderedDisplayItemKind::Heading
+        )
+        && let Some(cursor) = display_row_state.active_cursor
+        && cursor.row as usize >= item.row_range.end
+    {
+        let text_snapshot = snapshot.as_text_snapshot();
+        let cursor_offset = text_snapshot.point_to_offset(cursor);
+        let cursor_at_trailing_blank_tail = text_snapshot
+            .text_for_range(cursor_offset..text_snapshot.len())
+            .all(|chunk| chunk.chars().all(is_line_break_char));
+        let active_trailing_break =
+            display_row_state
+                .active_source_range
+                .as_ref()
+                .is_some_and(|range| {
+                    range.start == item.source_range.end && range.end == cursor_offset
+                })
+                || item.row_range.len() == 1
+                || cursor_at_trailing_blank_tail;
+        if cursor_offset > item.source_range.end
+            && active_trailing_break
+            && text_snapshot
+                .text_for_range(item.source_range.end..cursor_offset)
+                .all(|chunk| chunk.chars().all(is_line_break_char))
+        {
+            source_range.end = cursor_offset;
+            source_row_range.end = cursor.row as usize + 1;
+        }
+    }
+
+    (item.row_range.start as u32, source_range, source_row_range)
 }
 
 #[cfg(test)]
@@ -2218,8 +2479,15 @@ fn rendered_display_row_for_item_for_tests(
     let item = index.item(item_index).expect("item should exist");
     let display_row_state =
         DisplayRowProjectionState::new(snapshot, selection, MarkdownEditorMode::Rendered);
-    let (row, source_range, source_row_range) =
-        rendered_item_display_source_range(snapshot, item, &display_row_state);
+    let active_cursor_maps_to_item = display_row_state.active_cursor.is_some_and(|cursor| {
+        index.item_index_for_source_row(cursor.row as usize) == Some(item_index)
+    });
+    let (row, source_range, source_row_range) = rendered_item_display_source_range(
+        snapshot,
+        item,
+        &display_row_state,
+        active_cursor_maps_to_item,
+    );
     let range_semantics = snapshot.syntax_tree().range_semantics_for_source_range(
         source_range.clone(),
         display_row_state.active_source_range.clone(),
@@ -2414,6 +2682,7 @@ fn project_display_row_text(
         inline_spans,
         projection,
     );
+    restore_rendered_trailing_soft_break(&mut display_text, source_text);
     let mut insertions = Vec::new();
     for span in inline_spans {
         let descriptor = rendered_element_descriptors
@@ -2455,6 +2724,45 @@ fn project_display_row_text(
     }
 
     (display_text, insertions)
+}
+
+fn restore_rendered_trailing_soft_break(display_text: &mut String, source_text: &str) {
+    let trailing_line_break_count = trailing_line_break_count(source_text);
+    if trailing_line_break_count == 0 {
+        return;
+    }
+
+    let trailing_spaces = " ".repeat(trailing_line_break_count);
+    if !display_text.ends_with(&trailing_spaces) {
+        return;
+    }
+
+    let trailing_space_start = display_text.len().saturating_sub(trailing_line_break_count);
+    display_text.replace_range(
+        trailing_space_start..,
+        &"\n".repeat(trailing_line_break_count),
+    );
+}
+
+fn trailing_line_break_count(text: &str) -> usize {
+    let mut count = 0;
+    let mut end = text.len();
+    while end > 0 {
+        if text[..end].ends_with("\r\n") {
+            count += 1;
+            end = end.saturating_sub("\r\n".len());
+        } else if text[..end].ends_with(['\n', '\r']) {
+            count += 1;
+            end = end.saturating_sub('\n'.len_utf8());
+        } else {
+            break;
+        }
+    }
+    count
+}
+
+fn is_line_break_char(ch: char) -> bool {
+    matches!(ch, '\n' | '\r')
 }
 
 fn restore_rendered_soft_breaks(
@@ -2545,6 +2853,39 @@ fn push_rendered_source_text_chunk(
                 .as_str(),
         );
     }
+}
+
+fn visual_row_index_for_horizontal_movement(
+    visual_rows: &[VisualDisplayRow],
+    display_text: &str,
+    display_offset: usize,
+    text_len: usize,
+    direction: HorizontalDirection,
+) -> Option<usize> {
+    match direction {
+        HorizontalDirection::Right
+            if !display_text[..display_offset.min(display_text.len())].ends_with('\n') =>
+        {
+            if let Some(index) = visual_rows.iter().position(|visual_row| {
+                visual_row.display_range.end == display_offset
+                    && display_offset < text_len
+                    && !visual_row.display_range.is_empty()
+            }) {
+                return Some(index);
+            }
+        }
+        HorizontalDirection::Right | HorizontalDirection::Left => {}
+    }
+
+    if direction == HorizontalDirection::Left
+        && let Some(index) = visual_rows
+            .iter()
+            .position(|visual_row| visual_row.display_range.start == display_offset)
+    {
+        return Some(index);
+    }
+
+    visual_row_index_for_caret(visual_rows, display_offset, text_len, SelectionGoal::None)
 }
 
 fn buffer_byte_delta(before_len: usize, after_len: usize) -> Option<isize> {

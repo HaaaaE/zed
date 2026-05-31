@@ -514,6 +514,29 @@ fn visual_row_index_containing_caret_finds_boundary_row() {
 }
 
 #[test]
+fn visual_row_index_containing_caret_prefers_empty_trailing_break_row() {
+    let visual_rows = vec![
+        VisualDisplayRow {
+            display_range: 0..2,
+            line_start_x: px(0.),
+            top: px(0.),
+            height: px(20.),
+        },
+        VisualDisplayRow {
+            display_range: 2..2,
+            line_start_x: px(24.),
+            top: px(20.),
+            height: px(20.),
+        },
+    ];
+
+    assert_eq!(
+        visual_row_index_containing_caret(&visual_rows, 2, 2),
+        Some(1)
+    );
+}
+
+#[test]
 fn visual_row_index_for_caret_uses_wrapped_goal_at_boundary() {
     let visual_rows = vec![
         VisualDisplayRow {
