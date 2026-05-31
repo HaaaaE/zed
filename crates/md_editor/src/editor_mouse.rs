@@ -95,6 +95,7 @@ impl MarkdownEditor {
                     display_row.content_origin_x(),
                 ),
         };
+        let point = self.normalize_rendered_caret(point, RenderedCaretAffinity::After);
         self.freeze_rendered_drag_projection(&snapshot);
         let previous_selection = self.selection.clone();
         self.selection = if event.modifiers.shift {
@@ -181,6 +182,7 @@ impl MarkdownEditor {
                     display_row.content_origin_x(),
                 ),
         };
+        let point = self.normalize_rendered_caret(point, RenderedCaretAffinity::After);
         let previous_selection = self.selection.clone();
         self.selection = select_to_point_with_goal(&snapshot, &self.selection, point, goal);
         self.notify_after_selection_change(&previous_selection, cx);

@@ -25,10 +25,22 @@ pub(crate) enum RenderedEditIntent {
 #[allow(dead_code)]
 pub(crate) enum RenderedSemanticPosition {
     PlainText,
-    SoftBreakBoundary(RenderedNewlineRun),
-    ParagraphBoundary(RenderedNewlineRun),
-    BoundaryWithSoftBreakSlot(RenderedNewlineRun),
-    EmptyParagraph(RenderedNewlineRun),
+    SoftBreakBoundary {
+        run: RenderedNewlineRun,
+        slot: RenderedNewlineRunSlot,
+    },
+    ParagraphBoundary {
+        run: RenderedNewlineRun,
+        slot: RenderedNewlineRunSlot,
+    },
+    BoundaryWithSoftBreakSlot {
+        run: RenderedNewlineRun,
+        slot: RenderedNewlineRunSlot,
+    },
+    EmptyParagraph {
+        run: RenderedNewlineRun,
+        slot: RenderedNewlineRunSlot,
+    },
     LinePrefix {
         range: Range<usize>,
         replacement: String,
@@ -43,10 +55,20 @@ pub(crate) enum RenderedSemanticPosition {
     StructuredBoundary,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RenderedNewlineRunSlot {
+    LeftBoundary,
+    RightBoundary,
+    Separator,
+    EmptyParagraph(usize),
+    SoftBreakSlot,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RenderedEditPlan {
     pub(crate) edits: Vec<(Range<usize>, String)>,
     pub(crate) selection_after: Selection<Point>,
+    pub(crate) normalize_blank_run_after_delete: bool,
 }
 
 pub(crate) fn plan_rendered_insert_paragraph_break(
@@ -90,21 +112,21 @@ pub(crate) fn plan_rendered_insert_paragraph_break(
 
     if let Some(position) = newline_run_position_at_cursor(snapshot, cursor) {
         match position {
-            RenderedSemanticPosition::SoftBreakBoundary(run) => {
+            RenderedSemanticPosition::SoftBreakBoundary { run, .. } => {
                 return Some(canonical_newline_run_plan(
                     &run,
                     2,
                     Point::new(run.left_point.row + 2, 0),
                 ));
             }
-            RenderedSemanticPosition::ParagraphBoundary(run) => {
+            RenderedSemanticPosition::ParagraphBoundary { run, .. } => {
                 return Some(canonical_newline_run_plan(
                     &run,
                     4,
                     Point::new(run.left_point.row + 2, 0),
                 ));
             }
-            RenderedSemanticPosition::BoundaryWithSoftBreakSlot(run) => {
+            RenderedSemanticPosition::BoundaryWithSoftBreakSlot { run, .. } => {
                 let next_newline_count = if run_right_is_document_tail(snapshot, &run) {
                     5
                 } else {
@@ -120,7 +142,7 @@ pub(crate) fn plan_rendered_insert_paragraph_break(
                     },
                 ));
             }
-            RenderedSemanticPosition::EmptyParagraph(run) => {
+            RenderedSemanticPosition::EmptyParagraph { run, .. } => {
                 let next_count = empty_paragraph_count(run.newline_count).saturating_add(1);
                 return Some(canonical_newline_run_plan(
                     &run,
@@ -159,7 +181,7 @@ pub(crate) fn plan_rendered_insert_soft_break(
         rendered_semantic_position(snapshot, cursor, RenderedEditIntent::InsertSoftBreak)
     {
         match position {
-            RenderedSemanticPosition::SoftBreakBoundary(run) => {
+            RenderedSemanticPosition::SoftBreakBoundary { run, .. } => {
                 if run_right_is_document_tail(snapshot, &run) {
                     return Some(canonical_newline_run_plan(
                         &run,
@@ -169,17 +191,17 @@ pub(crate) fn plan_rendered_insert_soft_break(
                 }
                 return Some(move_only_plan(run.right_point));
             }
-            RenderedSemanticPosition::ParagraphBoundary(run) => {
+            RenderedSemanticPosition::ParagraphBoundary { run, .. } => {
                 return Some(canonical_newline_run_plan(
                     &run,
                     3,
                     Point::new(run.left_point.row + 1, 0),
                 ));
             }
-            RenderedSemanticPosition::BoundaryWithSoftBreakSlot(run) => {
+            RenderedSemanticPosition::BoundaryWithSoftBreakSlot { run, .. } => {
                 return Some(move_only_plan(Point::new(run.left_point.row + 1, 0)));
             }
-            RenderedSemanticPosition::EmptyParagraph(run) => {
+            RenderedSemanticPosition::EmptyParagraph { run, .. } => {
                 let kind = RenderedTopology::new(snapshot, RenderedDisplayIndex::build(snapshot))
                     .classify_newline_run(&run);
                 let has_slot = matches!(
@@ -232,27 +254,21 @@ pub(crate) fn plan_rendered_delete_backward(
             replacement,
             cursor_offset,
         )),
-        RenderedSemanticPosition::SoftBreakBoundary(run)
-        | RenderedSemanticPosition::ParagraphBoundary(run) => {
+        RenderedSemanticPosition::SoftBreakBoundary { run, .. }
+        | RenderedSemanticPosition::ParagraphBoundary { run, .. } => {
             Some(canonical_newline_run_plan(&run, 0, run.left_point))
         }
-        RenderedSemanticPosition::BoundaryWithSoftBreakSlot(run) => {
-            let cursor = if source_row_is_blank(snapshot, cursor.row as usize) {
-                if cursor.row <= run.left_point.row + 1 {
-                    run.left_point
-                } else {
-                    Point::new(run.left_point.row + 2, 0)
-                }
-            } else {
-                run.left_point
+        RenderedSemanticPosition::BoundaryWithSoftBreakSlot { run, slot } => {
+            let cursor = match slot {
+                RenderedNewlineRunSlot::Separator => run.left_point,
+                RenderedNewlineRunSlot::SoftBreakSlot => Point::new(run.left_point.row + 2, 0),
+                _ => run.left_point,
             };
             Some(canonical_newline_run_plan(&run, 2, cursor))
         }
-        RenderedSemanticPosition::EmptyParagraph(run) => Some(delete_empty_paragraph_plan(
-            &run,
-            cursor,
-            HorizontalDirection::Left,
-        )),
+        RenderedSemanticPosition::EmptyParagraph { run, slot } => Some(
+            delete_empty_paragraph_plan(&run, slot, HorizontalDirection::Left),
+        ),
         RenderedSemanticPosition::RenderedElement { range }
         | RenderedSemanticPosition::ProjectionReplacement { range } => {
             Some(single_edit_plan(snapshot, range.clone(), String::new(), 0))
@@ -272,23 +288,21 @@ pub(crate) fn plan_rendered_delete_forward(
     let cursor = selection.head();
     let position = rendered_semantic_position(snapshot, cursor, RenderedEditIntent::DeleteForward)?;
     match position {
-        RenderedSemanticPosition::SoftBreakBoundary(run)
-        | RenderedSemanticPosition::ParagraphBoundary(run) => {
+        RenderedSemanticPosition::SoftBreakBoundary { run, .. }
+        | RenderedSemanticPosition::ParagraphBoundary { run, .. } => {
             Some(canonical_newline_run_plan(&run, 0, run.left_point))
         }
-        RenderedSemanticPosition::BoundaryWithSoftBreakSlot(run) => {
-            let cursor = if source_row_is_blank(snapshot, cursor.row as usize) {
-                Point::new(run.left_point.row + 1, 0)
-            } else {
-                Point::new(run.left_point.row + 2, 0)
+        RenderedSemanticPosition::BoundaryWithSoftBreakSlot { run, slot } => {
+            let cursor = match slot {
+                RenderedNewlineRunSlot::Separator => Point::new(run.left_point.row + 2, 0),
+                RenderedNewlineRunSlot::SoftBreakSlot => Point::new(run.left_point.row + 2, 0),
+                _ => Point::new(run.left_point.row + 2, 0),
             };
             Some(canonical_newline_run_plan(&run, 2, cursor))
         }
-        RenderedSemanticPosition::EmptyParagraph(run) => Some(delete_empty_paragraph_plan(
-            &run,
-            cursor,
-            HorizontalDirection::Right,
-        )),
+        RenderedSemanticPosition::EmptyParagraph { run, slot } => Some(
+            delete_empty_paragraph_plan(&run, slot, HorizontalDirection::Right),
+        ),
         RenderedSemanticPosition::RenderedElement { range }
         | RenderedSemanticPosition::ProjectionReplacement { range } => {
             Some(single_edit_plan(snapshot, range.clone(), String::new(), 0))
@@ -370,7 +384,7 @@ fn newline_run_position_at_cursor(
     if !newline_run_is_between_editable_items(&index, &run) && !run_ends_at_document_tail(&run) {
         return None;
     }
-    Some(position_for_newline_run(&topology, run))
+    Some(position_for_newline_run(&topology, run, cursor))
 }
 
 fn newline_run_position_for_delete(
@@ -393,23 +407,75 @@ fn newline_run_position_for_delete(
     if !newline_run_is_between_editable_items(&index, &run) && !run_ends_at_document_tail(&run) {
         return None;
     }
-    Some(position_for_newline_run(&topology, run))
+    Some(position_for_newline_run(&topology, run, cursor))
 }
 
 fn position_for_newline_run(
     topology: &RenderedTopology<'_>,
     run: RenderedNewlineRun,
+    cursor: Point,
 ) -> RenderedSemanticPosition {
+    let kind = topology.classify_newline_run(&run);
+    let slot = slot_for_newline_run(&run, cursor, kind);
     match topology.classify_newline_run(&run) {
-        RenderedNewlineRunKind::SoftBreak => RenderedSemanticPosition::SoftBreakBoundary(run),
+        RenderedNewlineRunKind::SoftBreak => {
+            RenderedSemanticPosition::SoftBreakBoundary { run, slot }
+        }
         RenderedNewlineRunKind::ParagraphBoundary => {
-            RenderedSemanticPosition::ParagraphBoundary(run)
+            RenderedSemanticPosition::ParagraphBoundary { run, slot }
         }
         RenderedNewlineRunKind::BoundaryWithSoftBreakSlot => {
-            RenderedSemanticPosition::BoundaryWithSoftBreakSlot(run)
+            RenderedSemanticPosition::BoundaryWithSoftBreakSlot { run, slot }
         }
         RenderedNewlineRunKind::EmptyParagraphs { .. } => {
-            RenderedSemanticPosition::EmptyParagraph(run)
+            RenderedSemanticPosition::EmptyParagraph { run, slot }
+        }
+    }
+}
+
+fn slot_for_newline_run(
+    run: &RenderedNewlineRun,
+    cursor: Point,
+    kind: RenderedNewlineRunKind,
+) -> RenderedNewlineRunSlot {
+    if cursor == run.left_point {
+        return RenderedNewlineRunSlot::LeftBoundary;
+    }
+    if cursor == run.right_point {
+        return RenderedNewlineRunSlot::RightBoundary;
+    }
+
+    let Some(row_delta) = cursor.row.checked_sub(run.left_point.row) else {
+        return RenderedNewlineRunSlot::LeftBoundary;
+    };
+    let row_delta = row_delta as usize;
+
+    match kind {
+        RenderedNewlineRunKind::SoftBreak => RenderedNewlineRunSlot::RightBoundary,
+        RenderedNewlineRunKind::ParagraphBoundary => RenderedNewlineRunSlot::Separator,
+        RenderedNewlineRunKind::BoundaryWithSoftBreakSlot => {
+            if row_delta <= 1 {
+                RenderedNewlineRunSlot::Separator
+            } else {
+                RenderedNewlineRunSlot::SoftBreakSlot
+            }
+        }
+        RenderedNewlineRunKind::EmptyParagraphs {
+            count,
+            has_soft_break_slot,
+        } => {
+            if row_delta % 2 == 0 {
+                let index = row_delta / 2;
+                if index <= count {
+                    RenderedNewlineRunSlot::EmptyParagraph(index)
+                } else if has_soft_break_slot {
+                    RenderedNewlineRunSlot::SoftBreakSlot
+                } else {
+                    RenderedNewlineRunSlot::RightBoundary
+                }
+            } else {
+                RenderedNewlineRunSlot::Separator
+            }
         }
     }
 }
@@ -763,7 +829,7 @@ fn content_after_optional_task_marker(content: &str) -> &str {
 
 fn delete_empty_paragraph_plan(
     run: &RenderedNewlineRun,
-    cursor: Point,
+    slot: RenderedNewlineRunSlot,
     direction: HorizontalDirection,
 ) -> RenderedEditPlan {
     let current_count = empty_paragraph_count(run.newline_count);
@@ -775,10 +841,10 @@ fn delete_empty_paragraph_plan(
     };
     let cursor = match direction {
         HorizontalDirection::Left => {
-            if let Some(cursor_empty_index) = empty_paragraph_index_at_cursor(run, cursor)
-                && cursor_empty_index > 1
+            if let RenderedNewlineRunSlot::EmptyParagraph(index) = slot
+                && index > 1
             {
-                empty_paragraph_point(run, cursor_empty_index - 1)
+                empty_paragraph_point(run, index - 1)
             } else {
                 run.left_point
             }
@@ -786,11 +852,6 @@ fn delete_empty_paragraph_plan(
         HorizontalDirection::Right => Point::new(run.left_point.row + next_newline_count as u32, 0),
     };
     canonical_newline_run_plan(run, next_newline_count, cursor)
-}
-
-fn empty_paragraph_index_at_cursor(run: &RenderedNewlineRun, cursor: Point) -> Option<usize> {
-    let row_delta = cursor.row.checked_sub(run.left_point.row)?;
-    (row_delta > 0 && row_delta as usize % 2 == 0).then_some(row_delta as usize / 2)
 }
 
 fn empty_paragraph_point(run: &RenderedNewlineRun, empty_paragraph_index: usize) -> Point {
@@ -806,6 +867,7 @@ fn canonical_newline_run_plan(
     RenderedEditPlan {
         edits: vec![(run.source_range.clone(), replacement)],
         selection_after: collapsed_selection(cursor),
+        normalize_blank_run_after_delete: false,
     }
 }
 
@@ -826,6 +888,7 @@ fn delete_rendered_selection_plan(
     RenderedEditPlan {
         edits: vec![(range, String::new())],
         selection_after: collapsed_selection(cursor),
+        normalize_blank_run_after_delete: true,
     }
 }
 
@@ -849,6 +912,7 @@ fn single_edit_plan(
     RenderedEditPlan {
         edits: vec![(range, replacement)],
         selection_after: collapsed_selection(cursor),
+        normalize_blank_run_after_delete: false,
     }
 }
 
@@ -874,7 +938,57 @@ fn move_only_plan(cursor: Point) -> RenderedEditPlan {
             reversed: false,
             goal: SelectionGoal::None,
         },
+        normalize_blank_run_after_delete: false,
     }
+}
+
+pub(crate) fn rendered_blank_run_normalization_after_delete(
+    snapshot: &BufferSnapshot,
+    cursor_offset: usize,
+) -> Option<(Range<usize>, String)> {
+    let text_snapshot = snapshot.as_text_snapshot();
+    let row_count = text_snapshot.row_count() as usize;
+    if row_count == 0 {
+        return None;
+    }
+
+    let cursor = text_snapshot.offset_to_point(cursor_offset.min(text_snapshot.len()));
+    let cursor_row = cursor.row as usize;
+    let candidate_rows = [
+        cursor_row.min(row_count.saturating_sub(1)),
+        cursor_row.saturating_sub(1),
+    ];
+    let blank_row = candidate_rows
+        .into_iter()
+        .find(|row| *row < row_count && source_row_is_blank(snapshot, *row))?;
+    let blank_run = blank_run_containing_row(snapshot, blank_row);
+
+    let has_previous_paragraph =
+        blank_run.start > 0 && !source_row_is_blank(snapshot, blank_run.start - 1);
+    let has_next_paragraph =
+        blank_run.end < row_count && !source_row_is_blank(snapshot, blank_run.end);
+    let target_blank_rows = usize::from(has_previous_paragraph && has_next_paragraph);
+
+    let start = text_snapshot.point_to_offset(Point::new(blank_run.start as u32, 0));
+    let end = text_snapshot.point_to_offset(Point::new(blank_run.end as u32, 0));
+    let replacement = "\n".repeat(target_blank_rows);
+    let current_text = text_snapshot.text_for_range(start..end).collect::<String>();
+    (current_text != replacement).then_some((start..end, replacement))
+}
+
+fn blank_run_containing_row(snapshot: &BufferSnapshot, row: usize) -> Range<usize> {
+    let row_count = snapshot.as_text_snapshot().row_count() as usize;
+    let mut start = row;
+    while start > 0 && source_row_is_blank(snapshot, start - 1) {
+        start -= 1;
+    }
+
+    let mut end = row + 1;
+    while end < row_count && source_row_is_blank(snapshot, end) {
+        end += 1;
+    }
+
+    start..end
 }
 
 fn point_after_inserted_text(

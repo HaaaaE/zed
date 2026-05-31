@@ -3750,7 +3750,7 @@ fn rendered_delete_deletes_empty_paragraph() {
         delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
 
     assert_eq!(buffer.text(), "a\n\nb\n");
-    assert_eq!(selection, collapsed_selection(Point::new(1, 0)));
+    assert_eq!(selection, collapsed_selection(Point::new(2, 0)));
     assert!(transaction_id.is_some());
 }
 

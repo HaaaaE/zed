@@ -361,6 +361,52 @@ Acceptance:
 - nested list Tab/Shift+Tab 调整 source indent。
 - blockquote Enter/Backspace 行为符合 Typora 写作预期。
 
+### Phase 5.5: Rendered Semantic Editing Slots
+
+目标：Rendered mode 的编辑不再由各 action 直接按 source 字符或 blank row 猜行为，而是统一经过语义层：
+
+```text
+source caret/selection
+  -> rendered newline-run topology
+  -> semantic slot
+  -> edit intent
+  -> source edit plan
+```
+
+新增/收敛概念：
+
+- `RenderedNewlineRun`：source-backed newline run，记录 source range、左右 source point、newline count、左右 rendered item。
+- `RenderedNewlineRunKind`：
+  - `SoftBreak`：`K=1`
+  - `ParagraphBoundary`：`K=2`
+  - `BoundaryWithSoftBreakSlot`：`K=3`
+  - `EmptyParagraphs { count, has_soft_break_slot }`：`K>=4`
+- `RenderedNewlineRunSlot`：
+  - `LeftBoundary`
+  - `RightBoundary`
+  - `Separator`
+  - `SoftBreakSlot`
+  - `EmptyParagraph(index)`
+
+关键原则：
+
+- edit action 消费 semantic slot，不直接用 source row 推断。
+- separator / ignored-extra row 不能成为最终不可见 caret stop。
+- `Shift+Enter` 在 paragraph boundary 创建或复用 `SoftBreakSlot`。
+- `Backspace/Delete` 从 `SoftBreakSlot` 回收为 canonical paragraph boundary 后，光标必须落到可见 semantic caret stop。
+- 多个 empty paragraph 中 Backspace 删除第 `N` 个空段后，光标回到第 `N-1` 个幸存空段；如果 `N=1`，回到上一段末尾。
+- `Enter` / `Shift+Enter` / `Backspace` / `Delete` / horizontal movement / mouse hit-test 应共享同一套 slot 归一化规则。
+- 只有 `PlainText` 内部允许 fallback 到 source-character edit。
+
+Acceptance:
+
+- `1\n2` 中 `1|` 按 Enter 得到 `1\n\n2`，光标在 `2` 开头。
+- `1\n\n2` 中 `1|` 按 Shift+Enter 得到 `1\n\n\n2`，光标在 soft-break slot。
+- 上述 soft-break slot 按 Backspace 得到 `1\n\n2`，光标回到 `1` 后，不落在不可见 separator row。
+- `111\n\n\n\n|\n\n222` 按 Backspace 得到 `111\n\n|\n\n222`，光标保留在幸存空段。
+- rendered element / projection replacement 删除仍按 whole source span 删除。
+- Source mode 保持 raw source 行为。
+
 ### Phase 6: Code Block Presentation
 
 目标：代码块看起来像代码块，同时保持逐 source row 编辑。
