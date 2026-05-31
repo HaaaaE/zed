@@ -557,3 +557,6 @@ Acceptance:
 - Phase 6 完成：fenced/indented code content rows 使用 `RenderedItemPresentation` 获得连续 code block background、horizontal padding、首尾 vertical padding；content origin/wrap width 和 row height 消费 presentation padding；inactive fence/info row 继续隐藏，active fence row 继续 reveal source text。
 - 更新 regression test 覆盖 code content row padding/background/container metadata、inactive/active fence row 不获得 code container presentation、多行 code block 只在首尾行加入 vertical padding。
 - 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。
+- Phase 7 spacing 完成：heading、paragraph、list item、blockquote spacing 通过 `RenderedItemPresentation` 表达，并由 rendered row height/render padding 消费，不生成额外 source row。
+- 更新 regression test 覆盖 heading/paragraph/list/blockquote spacing metadata。
+- 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。

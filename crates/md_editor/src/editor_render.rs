@@ -187,6 +187,8 @@ fn render_editor_row(
 ) -> gpui::AnyElement {
     let palette = editor_palette();
     let content_padding = display_row.presentation.content_padding;
+    let before_spacing = display_row.presentation.before_spacing.px;
+    let after_spacing = display_row.presentation.after_spacing.px;
 
     div()
         .id(display_row.row as usize)
@@ -230,8 +232,8 @@ fn render_editor_row(
                 .flex()
                 .flex_col()
                 .relative()
-                .pt(px(f32::from(content_padding.top)))
-                .pb(px(f32::from(content_padding.bottom)))
+                .pt(px(f32::from(before_spacing + content_padding.top)))
+                .pb(px(f32::from(after_spacing + content_padding.bottom)))
                 .text_size(row_style.text_size)
                 .line_height(row_style.line_height)
                 .min_h(content_min_height)

@@ -754,6 +754,24 @@ fn rendered_display_rows_derive_container_presentation() {
 }
 
 #[test]
+fn rendered_display_rows_derive_spacing_presentation() {
+    let source = "# Title\nparagraph\n- item\n> quote\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+
+    let rows = display_rows_in_mode(&snapshot, 0..4, None, MarkdownEditorMode::Rendered);
+
+    assert_eq!(rows[0].presentation.before_spacing.px, 10);
+    assert_eq!(rows[0].presentation.after_spacing.px, 6);
+    assert_eq!(rows[1].presentation.before_spacing.px, 0);
+    assert_eq!(rows[1].presentation.after_spacing.px, 6);
+    assert_eq!(rows[2].presentation.before_spacing.px, 0);
+    assert_eq!(rows[2].presentation.after_spacing.px, 2);
+    assert_eq!(rows[3].presentation.before_spacing.px, 6);
+    assert_eq!(rows[3].presentation.after_spacing.px, 6);
+}
+
+#[test]
 fn rendered_display_rows_keep_inline_atom_boundaries_inactive() {
     let mut buffer = Buffer::local("Before $x + y$ after\n");
     let snapshot = buffer.snapshot();

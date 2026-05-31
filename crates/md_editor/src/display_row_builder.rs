@@ -18,6 +18,7 @@ use crate::{
     display_model::{
         DisplayInsertion, DisplayRow, RenderedAdornment, RenderedAdornmentKind,
         RenderedAdornmentPlacement, RenderedContainerKind, RenderedItemPresentation,
+        RenderedSpacing,
     },
     inline_atom::INLINE_IMAGE_PLACEHOLDER,
     range_contains, ranges_overlap,
@@ -238,6 +239,7 @@ fn rendered_item_presentation_for_display_row(
     source_range: &Range<usize>,
     row: u32,
 ) -> RenderedItemPresentation {
+    let spacing = rendered_spacing_for_display_row(markdown_blocks, row);
     let code_block = markdown_blocks.iter().find(|block| {
         matches!(
             block.kind,
@@ -257,6 +259,8 @@ fn rendered_item_presentation_for_display_row(
             _ => block.row_range.end.saturating_sub(1),
         };
         return RenderedItemPresentation {
+            before_spacing: spacing.0,
+            after_spacing: spacing.1,
             content_padding: crate::display_model::RenderedPadding {
                 top: if row == first_content_row { 3 } else { 0 },
                 right: 12,
@@ -271,6 +275,8 @@ fn rendered_item_presentation_for_display_row(
 
     if blockquote_depth > 0 {
         return RenderedItemPresentation {
+            before_spacing: spacing.0,
+            after_spacing: spacing.1,
             background: Some(crate::display_model::RenderedBackgroundKind::BlockQuote),
             container: Some(RenderedContainerKind::BlockQuote {
                 depth: blockquote_depth,
@@ -279,7 +285,74 @@ fn rendered_item_presentation_for_display_row(
         };
     }
 
-    RenderedItemPresentation::default()
+    RenderedItemPresentation {
+        before_spacing: spacing.0,
+        after_spacing: spacing.1,
+        ..Default::default()
+    }
+}
+
+fn rendered_spacing_for_display_row(
+    markdown_blocks: &[MarkdownBlock],
+    row: u32,
+) -> (RenderedSpacing, RenderedSpacing) {
+    let row = row as usize;
+    if let Some(level) = markdown_blocks.iter().find_map(|block| match block.kind {
+        MarkdownBlockKind::AtxHeading { level } | MarkdownBlockKind::SetextHeading { level }
+            if block.row_range.contains(&row) =>
+        {
+            Some(level)
+        }
+        _ => None,
+    }) {
+        let (before, after) = match level {
+            1 => (10, 6),
+            2 => (8, 4),
+            3 => (6, 3),
+            _ => (4, 2),
+        };
+        return (
+            RenderedSpacing { px: before },
+            RenderedSpacing { px: after },
+        );
+    }
+
+    if markdown_blocks.iter().any(|block| {
+        matches!(
+            block.kind,
+            MarkdownBlockKind::ListItem | MarkdownBlockKind::TaskListItem { .. }
+        ) && block.row_range.end.saturating_sub(1) == row
+    }) {
+        return (RenderedSpacing::default(), RenderedSpacing { px: 2 });
+    }
+
+    if let Some(blockquote) = markdown_blocks.iter().find(|block| {
+        matches!(block.kind, MarkdownBlockKind::BlockQuote) && block.row_range.contains(&row)
+    }) {
+        let before = if blockquote.row_range.start == row {
+            6
+        } else {
+            0
+        };
+        let after = if blockquote.row_range.end.saturating_sub(1) == row {
+            6
+        } else {
+            0
+        };
+        return (
+            RenderedSpacing { px: before },
+            RenderedSpacing { px: after },
+        );
+    }
+
+    if markdown_blocks.iter().any(|block| {
+        matches!(block.kind, MarkdownBlockKind::Paragraph)
+            && block.row_range.end.saturating_sub(1) == row
+    }) {
+        return (RenderedSpacing::default(), RenderedSpacing { px: 6 });
+    }
+
+    (RenderedSpacing::default(), RenderedSpacing::default())
 }
 
 fn rendered_adornments_for_display_row(

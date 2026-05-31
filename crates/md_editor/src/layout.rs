@@ -108,7 +108,8 @@ impl DisplayItemLayout {
         row_style: RowDisplayStyle,
         display_row: &DisplayRow,
     ) -> gpui::Pixels {
-        let vertical_padding = display_row.vertical_content_padding();
+        let vertical_padding =
+            display_row.vertical_content_padding() + display_row.vertical_presentation_spacing();
         (match self {
             Self::Text(text_layout) => row_style.min_height.max(text_layout.height(row_style)),
             Self::Block(block_layout) if block_layout.height() == px(0.) => px(0.),
@@ -122,7 +123,8 @@ impl DisplayItemLayout {
         row_style: RowDisplayStyle,
         display_row: &DisplayRow,
     ) -> gpui::Pixels {
-        let vertical_padding = display_row.vertical_content_padding();
+        let vertical_padding =
+            display_row.vertical_content_padding() + display_row.vertical_presentation_spacing();
         (match self {
             Self::Text(text_layout) => text_layout.height(row_style),
             Self::Block(block_layout) if block_layout.height() == px(0.) => px(0.),

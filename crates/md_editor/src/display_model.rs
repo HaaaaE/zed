@@ -70,6 +70,12 @@ impl DisplayRow {
         ))
     }
 
+    pub(crate) fn vertical_presentation_spacing(&self) -> Pixels {
+        px(f32::from(
+            self.presentation.before_spacing.px + self.presentation.after_spacing.px,
+        ))
+    }
+
     pub(crate) fn source_to_display(&self, source_offset: usize) -> usize {
         let mut display_offset = self.projection.source_to_display(source_offset);
         for insertion in &self.insertions {
