@@ -2925,6 +2925,74 @@ fn rendered_length_preserving_single_item_edit_keeps_other_display_rows(
 }
 
 #[gpui::test]
+fn rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build(
+    cx: &mut gpui::TestAppContext,
+) {
+    let cases = [
+        ("# Heading text\n\nbody", "Heading", "Updated"),
+        ("- list item text\n- second item\n", "item", "entry"),
+        ("> quoted line text\n\nbody", "line", "row"),
+        (
+            "| Name | State |\n| --- | --- |\n| Alice text | Ready |\n",
+            "text",
+            "value",
+        ),
+    ];
+
+    for (source, from, to) in cases {
+        let editor = cx.update(|cx| cx.new(|cx| MarkdownEditor::for_text(source, cx)));
+
+        editor.update(cx, |editor, cx| {
+            editor.set_mode(MarkdownEditorMode::Rendered, cx);
+            let snapshot = editor.buffer.snapshot();
+            let _ = editor.rendered_display_index(&snapshot);
+
+            let text_snapshot = editor.buffer.as_text_snapshot();
+            let offset = source.find(from).expect("case should contain edit target");
+            let previous_selection = Selection {
+                id: 7,
+                start: text_snapshot.offset_to_point(offset),
+                end: text_snapshot.offset_to_point(offset + from.len()),
+                reversed: false,
+                goal: SelectionGoal::None,
+            };
+            editor.selection = previous_selection.clone();
+
+            RenderedDisplayIndex::reset_stats_for_tests();
+            let syntax_version_before_edit = editor.buffer.cached_syntax_version_for_tests();
+            let row_count_before = editor.display_list_state.item_count();
+            let (selection, summary) = replace_selection(&mut editor.buffer, &editor.selection, to);
+            let summary = summary.expect("edit should produce summary");
+            editor.selection = selection;
+
+            editor.notify_after_edit(
+                true,
+                row_count_before,
+                &previous_selection,
+                EditLayoutInvalidation::LocalSourceSelection {
+                    edit_summary: Some(summary),
+                },
+                cx,
+            );
+
+            assert_eq!(
+                RenderedDisplayIndex::stats_for_tests(),
+                md_projection::RenderedDisplayIndexStats {
+                    full_builds: 0,
+                    incremental_updates: 1,
+                },
+                "{source:?}"
+            );
+            assert_eq!(
+                editor.buffer.cached_syntax_version_for_tests(),
+                syntax_version_before_edit,
+                "rendered plain text edit should not refresh markdown syntax for {source:?}"
+            );
+        });
+    }
+}
+
+#[gpui::test]
 fn source_undo_redo_single_row_edit_keeps_later_display_rows(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     let editor = cx.new(|cx| MarkdownEditor::for_text("one\ntwo\nthree", cx));

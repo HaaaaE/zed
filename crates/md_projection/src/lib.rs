@@ -529,18 +529,23 @@ impl RenderedDisplayIndex {
         let row = edit_summary.new_affected_rows.start;
         let item_index = self.item_index_for_source_row(row)?;
         let old_item = self.item(item_index)?;
-        if old_item.kind != RenderedDisplayItemKind::Paragraph
-            || old_item.row_range != (row..row + 1)
-            || edit_summary.old_range.start <= old_item.source_range.start
+        if !matches!(
+            old_item.kind,
+            RenderedDisplayItemKind::Paragraph
+                | RenderedDisplayItemKind::Heading
+                | RenderedDisplayItemKind::TableRow
+                | RenderedDisplayItemKind::SourceFallback
+        ) || !old_item.row_range.contains(&row)
+            || edit_summary.old_range.start < old_item.source_range.start
             || edit_summary.old_range.end > old_item.source_range.end
             || self.blank_row_roles.get(row).copied().flatten().is_some()
-            || !source_row_is_isolated_in_text_snapshot(text_snapshot, row)
+            || !edit_preserves_plain_rendered_item(text_snapshot, old_item, edit_summary, row)
         {
             return None;
         }
 
-        let new_source_range = row_source_range_in_text_snapshot(text_snapshot, row as u32);
-        if source_range_is_blank_in_text_snapshot(text_snapshot, new_source_range.clone()) {
+        let new_row_source_range = row_source_range_in_text_snapshot(text_snapshot, row as u32);
+        if source_range_is_blank_in_text_snapshot(text_snapshot, new_row_source_range.clone()) {
             return None;
         }
 
@@ -556,7 +561,11 @@ impl RenderedDisplayIndex {
         let mut items = self.items.clone();
         for item in &mut items {
             if item.index == item_index {
-                item.source_range = new_source_range.clone();
+                item.source_range = if old_item.row_range.len() == 1 {
+                    new_row_source_range.clone()
+                } else {
+                    old_item.source_range.start..shift_offset(old_item.source_range.end)?
+                };
                 item.id = DisplayItemId(display_item_id(
                     &item.source_range,
                     &item.row_range,
@@ -629,6 +638,166 @@ impl RenderedDisplayIndex {
             .row as usize;
         self.item_index_for_source_row(row)
     }
+}
+
+fn edit_preserves_plain_rendered_item(
+    text_snapshot: &TextBufferSnapshot,
+    item: &RenderedDisplayItem,
+    edit_summary: &BufferEditSummary,
+    row: usize,
+) -> bool {
+    if edit_summary.edits.len() != 1 || edit_summary.new_range.start > edit_summary.new_range.end {
+        return false;
+    }
+
+    let row_range = row_source_range_in_text_snapshot(text_snapshot, row as u32);
+    if edit_summary.new_range.start < row_range.start || edit_summary.new_range.end > row_range.end
+    {
+        return false;
+    }
+
+    let row_text = text_snapshot
+        .text_for_range(row_range.clone())
+        .collect::<String>();
+    let row_start = row_range.start;
+    let edit_start_column = edit_summary.new_range.start.saturating_sub(row_start);
+    let edit_end_column = edit_summary.new_range.end.saturating_sub(row_start);
+    let inserted_text = text_snapshot
+        .text_for_range(edit_summary.new_range.clone())
+        .collect::<String>();
+
+    if inserted_text.chars().any(is_markdown_structure_char) {
+        return false;
+    }
+
+    match item.kind {
+        RenderedDisplayItemKind::Paragraph => {
+            edit_start_column > 0 && edit_summary.old_range.start > row_range.start
+        }
+        RenderedDisplayItemKind::Heading => {
+            let Some(content_start) = heading_content_start(&row_text) else {
+                return false;
+            };
+            edit_start_column >= content_start
+                && edit_summary
+                    .old_range
+                    .start
+                    .saturating_sub(item.source_range.start)
+                    >= content_start
+        }
+        RenderedDisplayItemKind::TableRow => {
+            if inserted_text.contains('|')
+                || is_table_delimiter_row(&row_text)
+                || row_text.bytes().filter(|byte| *byte == b'|').count() < 3
+            {
+                return false;
+            }
+            edit_start_column > 0
+                && edit_end_column < row_text.len()
+                && row_text.as_bytes().get(edit_start_column) != Some(&b'|')
+                && edit_start_column
+                    .checked_sub(1)
+                    .and_then(|column| row_text.as_bytes().get(column))
+                    != Some(&b'|')
+        }
+        RenderedDisplayItemKind::SourceFallback => {
+            let content_start = source_fallback_content_start(&row_text);
+            edit_start_column >= content_start
+                && edit_summary.old_range.start > item.source_range.start
+                && edit_summary
+                    .old_range
+                    .start
+                    .saturating_sub(item.source_range.start)
+                    >= content_start
+        }
+        RenderedDisplayItemKind::EmptyParagraph | RenderedDisplayItemKind::StructuredBlock => false,
+    }
+}
+
+fn is_table_delimiter_row(row_text: &str) -> bool {
+    let trimmed = row_text.trim();
+    trimmed.contains('|')
+        && trimmed
+            .chars()
+            .all(|ch| matches!(ch, '|' | ':' | '-' | ' '))
+}
+
+fn heading_content_start(row_text: &str) -> Option<usize> {
+    let bytes = row_text.as_bytes();
+    let mut column = 0;
+    while column < bytes.len() && bytes[column] == b'#' && column < 6 {
+        column += 1;
+    }
+    if column == 0 || bytes.get(column) != Some(&b' ') {
+        return None;
+    }
+    Some(column + 1)
+}
+
+fn source_fallback_content_start(row_text: &str) -> usize {
+    let bytes = row_text.as_bytes();
+    let mut column = bytes
+        .iter()
+        .take_while(|byte| matches!(byte, b' ' | b'\t'))
+        .count();
+
+    if bytes.get(column) == Some(&b'>') {
+        column += 1;
+        if bytes.get(column) == Some(&b' ') {
+            column += 1;
+        }
+    }
+
+    if bytes.get(column) == Some(&b'-')
+        || bytes.get(column) == Some(&b'+')
+        || bytes.get(column) == Some(&b'*')
+    {
+        if bytes.get(column + 1) == Some(&b' ') {
+            return column + 2;
+        }
+        if bytes.get(column + 1) == Some(&b'[')
+            && matches!(bytes.get(column + 2), Some(b' ' | b'x' | b'X'))
+            && bytes.get(column + 3) == Some(&b']')
+            && bytes.get(column + 4) == Some(&b' ')
+        {
+            return column + 5;
+        }
+    }
+
+    let ordered_start = column;
+    while bytes.get(column).is_some_and(u8::is_ascii_digit) {
+        column += 1;
+    }
+    if column > ordered_start
+        && matches!(bytes.get(column), Some(b'.' | b')'))
+        && bytes.get(column + 1) == Some(&b' ')
+    {
+        return column + 2;
+    }
+
+    ordered_start
+}
+
+fn is_markdown_structure_char(ch: char) -> bool {
+    matches!(
+        ch,
+        '\n' | '\r'
+            | '#'
+            | '>'
+            | '*'
+            | '_'
+            | '`'
+            | '~'
+            | '['
+            | ']'
+            | '('
+            | ')'
+            | '!'
+            | '|'
+            | '\\'
+            | '<'
+            | '&'
+    )
 }
 
 fn rendered_item_for_source_row(
@@ -725,12 +894,6 @@ fn source_range_is_blank_in_text_snapshot(
     snapshot
         .text_for_range(source_range)
         .all(|chunk| chunk.trim().is_empty())
-}
-
-fn source_row_is_isolated_in_text_snapshot(snapshot: &TextBufferSnapshot, row: usize) -> bool {
-    let row_count = snapshot.row_count() as usize;
-    (row == 0 || source_row_is_blank_in_text_snapshot(snapshot, row - 1))
-        && (row + 1 >= row_count || source_row_is_blank_in_text_snapshot(snapshot, row + 1))
 }
 
 fn previous_nonblank_row_before_blank_run(
@@ -1311,6 +1474,69 @@ mod tests {
         let full = RenderedDisplayIndex::build(&new_snapshot);
 
         assert_index_matches_full_build(&incremental, &full);
+    }
+
+    #[test]
+    fn plain_text_update_matches_full_build_for_common_rendered_rows() {
+        let cases = [
+            ("# Heading text\n\nbody", "Heading", "Updated"),
+            ("first paragraph\ncontinued text\n\nbody", "text", "updated"),
+            ("- list item text\n- second item\n", "item", "entry"),
+            ("> quoted line text\n\nbody", "line", "row"),
+            (
+                "| Name | State |\n| --- | --- |\n| Alice text | Ready |\n",
+                "text",
+                "value",
+            ),
+        ];
+
+        for (source, from, to) in cases {
+            let mut buffer = Buffer::local(source);
+            let old_snapshot = buffer.snapshot();
+            let old_index = RenderedDisplayIndex::build(&old_snapshot);
+            let offset = source.find(from).expect("case should contain edit target");
+            let summary = buffer
+                .edit([(offset..offset + from.len(), to)])
+                .expect("edit should produce summary");
+
+            let incremental = old_index
+                .update_after_plain_text_edit(buffer.as_text_snapshot(), &summary)
+                .unwrap_or_else(|| panic!("plain edit should update incrementally for {source:?}"));
+            let full_snapshot = buffer.snapshot();
+            let full = RenderedDisplayIndex::build(&full_snapshot);
+
+            assert_index_matches_full_build(&incremental, &full);
+        }
+    }
+
+    #[test]
+    fn plain_text_update_declines_marker_and_table_delimiter_edits() {
+        let cases = [
+            ("# Heading\n\nbody", 0..1, "H"),
+            ("- list item\n", 0..1, "x"),
+            ("> quoted line\n", 0..1, "x"),
+            (
+                "| Name | State |\n| --- | --- |\n| Alice | Ready |\n",
+                7..8,
+                "x",
+            ),
+        ];
+
+        for (source, range, replacement) in cases {
+            let mut buffer = Buffer::local(source);
+            let old_snapshot = buffer.snapshot();
+            let old_index = RenderedDisplayIndex::build(&old_snapshot);
+            let summary = buffer
+                .edit([(range, replacement)])
+                .expect("edit should produce summary");
+
+            assert!(
+                old_index
+                    .update_after_plain_text_edit(buffer.as_text_snapshot(), &summary)
+                    .is_none(),
+                "marker edit should not use plain fast path for {source:?}"
+            );
+        }
     }
 
     #[test]

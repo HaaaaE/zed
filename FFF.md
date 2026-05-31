@@ -60,3 +60,12 @@
 - 这是本地 GPUI Markdown editor，不涉及远程协作，不引入 `project`、`workspace`、`editor`、`language`、`multi_buffer` 等 Zed IDE crate。
 - 不做旧 API 兼容层；直接把编辑、undo、redo、render invalidation 迁到 summary/incremental 路径。
 - 正确性优先：无法证明安全的结构编辑可以 full fallback，但普通输入、回车、删除不能 fallback。
+
+## Progress
+
+- 2026-05-31:
+  - 扩展 `RenderedDisplayIndex::update_after_plain_text_edit`，不再只接受空行包围的单行 paragraph；现在覆盖普通 paragraph 内容、heading 内容、list/blockquote fallback 行内容、table cell 内容的单行普通文本编辑。
+  - fast path 继续禁止结构字符、Markdown marker 前缀、table delimiter 行/分隔符编辑；命中时只平移当前/后续 item source range，不请求 `Buffer::snapshot()`，保留 deferred syntax refresh。
+  - 新增等价测试：common rendered rows 的 plain-text 增量 index 与 full build 完全一致；marker/table delimiter 编辑拒绝 fast path。
+  - 新增编辑层回归：Render 模式 heading/list/blockquote/table 普通文本编辑 `full_builds = 0`、`incremental_updates = 1`，且 `cached_syntax_version` 不变。
+  - 已验证：`cargo test -p md_projection`、`cargo test -p md_editor rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build`、`cargo test -p md_editor rendered_length_preserving_single_item_edit_keeps_other_display_rows`。
