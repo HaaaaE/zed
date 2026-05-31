@@ -3212,6 +3212,60 @@ fn rendered_enter_in_empty_paragraph_creates_next_empty_paragraph() {
 }
 
 #[test]
+fn rendered_enter_continues_unordered_task_ordered_and_blockquote_lines() {
+    let mut buffer = Buffer::local("- item\n- [x] done\n3) ordered\n> quote\n");
+
+    let selection = collapsed_selection(Point::new(0, "- item".len() as u32));
+    let (selection, transaction_id) =
+        insert_newline_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+    assert_eq!(
+        buffer.text(),
+        "- item\n- \n- [x] done\n3) ordered\n> quote\n"
+    );
+    assert_eq!(selection, collapsed_selection(Point::new(1, 2)));
+    assert!(transaction_id.is_some());
+
+    let selection = collapsed_selection(Point::new(2, "- [x] done".len() as u32));
+    let (selection, transaction_id) =
+        insert_newline_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+    assert_eq!(
+        buffer.text(),
+        "- item\n- \n- [x] done\n- [ ] \n3) ordered\n> quote\n"
+    );
+    assert_eq!(
+        selection,
+        collapsed_selection(Point::new(3, "- [ ] ".len() as u32))
+    );
+    assert!(transaction_id.is_some());
+
+    let selection = collapsed_selection(Point::new(4, "3) ordered".len() as u32));
+    let (selection, transaction_id) =
+        insert_newline_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+    assert_eq!(
+        buffer.text(),
+        "- item\n- \n- [x] done\n- [ ] \n3) ordered\n4) \n> quote\n"
+    );
+    assert_eq!(
+        selection,
+        collapsed_selection(Point::new(5, "4) ".len() as u32))
+    );
+    assert!(transaction_id.is_some());
+
+    let selection = collapsed_selection(Point::new(6, "> quote".len() as u32));
+    let (selection, transaction_id) =
+        insert_newline_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+    assert_eq!(
+        buffer.text(),
+        "- item\n- \n- [x] done\n- [ ] \n3) ordered\n4) \n> quote\n> \n"
+    );
+    assert_eq!(
+        selection,
+        collapsed_selection(Point::new(7, "> ".len() as u32))
+    );
+    assert!(transaction_id.is_some());
+}
+
+#[test]
 fn source_enter_preserves_auto_indent() {
     let mut buffer = Buffer::local("    ab");
     let selection = collapsed_selection(Point::new(0, "    a".len() as u32));

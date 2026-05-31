@@ -1,5 +1,5 @@
 use md_buffer::{Buffer, BufferSnapshot};
-use md_text::{Point, Selection, SelectionGoal};
+use md_text::{BufferSnapshot as TextBufferSnapshot, Point, Selection, SelectionGoal};
 
 use super::rendered_element::{
     projection_replacement_range_at_cursor, rendered_element_range_at_cursor,
@@ -62,7 +62,7 @@ fn insert_rendered_newline(
     let insertion = rendered_newline_insertion(buffer, selection);
     let range_start =
         selection_byte_range_in_text_snapshot(buffer.as_text_snapshot(), selection).start;
-    let (mut selection, transaction_id) = replace_selection(buffer, selection, insertion.text);
+    let (mut selection, transaction_id) = replace_selection(buffer, selection, &insertion.text);
     if insertion.cursor_delta != insertion.text.len() {
         let cursor = buffer
             .as_text_snapshot()
@@ -73,7 +73,7 @@ fn insert_rendered_newline(
 }
 
 struct RenderedNewlineInsertion {
-    text: &'static str,
+    text: String,
     cursor_delta: usize,
 }
 
@@ -82,7 +82,7 @@ fn rendered_newline_insertion(
     selection: &Selection<Point>,
 ) -> RenderedNewlineInsertion {
     let default = RenderedNewlineInsertion {
-        text: "\n\n",
+        text: "\n\n".to_string(),
         cursor_delta: "\n\n".len(),
     };
     if !selection.is_empty() {
@@ -92,6 +92,10 @@ fn rendered_newline_insertion(
     let snapshot = buffer.snapshot();
     let text_snapshot = snapshot.as_text_snapshot();
     let cursor = selection.head();
+    if let Some(insertion) = rendered_line_continuation_insertion(text_snapshot, cursor) {
+        return insertion;
+    }
+
     let source_offset = text_snapshot.point_to_offset(cursor);
     let index = RenderedDisplayIndex::build(&snapshot);
     let Some(item_index) = index.item_index_for_source_offset(&snapshot, source_offset) else {
@@ -114,8 +118,132 @@ fn rendered_newline_insertion(
     }
 
     RenderedNewlineInsertion {
-        text: "\n\n\n",
+        text: "\n\n\n".to_string(),
         cursor_delta: "\n\n".len(),
+    }
+}
+
+fn rendered_line_continuation_insertion(
+    snapshot: &TextBufferSnapshot,
+    cursor: Point,
+) -> Option<RenderedNewlineInsertion> {
+    if cursor.column != snapshot.line_len(cursor.row) {
+        return None;
+    }
+
+    let line_start = snapshot.point_to_offset(Point::new(cursor.row, 0));
+    let line_end = line_start + snapshot.line_len(cursor.row) as usize;
+    let line = snapshot
+        .text_for_range(line_start..line_end)
+        .collect::<String>();
+    let marker = rendered_line_continuation_marker(&line)?;
+    Some(RenderedNewlineInsertion {
+        text: format!("\n{marker}"),
+        cursor_delta: "\n".len() + marker.len(),
+    })
+}
+
+fn rendered_line_continuation_marker(line: &str) -> Option<String> {
+    let (quote_prefix, after_quote) = split_blockquote_prefix(line);
+    let (indent, rest) = split_ascii_indent(after_quote);
+    let prefix = format!("{quote_prefix}{indent}");
+    if let Some((marker, content)) = unordered_list_marker(rest) {
+        let task_marker = task_marker_for_content(content);
+        if content_after_optional_task_marker(content)
+            .trim()
+            .is_empty()
+        {
+            return None;
+        }
+        return Some(format!("{prefix}{marker}{task_marker}"));
+    }
+    if let Some((number, delimiter, content)) = ordered_list_marker(rest) {
+        if content.trim().is_empty() {
+            return None;
+        }
+        return Some(format!("{prefix}{}{delimiter} ", number.saturating_add(1)));
+    }
+    if !quote_prefix.is_empty() && !after_quote.trim().is_empty() {
+        return Some(quote_prefix.to_string());
+    }
+    None
+}
+
+fn split_blockquote_prefix(line: &str) -> (&str, &str) {
+    let mut cursor = 0;
+    let bytes = line.as_bytes();
+    loop {
+        while cursor < bytes.len() && matches!(bytes[cursor], b' ' | b'\t') {
+            cursor += 1;
+        }
+        if bytes.get(cursor) != Some(&b'>') {
+            break;
+        }
+        cursor += 1;
+        if bytes.get(cursor) == Some(&b' ') {
+            cursor += 1;
+        }
+    }
+    line.split_at(cursor)
+}
+
+fn split_ascii_indent(line: &str) -> (&str, &str) {
+    let indent_len = line
+        .as_bytes()
+        .iter()
+        .take_while(|byte| matches!(byte, b' ' | b'\t'))
+        .count();
+    line.split_at(indent_len)
+}
+
+fn unordered_list_marker(line: &str) -> Option<(&str, &str)> {
+    let bytes = line.as_bytes();
+    if bytes.len() >= 2 && matches!(bytes[0], b'-' | b'*' | b'+') && bytes[1] == b' ' {
+        return Some((&line[..2], &line[2..]));
+    }
+    None
+}
+
+fn ordered_list_marker(line: &str) -> Option<(u32, char, &str)> {
+    let bytes = line.as_bytes();
+    let digit_len = bytes
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digit_len == 0 || bytes.len() < digit_len + 2 {
+        return None;
+    }
+    let delimiter = bytes[digit_len] as char;
+    if !matches!(delimiter, '.' | ')') || bytes[digit_len + 1] != b' ' {
+        return None;
+    }
+    let number = line[..digit_len].parse::<u32>().ok()?;
+    Some((number, delimiter, &line[digit_len + 2..]))
+}
+
+fn task_marker_for_content(content: &str) -> &'static str {
+    if matches!(
+        content.as_bytes().get(..4),
+        Some([b'[', b' ', b']', b' '])
+            | Some([b'[', b'x', b']', b' '])
+            | Some([b'[', b'X', b']', b' '])
+    ) {
+        "[ ] "
+    } else {
+        ""
+    }
+}
+
+fn content_after_optional_task_marker(content: &str) -> &str {
+    if matches!(
+        content.as_bytes().get(..4),
+        Some([b'[', b' ', b']', b' '])
+            | Some([b'[', b'x', b']', b' '])
+            | Some([b'[', b'X', b']', b' '])
+    ) {
+        &content[4..]
+    } else {
+        content
     }
 }
 

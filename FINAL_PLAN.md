@@ -542,3 +542,6 @@ Acceptance:
 - Phase 4 基础完成：新增 `ToggleBold`、`ToggleItalic`、`ToggleInlineCode`、`ToggleStrikethrough`、`InsertLink`、`EditLink`、`ToggleSourceRevealCurrentBlock` actions；`ctrl/cmd-b` 和 `ctrl/cmd-i` 默认绑定；bold/italic/code/strike 支持 collapsed marker insertion、selection wrap、wrapped selection unwrap；InsertLink 支持 collapsed/selection Markdown link insertion。
 - 更新 regression tests 覆盖 inline formatting wrap/unwrap/collapsed insertion、italic/strike/link 和 undo。
 - 验证：`cargo test -p md_editor --lib` 通过；`cargo test -p md_settings` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。
+- Phase 5 部分推进：Rendered Enter 在行尾支持 unordered list、task list、ordered list、blockquote 的同级续行；task continuation 生成 unchecked marker，ordered continuation 递增编号。
+- 更新 regression test 覆盖 unordered/task/ordered/blockquote rendered Enter continuation。
+- 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。
