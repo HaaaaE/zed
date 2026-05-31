@@ -72,163 +72,6 @@ fn display_rows_cache_source_text_and_range() {
 }
 
 #[test]
-fn rendered_display_index_groups_paragraphs_and_keeps_structured_rows_addressable() {
-    let mut buffer = Buffer::local(
-        "first paragraph\ncontinued\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n```rust\nlet x = 1;\n```\n[label]: https://example.com\n<div>raw</div>\n",
-    );
-    let snapshot = buffer.snapshot();
-    let index = rendered_display_index_for_tests(&snapshot);
-
-    let items = (0..index.item_count())
-        .map(|ix| index.item(ix).expect("item should exist"))
-        .map(|item| (item.index, item.row_range.clone(), item.kind))
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        items,
-        vec![
-            (0, 0..2, rendered_index::RenderedDisplayItemKind::Paragraph),
-            (1, 3..4, rendered_index::RenderedDisplayItemKind::TableRow),
-            (2, 4..5, rendered_index::RenderedDisplayItemKind::TableRow),
-            (3, 5..6, rendered_index::RenderedDisplayItemKind::TableRow),
-            (
-                4,
-                7..8,
-                rendered_index::RenderedDisplayItemKind::StructuredBlock
-            ),
-            (
-                5,
-                8..9,
-                rendered_index::RenderedDisplayItemKind::StructuredBlock
-            ),
-            (
-                6,
-                9..10,
-                rendered_index::RenderedDisplayItemKind::StructuredBlock
-            ),
-            (
-                7,
-                10..11,
-                rendered_index::RenderedDisplayItemKind::StructuredBlock
-            ),
-            (
-                8,
-                11..12,
-                rendered_index::RenderedDisplayItemKind::StructuredBlock
-            ),
-        ]
-    );
-
-    assert_eq!(index.item_index_for_source_row(0), Some(0));
-    assert_eq!(index.item_index_for_source_row(1), Some(0));
-    assert_eq!(index.item_index_for_source_row(2), Some(0));
-    assert_eq!(index.item_index_for_source_row(4), Some(2));
-    assert_eq!(index.item_index_for_source_row(6), Some(3));
-    assert_eq!(index.item_index_for_source_row(8), Some(5));
-    assert_eq!(index.item_index_for_source_row(12), Some(8));
-}
-
-#[test]
-fn rendered_display_index_maps_single_blank_row_as_separator() {
-    let mut buffer = Buffer::local(
-        "# GFM Feature Test\n\nThis file is a manual fixture for checking GFM support.\n",
-    );
-    let snapshot = buffer.snapshot();
-    let index = rendered_display_index_for_tests(&snapshot);
-
-    let items = (0..index.item_count())
-        .map(|ix| index.item(ix).expect("item should exist"))
-        .map(|item| (item.row_range.clone(), item.kind))
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        items,
-        vec![
-            (0..1, rendered_index::RenderedDisplayItemKind::Heading),
-            (2..3, rendered_index::RenderedDisplayItemKind::Paragraph),
-        ]
-    );
-    assert_eq!(index.item_index_for_source_row(0), Some(0));
-    assert_eq!(index.item_index_for_source_row(1), Some(0));
-    assert_eq!(index.item_index_for_source_row(2), Some(1));
-    assert_eq!(
-        index.blank_row_role_for_source_row(1),
-        Some(rendered_index::BlankRowRole::Separator)
-    );
-}
-
-#[test]
-fn rendered_display_index_assigns_empty_paragraphs_from_blank_runs() {
-    let cases = [
-        ("A\n\nB", 0, vec![rendered_index::BlankRowRole::Separator]),
-        (
-            "A\n\n\nB",
-            0,
-            vec![
-                rendered_index::BlankRowRole::Separator,
-                rendered_index::BlankRowRole::IgnoredExtra,
-            ],
-        ),
-        (
-            "A\n\n\n\nB",
-            1,
-            vec![
-                rendered_index::BlankRowRole::Separator,
-                rendered_index::BlankRowRole::EmptyParagraph,
-                rendered_index::BlankRowRole::Separator,
-            ],
-        ),
-        (
-            "A\n\n\n\n\nB",
-            1,
-            vec![
-                rendered_index::BlankRowRole::Separator,
-                rendered_index::BlankRowRole::EmptyParagraph,
-                rendered_index::BlankRowRole::Separator,
-                rendered_index::BlankRowRole::IgnoredExtra,
-            ],
-        ),
-        (
-            "A\n\n\n\n\n\nB",
-            2,
-            vec![
-                rendered_index::BlankRowRole::Separator,
-                rendered_index::BlankRowRole::EmptyParagraph,
-                rendered_index::BlankRowRole::Separator,
-                rendered_index::BlankRowRole::EmptyParagraph,
-                rendered_index::BlankRowRole::Separator,
-            ],
-        ),
-    ];
-
-    for (source, expected_empty_count, expected_roles) in cases {
-        let mut buffer = Buffer::local(source);
-        let snapshot = buffer.snapshot();
-        let index = rendered_display_index_for_tests(&snapshot);
-        let empty_items = (0..index.item_count())
-            .filter_map(|ix| index.item(ix))
-            .filter(|item| item.kind == rendered_index::RenderedDisplayItemKind::EmptyParagraph)
-            .collect::<Vec<_>>();
-        let roles = (1..=expected_roles.len())
-            .map(|row| index.blank_row_role_for_source_row(row))
-            .collect::<Vec<_>>();
-
-        assert_eq!(empty_items.len(), expected_empty_count, "{source:?}");
-        assert_eq!(
-            roles,
-            expected_roles.into_iter().map(Some).collect::<Vec<_>>(),
-            "{source:?}"
-        );
-        for item in empty_items {
-            assert_eq!(
-                index.item_index_for_source_row(item.row_range.start),
-                Some(item.index)
-            );
-        }
-    }
-}
-
-#[test]
 fn rendered_merged_paragraph_projects_across_source_rows() {
     let source = "first **bold**\ncontinued &amp; escaped \\*\n\nnext\n";
     let mut buffer = Buffer::local(source);
@@ -2557,22 +2400,22 @@ fn active_projection_source_ranges_tracks_marker_visibility_dependencies() {
     assert!(!fenced_range.is_empty());
     assert!(!strong_range.is_empty());
 
-    let heading_state = DisplayRowProjectionState::new(
+    let heading_state = rendered_projection_state(
         &snapshot,
         Some(&collapsed_selection(Point::new(0, 3))),
         MarkdownEditorMode::Rendered,
     );
-    let fenced_state = DisplayRowProjectionState::new(
+    let fenced_state = rendered_projection_state(
         &snapshot,
         Some(&collapsed_selection(Point::new(3, 1))),
         MarkdownEditorMode::Rendered,
     );
-    let strong_state = DisplayRowProjectionState::new(
+    let strong_state = rendered_projection_state(
         &snapshot,
         Some(&collapsed_selection(Point::new(5, 3))),
         MarkdownEditorMode::Rendered,
     );
-    let active_ranges_for_row = |row, state: &DisplayRowProjectionState, mode| {
+    let active_ranges_for_row = |row, state: &RenderedProjectionState, mode| {
         if mode != MarkdownEditorMode::Rendered {
             return Vec::new();
         }

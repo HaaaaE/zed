@@ -7,12 +7,12 @@ use super::rendered_element::{
 use super::{
     MarkdownEditorMode,
     display_row_builder::row_source_range,
-    rendered_index::{RenderedDisplayIndex, RenderedDisplayItemKind},
     selection::{
         HorizontalDirection, clip_selection_in_text_snapshot, collapsed_selection,
         selection_byte_range_in_text_snapshot, selection_for_source_range,
     },
 };
+use md_projection::{RenderedDisplayIndex, RenderedDisplayItemKind};
 
 pub fn replace_selection(
     buffer: &mut Buffer,
@@ -358,7 +358,7 @@ fn rendered_blank_paragraph_deletion_at_cursor(
     let item = index.item(item_index)?;
     if !matches!(
         item.kind,
-        super::rendered_index::RenderedDisplayItemKind::EmptyParagraph
+        md_projection::RenderedDisplayItemKind::EmptyParagraph
     ) {
         return None;
     }
@@ -421,7 +421,7 @@ fn empty_paragraph_row_for_cursor(
         .is_some_and(|item| {
             matches!(
                 item.kind,
-                super::rendered_index::RenderedDisplayItemKind::EmptyParagraph
+                md_projection::RenderedDisplayItemKind::EmptyParagraph
             )
         })
     {
@@ -441,7 +441,7 @@ fn empty_paragraph_row_for_cursor(
         .is_some_and(|item| {
             matches!(
                 item.kind,
-                super::rendered_index::RenderedDisplayItemKind::EmptyParagraph
+                md_projection::RenderedDisplayItemKind::EmptyParagraph
             )
         })
         .then_some(neighbor)

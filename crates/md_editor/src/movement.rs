@@ -8,11 +8,8 @@ use crate::{
     DisplayRowLayout, MarkdownEditor, MarkdownEditorMode, MoveDown, MoveLeft, MoveRight,
     MoveToBeginningOfLine, MoveToEndOfLine, MoveUp, SelectDown, SelectLeft, SelectRight,
     SelectToBeginningOfLine, SelectToEndOfLine, SelectUp, clip_cursor, clip_selection,
-    layout::{
-        DisplayRowProjectionState, VisualDisplayRow, row_display_style_for_display_row,
-        text_wrap_width_for_mode,
-    },
-    rendered_topology::{RenderedCaretAffinity, RenderedTopology},
+    layout::{VisualDisplayRow, row_display_style_for_display_row, text_wrap_width_for_mode},
+    rendered_projection_state,
     selection::{
         HorizontalDirection, clip_cursor_in_text_snapshot, clip_selection_in_text_snapshot,
         collapsed_selection, move_horizontal_in_mode, move_left_in_text_snapshot,
@@ -34,6 +31,7 @@ use crate::{
         visual_line_boundary_for_caret, visual_row_index_for_caret,
     },
 };
+use md_projection::{RenderedCaretAffinity, RenderedTopology};
 
 impl MarkdownEditor {
     pub(crate) fn normalize_rendered_caret(
@@ -640,7 +638,7 @@ impl MarkdownEditor {
         let source_offset = snapshot.as_text_snapshot().point_to_offset(target);
         let target_selection = collapsed_selection(target);
         let display_row_state =
-            DisplayRowProjectionState::new(snapshot, Some(&target_selection), self.mode);
+            rendered_projection_state(snapshot, Some(&target_selection), self.mode);
         let item_index = self.display_item_index_for_cursor(snapshot, target, self.mode)?;
         let display_row =
             self.cached_display_row(snapshot, item_index, self.mode, &display_row_state)?;
@@ -698,8 +696,7 @@ impl MarkdownEditor {
         cx: &mut Context<Self>,
     ) -> Option<(Point, SelectionGoal)> {
         let cursor = clip_cursor(snapshot, selection.head());
-        let display_row_state =
-            DisplayRowProjectionState::new(snapshot, Some(selection), self.mode);
+        let display_row_state = rendered_projection_state(snapshot, Some(selection), self.mode);
         let item_index = self.display_item_index_for_cursor(snapshot, cursor, self.mode)?;
         let display_row =
             self.cached_display_row(snapshot, item_index, self.mode, &display_row_state)?;
@@ -766,8 +763,7 @@ impl MarkdownEditor {
         }
 
         let cursor = clip_cursor(snapshot, selection.head());
-        let display_row_state =
-            DisplayRowProjectionState::new(snapshot, Some(selection), self.mode);
+        let display_row_state = rendered_projection_state(snapshot, Some(selection), self.mode);
         let item_index = self.display_item_index_for_cursor(snapshot, cursor, self.mode)?;
         let display_row =
             self.cached_display_row(snapshot, item_index, self.mode, &display_row_state)?;

@@ -69,7 +69,7 @@ impl Render for MarkdownEditor {
                 let snapshot = self.buffer.snapshot();
                 let selection = clip_selection(&snapshot, &self.selection);
                 let display_row_state =
-                    DisplayRowProjectionState::new(&snapshot, Some(&selection), mode);
+                    rendered_projection_state(&snapshot, Some(&selection), mode);
                 let cursor = selection.head();
                 self.schedule_rendered_cache_prewarm(wrap_width, selection.clone(), window, cx);
 

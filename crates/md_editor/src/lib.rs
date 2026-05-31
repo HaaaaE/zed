@@ -41,8 +41,6 @@ mod markdown_image;
 mod movement;
 mod render;
 mod rendered_element;
-mod rendered_index;
-mod rendered_topology;
 mod selection;
 mod table;
 mod virtual_list;
@@ -88,9 +86,9 @@ use inline_layout::display_inline_row_inputs;
 use interaction::{mouse_target_for_text_layout, task_checkbox_source_range_for_text_layout_click};
 use invalidation::{EditLayoutInvalidation, LocalSourceEditInvalidation};
 use layout::{
-    DisplayRowLayout, DisplayRowLayoutInputs, DisplayRowProjectionState, DisplayRowTextLayout,
-    RowDisplayStyle, RowLayoutCacheKey, RowLayoutInputCacheKey, VisualDisplayRow,
-    row_display_style_for_display_row, text_wrap_width,
+    DisplayRowLayout, DisplayRowLayoutInputs, DisplayRowTextLayout, RowDisplayStyle,
+    RowLayoutCacheKey, RowLayoutInputCacheKey, VisualDisplayRow, row_display_style_for_display_row,
+    text_wrap_width,
 };
 #[cfg(test)]
 use layout::{
@@ -102,6 +100,7 @@ use layout::{
 };
 #[cfg(test)]
 use markdown_image::MarkdownImageSource;
+use md_projection::{RenderedCaretAffinity, RenderedDisplayIndex, RenderedProjectionState};
 #[cfg(test)]
 use render::{fragment_text_for_visual_row, selection_bounds_for_visual_row};
 use render::{render_display_row_layout, render_row_text};
@@ -119,8 +118,6 @@ use rendered_element::{
     active_source_range_for_selection, inactive_rendered_element_source_ranges_for_selection,
     rendered_element_source_range_is_active,
 };
-use rendered_index::RenderedDisplayIndex;
-use rendered_topology::RenderedCaretAffinity;
 #[cfg(test)]
 use selection::{
     HorizontalDirection, move_horizontal_in_mode, select_left_in_mode, select_right_in_mode,
@@ -180,6 +177,29 @@ gpui::actions!(
         Redo,
     ]
 );
+
+fn rendered_projection_state(
+    snapshot: &BufferSnapshot,
+    selection: Option<&Selection<Point>>,
+    mode: MarkdownEditorMode,
+) -> RenderedProjectionState {
+    if mode != MarkdownEditorMode::Rendered {
+        return RenderedProjectionState::default();
+    }
+
+    RenderedProjectionState {
+        active_source_range: selection
+            .and_then(|selection| active_source_range_for_selection(snapshot, selection)),
+        inactive_source_ranges: selection
+            .map(|selection| {
+                inactive_rendered_element_source_ranges_for_selection(snapshot, selection)
+            })
+            .unwrap_or_default(),
+        active_cursor: selection
+            .filter(|selection| selection.is_empty())
+            .map(|selection| selection.head()),
+    }
+}
 
 const DISPLAY_LIST_OVERDRAW: gpui::Pixels = px(500.);
 const RENDERED_LEFT_RAIL_WIDTH: gpui::Pixels = px(24.);
@@ -885,7 +905,7 @@ mod test_support {
     ) -> String {
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         editor
             .cached_display_row(&snapshot, row, editor.mode, &display_row_state)
             .expect("display row should exist")

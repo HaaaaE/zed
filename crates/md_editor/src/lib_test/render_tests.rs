@@ -287,7 +287,7 @@ fn rendered_soft_break_caret_stays_inside_paragraph_item(cx: &mut gpui::TestAppC
         assert_eq!(index.item_index_for_source_row(0), Some(paragraph_item));
 
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, paragraph_item, editor.mode, &display_row_state)
             .expect("paragraph display row should exist");
@@ -369,7 +369,7 @@ fn rendered_trailing_soft_break_caret_gets_empty_visual_row(cx: &mut gpui::TestA
         assert_eq!(paragraph_item, 0);
 
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, paragraph_item, editor.mode, &display_row_state)
             .expect("paragraph display row should exist");
@@ -438,7 +438,7 @@ fn rendered_trailing_soft_break_from_eof_row_gets_empty_visual_row(cx: &mut gpui
         assert_eq!(paragraph_item, 0);
 
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, paragraph_item, editor.mode, &display_row_state)
             .expect("paragraph display row should exist");
@@ -501,7 +501,7 @@ fn rendered_trailing_soft_break_before_next_paragraph_gets_empty_visual_row(
         assert_eq!(paragraph_item, 0);
 
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, paragraph_item, editor.mode, &display_row_state)
             .expect("paragraph display row should exist");
@@ -558,7 +558,7 @@ fn rendered_soft_break_segments_still_wrap(cx: &mut gpui::TestAppContext) {
             .item_index_for_source_row(0)
             .expect("paragraph item should exist");
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, paragraph_item, editor.mode, &display_row_state)
             .expect("paragraph display row should exist");

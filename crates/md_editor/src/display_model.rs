@@ -2,9 +2,10 @@ use std::ops::Range;
 
 use gpui::{FontWeight, Pixels, px};
 use markdown_wysiwyg::{MarkdownBlock, MarkdownInlineSpan, MarkdownProjectionMap};
+use md_projection::DisplayItemId;
 use md_text::Point;
 
-use crate::{rendered_element::RenderedElementDescriptor, rendered_index::DisplayItemId};
+use crate::rendered_element::RenderedElementDescriptor;
 
 #[derive(Clone, Debug)]
 pub struct DisplayRow {

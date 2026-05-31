@@ -377,7 +377,7 @@ fn rendered_interaction_layouts_cache_plain_text_rows(cx: &mut gpui::TestAppCont
 
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
@@ -428,7 +428,7 @@ fn rendered_table_rows_use_structured_layout_when_inactive(cx: &mut gpui::TestAp
         editor.set_cursor(Point::new(3, 0));
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
@@ -521,7 +521,7 @@ fn rendered_table_cells_wrap_to_available_width(cx: &mut gpui::TestAppContext) {
         editor.set_cursor(Point::new(2, 0));
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
@@ -566,7 +566,7 @@ fn rendered_table_header_cells_fit_preferred_width(cx: &mut gpui::TestAppContext
         editor.set_cursor(Point::new(2, 0));
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
@@ -618,7 +618,7 @@ fn rendered_table_shrinks_long_columns_before_short_columns(cx: &mut gpui::TestA
         editor.set_cursor(Point::new(3, 0));
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, 2, editor.mode, &display_row_state)
             .expect("display row should exist");
@@ -668,7 +668,7 @@ fn rendered_table_delimiter_row_uses_structured_separator_layout(cx: &mut gpui::
         editor.set_cursor(Point::new(2, 0));
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, 1, editor.mode, &display_row_state)
             .expect("display row should exist");
@@ -711,7 +711,7 @@ fn rendered_table_wrapping_uses_text_measurement_for_words(cx: &mut gpui::TestAp
         editor.set_cursor(Point::new(2, 0));
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
@@ -756,7 +756,7 @@ fn rendered_table_wrapping_keeps_cjk_boundaries(cx: &mut gpui::TestAppContext) {
         editor.set_cursor(Point::new(3, 0));
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, 2, editor.mode, &display_row_state)
             .expect("display row should exist");
@@ -801,7 +801,7 @@ fn rendered_table_mouse_target_maps_to_cell_source(cx: &mut gpui::TestAppContext
         editor.set_cursor(Point::new(2, 0));
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
@@ -847,7 +847,7 @@ fn rendered_table_mouse_target_accounts_for_rendered_indent(cx: &mut gpui::TestA
         editor.set_cursor(Point::new(3, 0));
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
@@ -967,13 +967,13 @@ fn rendered_empty_paragraph_has_clickable_caret_row(cx: &mut gpui::TestAppContex
         let empty_item_index = (0..index.item_count())
             .find(|item_index| {
                 index.item(*item_index).is_some_and(|item| {
-                    item.kind == rendered_index::RenderedDisplayItemKind::EmptyParagraph
+                    item.kind == md_projection::RenderedDisplayItemKind::EmptyParagraph
                 })
             })
             .expect("expected empty paragraph item");
 
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, empty_item_index, editor.mode, &display_row_state)
             .expect("empty paragraph display row should exist");
@@ -1050,7 +1050,7 @@ fn rendered_display_row_cache_hit_skips_syntax_queries(cx: &mut gpui::TestAppCon
     editor.update(cx, |editor, _| {
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let row = editor
             .cached_display_row(&snapshot, 1, editor.mode, &display_row_state)
             .expect("row should exist");
@@ -1087,7 +1087,7 @@ fn rendered_mode_actions_follow_wrapped_visual_rows_with_inline_image(
         let source_line_end = editor.buffer.as_text_snapshot().line_len(0);
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
@@ -1169,7 +1169,7 @@ fn rendered_horizontal_actions_keep_directional_side_at_soft_wrap_boundary(
     editor.update_in(cx, |editor, window, cx| {
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
@@ -1409,7 +1409,7 @@ fn rendered_shift_enter_after_merged_paragraph_keeps_caret_visible_before_next_p
         assert_eq!(paragraph_item, 0);
 
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, paragraph_item, editor.mode, &display_row_state)
             .expect("paragraph display row should exist");
@@ -1516,7 +1516,7 @@ fn rendered_cjk_text_with_replacements_shapes_on_char_boundaries(cx: &mut gpui::
     editor.update_in(cx, |editor, window, cx| {
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
@@ -1574,7 +1574,7 @@ fn rendered_mode_select_actions_follow_wrapped_visual_rows_with_inline_image(
         let source_line_end = editor.buffer.as_text_snapshot().line_len(0);
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let display_row = editor
             .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
             .expect("display row should exist");
@@ -2028,7 +2028,7 @@ fn rendered_task_checkbox_click_positions(
 ) -> (gpui::Pixels, gpui::Pixels) {
     let snapshot = editor.buffer.snapshot();
     let display_row_state =
-        DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
     let display_row = editor
         .cached_display_row(&snapshot, 0, editor.mode, &display_row_state)
         .expect("display row should exist");
@@ -2511,7 +2511,7 @@ fn inline_atom_deferred_remeasure_only_clears_affected_row(cx: &mut gpui::TestAp
         editor.set_cursor(Point::new(3, 0));
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
         let selection = editor.selection.clone();
         let wrap_width = text_wrap_width(window);
         for row in 0..2 {
@@ -2702,7 +2702,7 @@ fn source_cached_display_row_reuses_text_snapshot_fast_path(cx: &mut gpui::TestA
 
     editor.update(cx, |editor, _| {
         let snapshot = editor.buffer.snapshot();
-        let display_row_state = DisplayRowProjectionState::new(
+        let display_row_state = rendered_projection_state(
             &snapshot,
             Some(&editor.selection),
             MarkdownEditorMode::Source,
@@ -2730,8 +2730,7 @@ fn source_single_row_edit_rekeys_display_row_cache_before_edited_row(
     editor.update(cx, |editor, cx| {
         let mode = editor.mode;
         let snapshot = editor.buffer.snapshot();
-        let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let display_row_state = rendered_projection_state(&snapshot, Some(&editor.selection), mode);
         let row_0 = editor
             .cached_display_row(&snapshot, 0, mode, &display_row_state)
             .expect("row 0 should exist");
@@ -2761,8 +2760,7 @@ fn source_single_row_edit_rekeys_display_row_cache_before_edited_row(
         );
 
         let snapshot = editor.buffer.snapshot();
-        let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let display_row_state = rendered_projection_state(&snapshot, Some(&editor.selection), mode);
         let cached_row_0 = editor
             .cached_display_row(&snapshot, 0, mode, &display_row_state)
             .expect("row 0 should exist after edit");
@@ -2793,8 +2791,7 @@ fn source_length_preserving_single_row_edit_keeps_later_display_rows(
     editor.update(cx, |editor, cx| {
         let mode = editor.mode;
         let snapshot = editor.buffer.snapshot();
-        let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let display_row_state = rendered_projection_state(&snapshot, Some(&editor.selection), mode);
         let row_0 = editor
             .cached_display_row(&snapshot, 0, mode, &display_row_state)
             .expect("row 0 should exist");
@@ -2830,8 +2827,7 @@ fn source_length_preserving_single_row_edit_keeps_later_display_rows(
         );
 
         let snapshot = editor.buffer.snapshot();
-        let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let display_row_state = rendered_projection_state(&snapshot, Some(&editor.selection), mode);
         let cached_row_0 = editor
             .cached_display_row(&snapshot, 0, mode, &display_row_state)
             .expect("row 0 should exist after edit");
@@ -2858,8 +2854,7 @@ fn source_undo_redo_single_row_edit_keeps_later_display_rows(cx: &mut gpui::Test
     editor.update_in(cx, |editor, window, cx| {
         let mode = editor.mode;
         let snapshot = editor.buffer.snapshot();
-        let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let display_row_state = rendered_projection_state(&snapshot, Some(&editor.selection), mode);
         let row_0 = editor
             .cached_display_row(&snapshot, 0, mode, &display_row_state)
             .expect("row 0 should exist");
@@ -2900,8 +2895,7 @@ fn source_undo_redo_single_row_edit_keeps_later_display_rows(cx: &mut gpui::Test
         );
 
         let snapshot = editor.buffer.snapshot();
-        let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let display_row_state = rendered_projection_state(&snapshot, Some(&editor.selection), mode);
         let edited_row_0 = editor
             .cached_display_row(&snapshot, 0, mode, &display_row_state)
             .expect("row 0 should exist after edit");
@@ -2920,8 +2914,7 @@ fn source_undo_redo_single_row_edit_keeps_later_display_rows(cx: &mut gpui::Test
         editor.undo(&Undo, window, cx);
 
         let snapshot = editor.buffer.snapshot();
-        let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let display_row_state = rendered_projection_state(&snapshot, Some(&editor.selection), mode);
         let undo_row_0 = editor
             .cached_display_row(&snapshot, 0, mode, &display_row_state)
             .expect("row 0 should exist after undo");
@@ -2941,8 +2934,7 @@ fn source_undo_redo_single_row_edit_keeps_later_display_rows(cx: &mut gpui::Test
         editor.redo(&Redo, window, cx);
 
         let snapshot = editor.buffer.snapshot();
-        let display_row_state =
-            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), mode);
+        let display_row_state = rendered_projection_state(&snapshot, Some(&editor.selection), mode);
         let redo_row_0 = editor
             .cached_display_row(&snapshot, 0, mode, &display_row_state)
             .expect("row 0 should exist after redo");
@@ -3135,7 +3127,7 @@ fn rendered_enter_at_paragraph_end_creates_empty_paragraph_before_next_paragraph
     let index = rendered_display_index_for_tests(&snapshot);
     let empty_paragraph_count = (0..index.item_count())
         .filter_map(|item_index| index.item(item_index))
-        .filter(|item| item.kind == rendered_index::RenderedDisplayItemKind::EmptyParagraph)
+        .filter(|item| item.kind == md_projection::RenderedDisplayItemKind::EmptyParagraph)
         .count();
     assert_eq!(empty_paragraph_count, 1);
 }
@@ -3156,7 +3148,7 @@ fn rendered_enter_at_final_paragraph_end_creates_visible_empty_paragraph() {
     let index = rendered_display_index_for_tests(&snapshot);
     let empty_paragraph_count = (0..index.item_count())
         .filter_map(|item_index| index.item(item_index))
-        .filter(|item| item.kind == rendered_index::RenderedDisplayItemKind::EmptyParagraph)
+        .filter(|item| item.kind == md_projection::RenderedDisplayItemKind::EmptyParagraph)
         .count();
     assert_eq!(empty_paragraph_count, 1);
 }
@@ -3180,7 +3172,7 @@ fn rendered_consecutive_enter_at_final_paragraph_end_grows_empty_paragraphs() {
     let index = rendered_display_index_for_tests(&snapshot);
     let empty_paragraph_count = (0..index.item_count())
         .filter_map(|item_index| index.item(item_index))
-        .filter(|item| item.kind == rendered_index::RenderedDisplayItemKind::EmptyParagraph)
+        .filter(|item| item.kind == md_projection::RenderedDisplayItemKind::EmptyParagraph)
         .count();
     assert_eq!(empty_paragraph_count, 2);
 }
@@ -3214,7 +3206,7 @@ fn rendered_enter_in_empty_paragraph_creates_next_empty_paragraph() {
     let index = rendered_display_index_for_tests(&snapshot);
     let empty_paragraph_count = (0..index.item_count())
         .filter_map(|item_index| index.item(item_index))
-        .filter(|item| item.kind == rendered_index::RenderedDisplayItemKind::EmptyParagraph)
+        .filter(|item| item.kind == md_projection::RenderedDisplayItemKind::EmptyParagraph)
         .count();
     assert_eq!(empty_paragraph_count, 2);
 }

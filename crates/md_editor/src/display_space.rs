@@ -1,7 +1,8 @@
 use md_buffer::BufferSnapshot;
+use md_projection::RenderedDisplayIndex;
 use md_text::{BufferSnapshot as TextBufferSnapshot, Point};
 
-use crate::{MarkdownEditorMode, rendered_index::RenderedDisplayIndex};
+use crate::MarkdownEditorMode;
 
 pub(crate) fn display_item_count_for_mode(
     mode: MarkdownEditorMode,

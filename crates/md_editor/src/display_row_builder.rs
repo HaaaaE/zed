@@ -12,7 +12,7 @@ use md_text::Selection;
 use md_text::{BufferSnapshot as TextBufferSnapshot, Point};
 
 #[cfg(test)]
-use crate::rendered_index::RenderedDisplayIndex;
+use crate::rendered_projection_state;
 use crate::{
     MarkdownEditorMode,
     display_model::{DisplayInsertion, DisplayRow},
@@ -22,10 +22,10 @@ use crate::{
         RenderedElementDescriptor, RenderedElementPlacement,
         rendered_element_descriptor_for_inline_span_in_row,
     },
-    rendered_index::{self, DisplayItemId},
 };
+use md_projection::{self, DisplayItemId};
 #[cfg(test)]
-use crate::{layout::DisplayRowProjectionState, rendered_topology::RenderedTopology};
+use md_projection::{RenderedDisplayIndex, RenderedTopology};
 
 pub fn display_rows(snapshot: &BufferSnapshot, range: Range<usize>) -> Vec<DisplayRow> {
     display_rows_in_text_snapshot(snapshot.as_text_snapshot(), range)
@@ -57,7 +57,7 @@ pub(crate) fn display_rows_in_mode(
     let row_count = snapshot.row_count() as usize;
     let start = range.start.min(row_count);
     let end = range.end.min(row_count);
-    let display_row_state = DisplayRowProjectionState::new(snapshot, selection, mode);
+    let display_row_state = rendered_projection_state(snapshot, selection, mode);
     (start..end)
         .map(|row| {
             let row = row as u32;
@@ -69,7 +69,7 @@ pub(crate) fn display_rows_in_mode(
             );
             rendered_display_row(
                 snapshot,
-                rendered_index::source_display_item_id(&source_range, row as usize),
+                md_projection::source_display_item_id(&source_range, row as usize),
                 row,
                 row,
                 source_range,
@@ -97,15 +97,11 @@ pub(crate) fn rendered_display_row_for_item_for_tests(
     let index = RenderedDisplayIndex::build(snapshot);
     let item = index.item(item_index).expect("item should exist");
     let display_row_state =
-        DisplayRowProjectionState::new(snapshot, selection, MarkdownEditorMode::Rendered);
-    let active_cursor_maps_to_item = display_row_state.active_cursor.is_some_and(|cursor| {
-        index.item_index_for_source_row(cursor.row as usize) == Some(item_index)
-    });
+        rendered_projection_state(snapshot, selection, MarkdownEditorMode::Rendered);
     let topology = RenderedTopology::new(snapshot, index.clone());
-    let (row, source_range, source_row_range) =
-        topology.item_display_source_range(item, &display_row_state, active_cursor_maps_to_item);
+    let display_source_range = topology.item_display_source_range(item, &display_row_state);
     let range_semantics = snapshot.syntax_tree().range_semantics_for_source_range(
-        source_range.clone(),
+        display_source_range.source_range.clone(),
         display_row_state.active_source_range.clone(),
         &display_row_state.inactive_source_ranges,
     );
@@ -114,9 +110,9 @@ pub(crate) fn rendered_display_row_for_item_for_tests(
         snapshot,
         item.id,
         item.index as u32,
-        row,
-        source_range,
-        source_row_range,
+        display_source_range.row,
+        display_source_range.source_range,
+        display_source_range.source_row_range,
         range_semantics,
         None,
     )
@@ -202,7 +198,7 @@ pub(crate) fn source_display_row_in_text_snapshot(
     let source_text: String = snapshot.text_for_range(source_range.clone()).collect();
     let projection = MarkdownProjectionMap::new(snapshot.len(), source_range.clone(), Vec::new());
     DisplayRow {
-        item_id: rendered_index::source_display_item_id(&source_range, row as usize),
+        item_id: md_projection::source_display_item_id(&source_range, row as usize),
         item_index: row,
         row,
         source_row_range: row as usize..row as usize + 1,

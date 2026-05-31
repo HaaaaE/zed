@@ -3,7 +3,6 @@ use std::{ops::Range, path::Path, sync::Arc};
 use gpui::{App, LineFragment, SharedString, TextRun, Window, font, px};
 use md_assets::EDITOR_FONT_FAMILY;
 use md_buffer::BufferSnapshot;
-use md_text::{Point, Selection};
 
 pub(super) use super::inline_layout::{
     atom_range_containing_display_index, atomic_wrap_boundary_index, display_inline_fragments,
@@ -14,10 +13,10 @@ pub(super) use super::inline_layout::{
 use super::inline_layout::{has_inline_atoms, wrap_boundary_glyph};
 use super::{
     DisplayInlineAtom, DisplayInlineFragment, DisplayTableRowLayout, InlineAtomMeasurementState,
-    MarkdownEditorMode, active_source_range_for_selection,
+    MarkdownEditorMode,
     block::DisplayBlockLayout,
     display_model::{DisplayRow, DisplayTextStyle},
-    inactive_rendered_element_source_ranges_for_selection, left_rail_width, ranges_overlap,
+    left_rail_width, ranges_overlap,
     visual_row::display_x_for_offset,
 };
 
@@ -126,7 +125,7 @@ impl DisplayItemLayout {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct DisplayRowCacheKey {
     pub(super) version: md_text::Global,
-    pub(super) item_id: crate::rendered_index::DisplayItemId,
+    pub(super) item_id: md_projection::DisplayItemId,
     pub(super) item_index: u32,
     pub(super) source_range: Range<usize>,
     pub(super) source_row_range: Range<usize>,
@@ -134,45 +133,9 @@ pub(super) struct DisplayRowCacheKey {
     pub(super) active_projection_source_ranges: Vec<Range<usize>>,
 }
 
-#[derive(Clone, Debug)]
-pub(super) struct DisplayRowProjectionState {
-    pub(super) active_source_range: Option<Range<usize>>,
-    pub(super) inactive_source_ranges: Vec<Range<usize>>,
-    pub(super) active_cursor: Option<Point>,
-}
-
-impl DisplayRowProjectionState {
-    pub(super) fn new(
-        snapshot: &BufferSnapshot,
-        selection: Option<&Selection<Point>>,
-        mode: MarkdownEditorMode,
-    ) -> Self {
-        if mode != MarkdownEditorMode::Rendered {
-            return Self {
-                active_source_range: None,
-                inactive_source_ranges: Vec::new(),
-                active_cursor: None,
-            };
-        }
-
-        Self {
-            active_source_range: selection
-                .and_then(|selection| active_source_range_for_selection(snapshot, selection)),
-            inactive_source_ranges: selection
-                .map(|selection| {
-                    inactive_rendered_element_source_ranges_for_selection(snapshot, selection)
-                })
-                .unwrap_or_default(),
-            active_cursor: selection
-                .filter(|selection| selection.is_empty())
-                .map(|selection| selection.head()),
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct RowLayoutCacheKey {
-    pub(super) item_id: crate::rendered_index::DisplayItemId,
+    pub(super) item_id: md_projection::DisplayItemId,
     pub(super) item_index: u32,
     pub(super) source_range: Range<usize>,
     pub(super) source_row_range: Range<usize>,
@@ -185,7 +148,7 @@ pub(super) struct RowLayoutCacheKey {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct RowLayoutInputCacheKey {
     pub(super) version: md_text::Global,
-    pub(super) item_id: crate::rendered_index::DisplayItemId,
+    pub(super) item_id: md_projection::DisplayItemId,
     pub(super) item_index: u32,
     pub(super) source_range: Range<usize>,
     pub(super) source_row_range: Range<usize>,

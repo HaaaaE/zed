@@ -11,19 +11,20 @@ use md_text::{BufferSnapshot as TextBufferSnapshot, Point, Selection};
 
 use super::{
     DisplayBlockLayout, DisplayInlineAtomKind, DisplayRow, DisplayRowLayout,
-    DisplayRowLayoutInputs, DisplayRowProjectionState, DisplayRowTextLayout, DisplayTableLayout,
-    InlineAtomMeasurementKey, InlineAtomMeasurementState, MarkdownEditor, MarkdownEditorMode,
-    RowDisplayStyle, RowLayoutCacheKey, RowLayoutInputCacheKey, TableLayoutCacheKey,
-    clip_selection, invalidation::LocalSourceEditInvalidation, layout::DisplayRowCacheKey,
-    ranges_overlap,
+    DisplayRowLayoutInputs, DisplayRowTextLayout, DisplayTableLayout, InlineAtomMeasurementKey,
+    InlineAtomMeasurementState, MarkdownEditor, MarkdownEditorMode, RowDisplayStyle,
+    RowLayoutCacheKey, RowLayoutInputCacheKey, TableLayoutCacheKey, clip_selection,
+    invalidation::LocalSourceEditInvalidation, layout::DisplayRowCacheKey, ranges_overlap,
+    rendered_projection_state,
 };
 use crate::display_row_builder::{rendered_display_row, source_display_row_in_text_snapshot};
 use crate::layout::{
     display_row_layout_inputs, effective_text_wrap_width, source_display_row_layout_inputs,
     text_layout_for_display_row_inputs,
 };
-use crate::rendered_index::{RenderedDisplayIndex, source_display_item_id};
-use crate::rendered_topology::RenderedTopology;
+use md_projection::{
+    RenderedDisplayIndex, RenderedProjectionState, RenderedTopology, source_display_item_id,
+};
 
 pub(crate) struct DisplayCacheStore {
     pub(super) display_row_cache: HashMap<DisplayRowCacheKey, Arc<DisplayRow>>,
@@ -361,7 +362,7 @@ impl MarkdownEditor {
         snapshot: &BufferSnapshot,
         item_index: usize,
         mode: MarkdownEditorMode,
-        display_row_state: &DisplayRowProjectionState,
+        display_row_state: &RenderedProjectionState,
     ) -> Option<Arc<DisplayRow>> {
         if mode == MarkdownEditorMode::Source {
             return self.cached_source_display_row(snapshot.as_text_snapshot(), item_index);
@@ -369,19 +370,12 @@ impl MarkdownEditor {
 
         let index = self.rendered_display_index(snapshot);
         let item = index.item(item_index)?.clone();
-        let active_cursor_maps_to_item = display_row_state.active_cursor.is_some_and(|cursor| {
-            index.item_index_for_source_row(cursor.row as usize) == Some(item_index)
-        });
         let topology = RenderedTopology::new(snapshot, index.clone());
-        let (row, source_range, source_row_range) = topology.item_display_source_range(
-            &item,
-            display_row_state,
-            active_cursor_maps_to_item,
-        );
+        let display_source_range = topology.item_display_source_range(&item, display_row_state);
         let active_projection_source_ranges = snapshot
             .syntax_tree()
             .active_projection_source_ranges_for_source_range(
-                source_range.clone(),
+                display_source_range.source_range.clone(),
                 display_row_state.active_source_range.clone(),
                 &display_row_state.inactive_source_ranges,
             );
@@ -389,8 +383,8 @@ impl MarkdownEditor {
             version: snapshot.version().clone(),
             item_id: item.id,
             item_index: item.index as u32,
-            source_range: source_range.clone(),
-            source_row_range: source_row_range.clone(),
+            source_range: display_source_range.source_range.clone(),
+            source_row_range: display_source_range.source_row_range.clone(),
             mode,
             active_projection_source_ranges: active_projection_source_ranges.clone(),
         };
@@ -406,7 +400,7 @@ impl MarkdownEditor {
             self.layout_computation_counts.rendered_inline_span_queries += 1;
         }
         let range_semantics = snapshot.syntax_tree().range_semantics_for_source_range(
-            source_range.clone(),
+            display_source_range.source_range.clone(),
             display_row_state.active_source_range.clone(),
             &display_row_state.inactive_source_ranges,
         );
@@ -414,9 +408,9 @@ impl MarkdownEditor {
             snapshot,
             item.id,
             item.index as u32,
-            row,
-            source_range,
-            source_row_range,
+            display_source_range.row,
+            display_source_range.source_range,
+            display_source_range.source_row_range,
             range_semantics,
             self.document_path(),
         ));
@@ -855,11 +849,8 @@ impl MarkdownEditor {
         let has_more_rows = !state.rows.is_empty();
         let wrap_width = state.wrap_width;
 
-        let display_row_state = DisplayRowProjectionState::new(
-            &snapshot,
-            Some(&selection),
-            MarkdownEditorMode::Rendered,
-        );
+        let display_row_state =
+            rendered_projection_state(&snapshot, Some(&selection), MarkdownEditorMode::Rendered);
         for item in items {
             let Some(display_row) = self.cached_display_row(
                 &snapshot,
