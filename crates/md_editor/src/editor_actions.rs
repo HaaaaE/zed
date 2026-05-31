@@ -39,11 +39,11 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
-        let buffer_len_before = self.buffer.len();
-        let (selection, transaction_id) =
+        let (selection, summary) =
             backspace_selection_in_mode(&mut self.buffer, &self.selection, self.mode);
-        let changed = transaction_id.is_some();
-        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
+        let changed = summary.is_some();
+        let byte_delta = summary.as_ref().map(|summary| summary.byte_delta);
+        let transaction_id = summary.and_then(|summary| summary.transaction_id);
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(
@@ -59,11 +59,11 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
-        let buffer_len_before = self.buffer.len();
-        let (selection, transaction_id) =
+        let (selection, summary) =
             delete_selection_in_mode(&mut self.buffer, &self.selection, self.mode);
-        let changed = transaction_id.is_some();
-        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
+        let changed = summary.is_some();
+        let byte_delta = summary.as_ref().map(|summary| summary.byte_delta);
+        let transaction_id = summary.and_then(|summary| summary.transaction_id);
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(
@@ -168,21 +168,21 @@ impl MarkdownEditor {
     pub fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
-        let buffer_len_before = self.buffer.len();
         let mut changed = false;
         let mut invalidation = EditLayoutInvalidation::Conservative;
-        if let Some(transaction_id) = self.buffer.undo() {
+        if let Some(summary) = self.buffer.undo() {
             let fallback = collapsed_selection(clip_cursor_in_text_snapshot(
                 self.buffer.as_text_snapshot(),
                 self.cursor(),
             ));
-            let previous = self
-                .selection_history
-                .get(&transaction_id)
+            let previous = summary
+                .transaction_id
+                .and_then(|transaction_id| self.selection_history.get(&transaction_id))
                 .map(|state| state.before.clone());
             if previous.is_some() {
-                let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
-                invalidation = EditLayoutInvalidation::LocalSourceSelection { byte_delta };
+                invalidation = EditLayoutInvalidation::LocalSourceSelection {
+                    byte_delta: Some(summary.byte_delta),
+                };
             }
             self.selection = previous.unwrap_or(fallback);
             changed = true;
@@ -199,21 +199,21 @@ impl MarkdownEditor {
     pub fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
-        let buffer_len_before = self.buffer.len();
         let mut changed = false;
         let mut invalidation = EditLayoutInvalidation::Conservative;
-        if let Some(transaction_id) = self.buffer.redo() {
+        if let Some(summary) = self.buffer.redo() {
             let fallback = collapsed_selection(clip_cursor_in_text_snapshot(
                 self.buffer.as_text_snapshot(),
                 self.cursor(),
             ));
-            let next = self
-                .selection_history
-                .get(&transaction_id)
+            let next = summary
+                .transaction_id
+                .and_then(|transaction_id| self.selection_history.get(&transaction_id))
                 .map(|state| state.after.clone());
             if next.is_some() {
-                let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
-                invalidation = EditLayoutInvalidation::LocalSourceSelection { byte_delta };
+                invalidation = EditLayoutInvalidation::LocalSourceSelection {
+                    byte_delta: Some(summary.byte_delta),
+                };
             }
             self.selection = next.unwrap_or(fallback);
             changed = true;
@@ -267,11 +267,10 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
-        let buffer_len_before = self.buffer.len();
-        let (selection, transaction_id) =
-            replace_selection(&mut self.buffer, &self.selection, text);
-        let changed = transaction_id.is_some();
-        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
+        let (selection, summary) = replace_selection(&mut self.buffer, &self.selection, text);
+        let changed = summary.is_some();
+        let byte_delta = summary.as_ref().map(|summary| summary.byte_delta);
+        let transaction_id = summary.and_then(|summary| summary.transaction_id);
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(
@@ -364,12 +363,15 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
-        let buffer_len_before = self.buffer.len();
         self.buffer.start_transaction();
-        self.buffer.edit(edits);
+        let mut summary = self.buffer.edit(edits);
         let transaction_id = self.buffer.end_transaction();
-        let changed = transaction_id.is_some();
-        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
+        if let Some(summary) = summary.as_mut() {
+            summary.transaction_id = transaction_id;
+        }
+        let changed = summary.is_some();
+        let byte_delta = summary.as_ref().map(|summary| summary.byte_delta);
+        let transaction_id = summary.and_then(|summary| summary.transaction_id);
         self.selection =
             clip_selection_in_text_snapshot(self.buffer.as_text_snapshot(), &after_selection);
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
@@ -403,14 +405,14 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
-        let buffer_len_before = self.buffer.len();
-        let (selection, transaction_id) = if soft_break {
+        let (selection, summary) = if soft_break {
             insert_soft_break_in_mode(&mut self.buffer, &self.selection, self.mode)
         } else {
             insert_newline_in_mode(&mut self.buffer, &self.selection, self.mode)
         };
-        let changed = transaction_id.is_some();
-        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
+        let changed = summary.is_some();
+        let byte_delta = summary.as_ref().map(|summary| summary.byte_delta);
+        let transaction_id = summary.and_then(|summary| summary.transaction_id);
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(
@@ -447,11 +449,11 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
-        let buffer_len_before = self.buffer.len();
-        let (_selection, transaction_id) =
+        let (_selection, summary) =
             replace_selection(&mut self.buffer, &marker_selection, replacement);
-        let changed = transaction_id.is_some();
-        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
+        let changed = summary.is_some();
+        let byte_delta = summary.as_ref().map(|summary| summary.byte_delta);
+        let transaction_id = summary.and_then(|summary| summary.transaction_id);
         self.selection = selection_before.clone();
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(

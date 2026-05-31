@@ -12,8 +12,8 @@ use std::{
 
 use markdown_wysiwyg::MarkdownSyntaxTree;
 use md_text::{
-    Buffer as TextBuffer, BufferId, BufferSnapshot as TextBufferSnapshot, Global, Lamport,
-    LineEnding, ReplicaId, Result, Rope, ToOffset, Transaction, TransactionId,
+    Buffer as TextBuffer, BufferId, BufferSnapshot as TextBufferSnapshot, Edit, Global, Lamport,
+    LineEnding, Patch, ReplicaId, Result, Rope, ToOffset, Transaction, TransactionId,
     chunks_with_line_ending,
 };
 
@@ -40,6 +40,18 @@ struct PendingIncrementalReparse {
     old_source: String,
     old_range: Range<usize>,
     syntax_tree: Arc<MarkdownSyntaxTree>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BufferEditSummary {
+    pub edits: Vec<Edit<usize>>,
+    pub old_range: Range<usize>,
+    pub new_range: Range<usize>,
+    pub byte_delta: isize,
+    pub row_delta: isize,
+    pub old_affected_rows: Range<usize>,
+    pub new_affected_rows: Range<usize>,
+    pub transaction_id: Option<TransactionId>,
 }
 
 impl Buffer {
@@ -192,36 +204,38 @@ impl Buffer {
         self.text.set_line_ending(line_ending);
     }
 
-    pub fn set_text<T>(&mut self, text: T) -> Option<Lamport>
+    pub fn set_text<T>(&mut self, text: T) -> Option<BufferEditSummary>
     where
         T: Into<Arc<str>>,
     {
         self.edit([(0..self.len(), text)])
     }
 
-    pub fn append<T>(&mut self, text: T) -> Option<Lamport>
+    pub fn append<T>(&mut self, text: T) -> Option<BufferEditSummary>
     where
         T: Into<Arc<str>>,
     {
         self.edit([(self.len()..self.len(), text)])
     }
 
-    pub fn edit<I, S, T>(&mut self, edits_iter: I) -> Option<Lamport>
+    pub fn edit<I, S, T>(&mut self, edits_iter: I) -> Option<BufferEditSummary>
     where
         I: IntoIterator<Item = (Range<S>, T)>,
         S: ToOffset,
         T: Into<Arc<str>>,
     {
         self.edit_internal(edits_iter, true)
+            .map(|(_, summary)| summary)
     }
 
-    pub fn edit_non_coalesce<I, S, T>(&mut self, edits_iter: I) -> Option<Lamport>
+    pub fn edit_non_coalesce<I, S, T>(&mut self, edits_iter: I) -> Option<BufferEditSummary>
     where
         I: IntoIterator<Item = (Range<S>, T)>,
         S: ToOffset,
         T: Into<Arc<str>>,
     {
         self.edit_internal(edits_iter, false)
+            .map(|(_, summary)| summary)
     }
 
     pub fn start_transaction(&mut self) -> Option<TransactionId> {
@@ -268,11 +282,14 @@ impl Buffer {
         self.text.merge_transactions(transaction, destination);
     }
 
-    pub fn undo(&mut self) -> Option<TransactionId> {
-        self.text.undo().map(|(transaction_id, _)| {
-            self.pending_incremental_reparse = None;
-            transaction_id
-        })
+    pub fn undo(&mut self) -> Option<BufferEditSummary> {
+        let before = self.text.snapshot().clone();
+        self.text
+            .undo_with_patch()
+            .map(|(transaction_id, _, patch)| {
+                self.pending_incremental_reparse = None;
+                summarize_patch(&before, self.text.snapshot(), patch, Some(transaction_id))
+            })
     }
 
     pub fn undo_transaction(&mut self, transaction_id: TransactionId) -> bool {
@@ -292,11 +309,14 @@ impl Buffer {
         undone
     }
 
-    pub fn redo(&mut self) -> Option<TransactionId> {
-        self.text.redo().map(|(transaction_id, _)| {
-            self.pending_incremental_reparse = None;
-            transaction_id
-        })
+    pub fn redo(&mut self) -> Option<BufferEditSummary> {
+        let before = self.text.snapshot().clone();
+        self.text
+            .redo_with_patch()
+            .map(|(transaction_id, _, patch)| {
+                self.pending_incremental_reparse = None;
+                summarize_patch(&before, self.text.snapshot(), patch, Some(transaction_id))
+            })
     }
 
     pub fn redo_to_transaction(&mut self, transaction_id: TransactionId) -> bool {
@@ -327,7 +347,11 @@ impl Buffer {
         self.text.give_up_waiting();
     }
 
-    fn edit_internal<I, S, T>(&mut self, edits_iter: I, coalesce_adjacent: bool) -> Option<Lamport>
+    fn edit_internal<I, S, T>(
+        &mut self,
+        edits_iter: I,
+        coalesce_adjacent: bool,
+    ) -> Option<(Lamport, BufferEditSummary)>
     where
         I: IntoIterator<Item = (Range<S>, T)>,
         S: ToOffset,
@@ -367,6 +391,7 @@ impl Buffer {
             return None;
         }
 
+        let old_snapshot = self.text.snapshot().clone();
         let pending_incremental_reparse =
             if edits.len() == 1 && self.cached_syntax_version == self.text.version() {
                 Some((
@@ -378,7 +403,12 @@ impl Buffer {
                 None
             };
 
-        let operation = self.text.edit(edits);
+        let (operation, patch) = self.text.edit(edits);
+        let timestamp = operation.timestamp();
+        let transaction_id = self
+            .text
+            .peek_undo_stack()
+            .map(|entry| entry.transaction_id());
         self.pending_incremental_reparse =
             pending_incremental_reparse.map(|(old_source, old_range, syntax_tree)| {
                 PendingIncrementalReparse {
@@ -387,7 +417,10 @@ impl Buffer {
                     syntax_tree,
                 }
             });
-        Some(operation.timestamp())
+        Some((
+            timestamp,
+            summarize_patch(&old_snapshot, self.text.snapshot(), patch, transaction_id),
+        ))
     }
 
     fn refresh_syntax_tree(&mut self) {
@@ -463,6 +496,55 @@ fn next_buffer_id() -> BufferId {
 
 fn parse_markdown(snapshot: &TextBufferSnapshot) -> MarkdownSyntaxTree {
     MarkdownSyntaxTree::parse(&snapshot.text())
+}
+
+fn summarize_patch(
+    old_snapshot: &TextBufferSnapshot,
+    new_snapshot: &TextBufferSnapshot,
+    patch: Patch<usize>,
+    transaction_id: Option<TransactionId>,
+) -> BufferEditSummary {
+    let edits = patch.into_inner();
+    let old_range = edits
+        .iter()
+        .map(|edit| edit.old.clone())
+        .reduce(|left, right| left.start.min(right.start)..left.end.max(right.end))
+        .unwrap_or_else(|| old_snapshot.len()..old_snapshot.len());
+    let new_range = edits
+        .iter()
+        .map(|edit| edit.new.clone())
+        .reduce(|left, right| left.start.min(right.start)..left.end.max(right.end))
+        .unwrap_or_else(|| new_snapshot.len()..new_snapshot.len());
+    let byte_delta = range_len_isize(&new_range) - range_len_isize(&old_range);
+    let row_delta = new_snapshot.row_count() as isize - old_snapshot.row_count() as isize;
+    let old_affected_rows = affected_rows_for_range(old_snapshot, old_range.clone());
+    let new_affected_rows = affected_rows_for_range(new_snapshot, new_range.clone());
+
+    BufferEditSummary {
+        edits,
+        old_range,
+        new_range,
+        byte_delta,
+        row_delta,
+        old_affected_rows,
+        new_affected_rows,
+        transaction_id,
+    }
+}
+
+fn range_len_isize(range: &Range<usize>) -> isize {
+    range.len() as isize
+}
+
+fn affected_rows_for_range(snapshot: &TextBufferSnapshot, range: Range<usize>) -> Range<usize> {
+    let start = snapshot.offset_to_point(range.start.min(snapshot.len())).row as usize;
+    let end_offset = if range.is_empty() {
+        range.end
+    } else {
+        range.end.saturating_sub(1)
+    };
+    let end = snapshot.offset_to_point(end_offset.min(snapshot.len())).row as usize;
+    start..end.saturating_add(1)
 }
 
 #[cfg(test)]
@@ -677,6 +759,62 @@ mod tests {
     }
 
     #[test]
+    fn edit_summary_reports_byte_and_row_impact() {
+        let mut buffer = Buffer::local("one\ntwo\nthree");
+
+        let summary = buffer.edit([(5..6, "XX")]).expect("edit should produce a summary");
+
+        assert_eq!(buffer.text(), "one\ntXXo\nthree");
+        assert_eq!(summary.edits, vec![Edit { old: 5..6, new: 5..7 }]);
+        assert_eq!(summary.old_range, 5..6);
+        assert_eq!(summary.new_range, 5..7);
+        assert_eq!(summary.byte_delta, 1);
+        assert_eq!(summary.row_delta, 0);
+        assert_eq!(summary.old_affected_rows, 1..2);
+        assert_eq!(summary.new_affected_rows, 1..2);
+        assert!(summary.transaction_id.is_some());
+
+        let summary = buffer
+            .edit([(7..7, "\ninserted")])
+            .expect("newline edit should produce a summary");
+
+        assert_eq!(summary.old_range, 7..7);
+        assert_eq!(summary.new_range, 7..16);
+        assert_eq!(summary.byte_delta, 9);
+        assert_eq!(summary.row_delta, 1);
+        assert_eq!(summary.old_affected_rows, 1..2);
+        assert_eq!(summary.new_affected_rows, 1..3);
+    }
+
+    #[test]
+    fn undo_and_redo_summary_reports_inverse_impact() {
+        let mut buffer = Buffer::local("one\ntwo\nthree");
+        let edit_summary = buffer.edit([(5..6, "XX")]).expect("edit should produce a summary");
+
+        let undo_summary = buffer.undo().expect("undo should produce a summary");
+
+        assert_eq!(buffer.text(), "one\ntwo\nthree");
+        assert_eq!(undo_summary.old_range, edit_summary.new_range);
+        assert_eq!(undo_summary.new_range, edit_summary.old_range);
+        assert_eq!(undo_summary.byte_delta, -edit_summary.byte_delta);
+        assert_eq!(undo_summary.row_delta, 0);
+        assert_eq!(undo_summary.old_affected_rows, 1..2);
+        assert_eq!(undo_summary.new_affected_rows, 1..2);
+        assert_eq!(undo_summary.transaction_id, edit_summary.transaction_id);
+
+        let redo_summary = buffer.redo().expect("redo should produce a summary");
+
+        assert_eq!(buffer.text(), "one\ntXXo\nthree");
+        assert_eq!(redo_summary.old_range, edit_summary.old_range);
+        assert_eq!(redo_summary.new_range, edit_summary.new_range);
+        assert_eq!(redo_summary.byte_delta, edit_summary.byte_delta);
+        assert_eq!(redo_summary.row_delta, 0);
+        assert_eq!(redo_summary.old_affected_rows, 1..2);
+        assert_eq!(redo_summary.new_affected_rows, 1..2);
+        assert_eq!(redo_summary.transaction_id, edit_summary.transaction_id);
+    }
+
+    #[test]
     fn undo_back_to_saved_state_clears_dirty_flag() {
         let mut buffer = Buffer::local("hello");
         buffer.did_save_at_current_version();
@@ -795,8 +933,9 @@ mod tests {
         let mut future = Box::pin(buffer.wait_for_version(target_version.clone()));
         assert!(matches!(poll_once(future.as_mut()), Poll::Pending));
 
-        let edit_timestamp = buffer.append("B").unwrap();
-        assert_eq!(edit_timestamp, target_timestamp);
+        let edit_summary = buffer.append("B").unwrap();
+        assert!(buffer.version().observed(target_timestamp));
+        assert_eq!(edit_summary.transaction_id, Some(transaction_id));
         assert_eq!(buffer.end_transaction(), Some(transaction_id));
 
         assert!(matches!(poll_once(future.as_mut()), Poll::Ready(Ok(()))));

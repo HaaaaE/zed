@@ -2812,11 +2812,10 @@ fn source_length_preserving_single_row_edit_keeps_later_display_rows(
         };
         editor.selection = previous_selection.clone();
         let row_count_before = editor.display_list_state.item_count();
-        let buffer_len_before = editor.buffer.len();
-        let (selection, transaction_id) =
+        let (selection, summary) =
             replace_selection(&mut editor.buffer, &editor.selection, "X");
-        assert!(transaction_id.is_some());
-        let byte_delta = buffer_byte_delta(buffer_len_before, editor.buffer.len());
+        let summary = summary.expect("edit should produce summary");
+        let byte_delta = Some(summary.byte_delta);
         editor.selection = selection;
 
         editor.notify_after_edit(
@@ -2879,11 +2878,10 @@ fn rendered_length_preserving_single_item_edit_keeps_other_display_rows(
             .expect("row 2 should exist");
 
         let row_count_before = editor.display_list_state.item_count();
-        let buffer_len_before = editor.buffer.len();
-        let (selection, transaction_id) =
+        let (selection, summary) =
             replace_selection(&mut editor.buffer, &editor.selection, "X");
-        assert!(transaction_id.is_some());
-        let byte_delta = buffer_byte_delta(buffer_len_before, editor.buffer.len());
+        let summary = summary.expect("edit should produce summary");
+        let byte_delta = Some(summary.byte_delta);
         editor.selection = selection;
 
         editor.notify_after_edit(
@@ -2941,11 +2939,11 @@ fn source_undo_redo_single_row_edit_keeps_later_display_rows(cx: &mut gpui::Test
         };
         editor.selection = previous_selection.clone();
         let row_count_before = editor.display_list_state.item_count();
-        let buffer_len_before = editor.buffer.len();
-        let (selection, transaction_id) =
+        let (selection, summary) =
             replace_selection(&mut editor.buffer, &editor.selection, "X");
-        assert!(transaction_id.is_some());
-        let byte_delta = buffer_byte_delta(buffer_len_before, editor.buffer.len());
+        let summary = summary.expect("edit should produce summary");
+        let transaction_id = summary.transaction_id;
+        let byte_delta = Some(summary.byte_delta);
         editor.selection = selection;
         editor.record_selection_history(
             transaction_id,

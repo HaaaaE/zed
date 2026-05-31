@@ -981,7 +981,7 @@ impl Buffer {
         self.history.group_interval
     }
 
-    pub fn edit<R, I, S, T>(&mut self, edits: R) -> Operation
+    pub fn edit<R, I, S, T>(&mut self, edits: R) -> (Operation, Patch<usize>)
     where
         R: IntoIterator<IntoIter = I>,
         I: ExactSizeIterator<Item = (Range<S>, T)>,
@@ -994,21 +994,22 @@ impl Buffer {
 
         self.start_transaction();
         let timestamp = self.lamport_clock.tick();
-        let operation = Operation::Edit(self.apply_local_edit(edits, timestamp));
+        let (edit, patch) = self.apply_local_edit(edits, timestamp);
+        let operation = Operation::Edit(edit);
 
         self.history.push(operation.clone());
         self.history.push_undo(operation.timestamp());
         self.snapshot.version.observe(operation.timestamp());
         self.resolve_waiting_versions();
         self.end_transaction();
-        operation
+        (operation, patch)
     }
 
     fn apply_local_edit<S: ToOffset, T: Into<Arc<str>>>(
         &mut self,
         edits: impl ExactSizeIterator<Item = (Range<S>, T)>,
         timestamp: clock::Lamport,
-    ) -> EditOperation {
+    ) -> (EditOperation, Patch<usize>) {
         let mut edits_patch = Patch::default();
         let mut edit_op = EditOperation {
             timestamp,
@@ -1166,7 +1167,7 @@ impl Buffer {
         self.snapshot.deleted_text = deleted_text;
         self.subscriptions.publish_mut(&edits_patch);
         self.snapshot.insertion_slices.extend(insertion_slices);
-        edit_op
+        (edit_op, edits_patch)
     }
 
     pub fn set_line_ending(&mut self, line_ending: LineEnding) {
@@ -1532,7 +1533,7 @@ impl Buffer {
         fragment_ids
     }
 
-    fn apply_undo(&mut self, undo: &UndoOperation) {
+    fn apply_undo(&mut self, undo: &UndoOperation) -> Patch<usize> {
         self.snapshot.undo_map.insert(undo);
 
         let mut edits = Patch::default();
@@ -1585,6 +1586,7 @@ impl Buffer {
         self.snapshot.visible_text = visible_text;
         self.snapshot.deleted_text = deleted_text;
         self.subscriptions.publish_mut(&edits);
+        edits
     }
 
     fn flush_deferred_ops(&mut self) {
@@ -1664,14 +1666,16 @@ impl Buffer {
     }
 
     pub fn undo(&mut self) -> Option<(TransactionId, Operation)> {
-        if let Some(entry) = self.history.pop_undo() {
-            let transaction = entry.transaction.clone();
-            let transaction_id = transaction.id;
-            let op = self.undo_or_redo(transaction);
-            Some((transaction_id, op))
-        } else {
-            None
-        }
+        self.undo_with_patch()
+            .map(|(transaction_id, operation, _)| (transaction_id, operation))
+    }
+
+    pub fn undo_with_patch(&mut self) -> Option<(TransactionId, Operation, Patch<usize>)> {
+        let entry = self.history.pop_undo()?;
+        let transaction = entry.transaction.clone();
+        let transaction_id = transaction.id;
+        let (op, patch) = self.undo_or_redo_with_patch(transaction);
+        Some((transaction_id, op, patch))
     }
 
     pub fn undo_transaction(&mut self, transaction_id: TransactionId) -> Option<Operation> {
@@ -1710,14 +1714,16 @@ impl Buffer {
     }
 
     pub fn redo(&mut self) -> Option<(TransactionId, Operation)> {
-        if let Some(entry) = self.history.pop_redo() {
-            let transaction = entry.transaction.clone();
-            let transaction_id = transaction.id;
-            let op = self.undo_or_redo(transaction);
-            Some((transaction_id, op))
-        } else {
-            None
-        }
+        self.redo_with_patch()
+            .map(|(transaction_id, operation, _)| (transaction_id, operation))
+    }
+
+    pub fn redo_with_patch(&mut self) -> Option<(TransactionId, Operation, Patch<usize>)> {
+        let entry = self.history.pop_redo()?;
+        let transaction = entry.transaction.clone();
+        let transaction_id = transaction.id;
+        let (op, patch) = self.undo_or_redo_with_patch(transaction);
+        Some((transaction_id, op, patch))
     }
 
     pub fn redo_to_transaction(&mut self, transaction_id: TransactionId) -> Vec<Operation> {
@@ -1735,17 +1741,28 @@ impl Buffer {
     }
 
     fn undo_or_redo(&mut self, transaction: Transaction) -> Operation {
+        self.undo_or_redo_with_patch(transaction).0
+    }
+
+    fn undo_or_redo_with_patch(&mut self, transaction: Transaction) -> (Operation, Patch<usize>) {
         let mut counts = HashMap::default();
         for edit_id in transaction.edit_ids {
             counts.insert(edit_id, self.undo_map.undo_count(edit_id).saturating_add(1));
         }
 
-        let operation = self.undo_operations(counts);
+        let (operation, patch) = self.undo_operations_with_patch(counts);
         self.history.push(operation.clone());
-        operation
+        (operation, patch)
     }
 
     pub fn undo_operations(&mut self, counts: HashMap<clock::Lamport, u32>) -> Operation {
+        self.undo_operations_with_patch(counts).0
+    }
+
+    pub fn undo_operations_with_patch(
+        &mut self,
+        counts: HashMap<clock::Lamport, u32>,
+    ) -> (Operation, Patch<usize>) {
         let timestamp = self.lamport_clock.tick();
         let version = self.version();
         self.snapshot.version.observe(timestamp);
@@ -1754,9 +1771,9 @@ impl Buffer {
             version,
             counts,
         };
-        self.apply_undo(&undo);
+        let patch = self.apply_undo(&undo);
         self.resolve_waiting_versions();
-        Operation::Undo(undo)
+        (Operation::Undo(undo), patch)
     }
 
     pub fn push_transaction(&mut self, transaction: Transaction, now: Instant) {
@@ -2099,7 +2116,7 @@ impl Buffer {
         let mut edits = self.get_random_edits(rng, edit_count);
         log::info!("mutating buffer {:?} with {:?}", self.replica_id, edits);
 
-        let op = self.edit(edits.iter().cloned());
+        let (op, _) = self.edit(edits.iter().cloned());
         if let Operation::Edit(edit) = &op {
             assert_eq!(edits.len(), edit.new_text.len());
             for (edit, new_text) in edits.iter_mut().zip(&edit.new_text) {

@@ -147,11 +147,10 @@ fn replace_middle_row_word(
 
         editor.selection = previous_selection.clone();
         let row_count_before = editor.display_list_state.item_count();
-        let buffer_len_before = editor.buffer.len();
-        let (selection, transaction_id) =
-            replace_selection(&mut editor.buffer, &editor.selection, to);
-        let changed = transaction_id.is_some();
-        let byte_delta = buffer_byte_delta(buffer_len_before, editor.buffer.len());
+        let (selection, summary) = replace_selection(&mut editor.buffer, &editor.selection, to);
+        let changed = summary.is_some();
+        let transaction_id = summary.as_ref().and_then(|summary| summary.transaction_id);
+        let byte_delta = summary.as_ref().map(|summary| summary.byte_delta);
 
         editor.selection = selection;
         editor.record_selection_history(

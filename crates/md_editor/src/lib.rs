@@ -706,12 +706,6 @@ impl Focusable for MarkdownEditor {
     }
 }
 
-fn buffer_byte_delta(before_len: usize, after_len: usize) -> Option<isize> {
-    let before_len = isize::try_from(before_len).ok()?;
-    let after_len = isize::try_from(after_len).ok()?;
-    after_len.checked_sub(before_len)
-}
-
 fn local_edit_invalidation_rows(
     mode: MarkdownEditorMode,
     row_count_before: usize,

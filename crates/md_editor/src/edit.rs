@@ -9,14 +9,14 @@ use super::{
         clip_selection_in_text_snapshot, collapsed_selection, selection_byte_range_in_text_snapshot,
     },
 };
-use md_buffer::{Buffer, BufferSnapshot};
+use md_buffer::{Buffer, BufferEditSummary, BufferSnapshot};
 use md_text::{Point, Selection, SelectionGoal};
 
 pub fn replace_selection(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
     text: &str,
-) -> (Selection<Point>, Option<md_text::TransactionId>) {
+) -> (Selection<Point>, Option<BufferEditSummary>) {
     let (selection, range) = {
         let snapshot = buffer.as_text_snapshot();
         let selection = clip_selection_in_text_snapshot(snapshot, selection);
@@ -30,18 +30,21 @@ pub fn replace_selection(
 
     let cursor_offset = range.start.saturating_add(text.len());
     buffer.start_transaction();
-    buffer.edit([(range, text)]);
+    let mut summary = buffer.edit([(range, text)]);
     let transaction_id = buffer.end_transaction();
+    if let Some(summary) = summary.as_mut() {
+        summary.transaction_id = transaction_id;
+    }
 
     let cursor = buffer.as_text_snapshot().offset_to_point(cursor_offset);
-    (collapsed_selection(cursor), transaction_id)
+    (collapsed_selection(cursor), summary)
 }
 
 pub(crate) fn insert_newline_in_mode(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
-) -> (Selection<Point>, Option<md_text::TransactionId>) {
+) -> (Selection<Point>, Option<BufferEditSummary>) {
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Rendered {
         return insert_rendered_newline(buffer, &selection);
@@ -56,7 +59,7 @@ pub(crate) fn insert_newline_in_mode(
 fn insert_rendered_newline(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
-) -> (Selection<Point>, Option<md_text::TransactionId>) {
+) -> (Selection<Point>, Option<BufferEditSummary>) {
     let snapshot = buffer.snapshot();
     if let Some(plan) = plan_rendered_insert_paragraph_break(&snapshot, selection) {
         return apply_rendered_edit_plan(buffer, plan);
@@ -68,14 +71,14 @@ fn insert_rendered_newline(
 fn apply_rendered_edit_plan(
     buffer: &mut Buffer,
     plan: RenderedEditPlan,
-) -> (Selection<Point>, Option<md_text::TransactionId>) {
+) -> (Selection<Point>, Option<BufferEditSummary>) {
     if plan.edits.is_empty() {
         return (plan.selection_after, None);
     }
 
     let mut selection_after = plan.selection_after;
     buffer.start_transaction();
-    buffer.edit(plan.edits);
+    let mut summary = buffer.edit(plan.edits);
     if plan.normalize_blank_run_after_delete {
         let mut cursor_offset = buffer
             .as_text_snapshot()
@@ -86,7 +89,7 @@ fn apply_rendered_edit_plan(
             if range.start <= cursor_offset {
                 cursor_offset = range.start + replacement.len();
             }
-            buffer.edit([(range, replacement)]);
+            summary = buffer.edit([(range, replacement)]);
             let cursor = buffer
                 .as_text_snapshot()
                 .offset_to_point(cursor_offset.min(buffer.as_text_snapshot().len()));
@@ -94,14 +97,17 @@ fn apply_rendered_edit_plan(
         }
     }
     let transaction_id = buffer.end_transaction();
-    (selection_after, transaction_id)
+    if let Some(summary) = summary.as_mut() {
+        summary.transaction_id = transaction_id;
+    }
+    (selection_after, summary)
 }
 
 pub(crate) fn insert_soft_break_in_mode(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
-) -> (Selection<Point>, Option<md_text::TransactionId>) {
+) -> (Selection<Point>, Option<BufferEditSummary>) {
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Source {
         return insert_newline_in_mode(buffer, &selection, mode);
@@ -119,7 +125,7 @@ pub(crate) fn backspace_selection_in_mode(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
-) -> (Selection<Point>, Option<md_text::TransactionId>) {
+) -> (Selection<Point>, Option<BufferEditSummary>) {
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Rendered && !selection.is_empty() {
         let snapshot = buffer.snapshot();
@@ -141,7 +147,7 @@ pub(crate) fn backspace_selection_in_mode(
 pub fn backspace_selection(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
-) -> (Selection<Point>, Option<md_text::TransactionId>) {
+) -> (Selection<Point>, Option<BufferEditSummary>) {
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if !selection.is_empty() {
         return replace_selection(buffer, &selection, "");
@@ -173,7 +179,7 @@ pub(crate) fn delete_selection_in_mode(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
-) -> (Selection<Point>, Option<md_text::TransactionId>) {
+) -> (Selection<Point>, Option<BufferEditSummary>) {
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Rendered && !selection.is_empty() {
         let snapshot = buffer.snapshot();
@@ -195,7 +201,7 @@ pub(crate) fn delete_selection_in_mode(
 pub fn delete_selection(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
-) -> (Selection<Point>, Option<md_text::TransactionId>) {
+) -> (Selection<Point>, Option<BufferEditSummary>) {
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if !selection.is_empty() {
         return replace_selection(buffer, &selection, "");

@@ -20,7 +20,11 @@
   - [x] 第一阶段测试：
     - 新增 rendered 等长局部编辑缓存复用回归测试。
     - 已通过 `cargo test -p md_editor` 和 `cargo check -p updraft_editor`。
-  - [ ] 待完成：`md_text`/`md_buffer` edit summary API，undo/redo 统一 invalidation 管线。
+  - [x] 第二阶段 edit summary API：
+    - `md_text::Buffer::edit` 直接返回 operation patch；undo/redo 同样暴露 patch。
+    - `md_buffer::edit`/`edit_non_coalesce`/`undo`/`redo` 直接返回 `BufferEditSummary`。
+    - editor 普通输入、删除、换行、undo/redo 改用 summary 的 transaction id 和 byte delta，不再手算 buffer 长度差。
+    - 已通过 `cargo test -p md_text`、`cargo test -p md_buffer`、`cargo test -p md_editor`。
   - [ ] 待完成：Markdown syntax tree 基于 edit summary 的增量 reparse，移除 old/new 全文复制热路径。
   - [ ] 待完成：`RenderedDisplayIndex::update_after_edit` 真增量更新及等价性测试。
   - [ ] 待完成：md_editor perf suite 的 rendered edit 回归场景与 important perf gate。
@@ -28,9 +32,9 @@
   ## Key Changes
 
   - 新增编辑影响摘要 API：
-    - 在 `md_text` 暴露非破坏性新增接口，让 `edit/undo/redo` 能返回 `Vec<Edit<usize>>` 样式的 old/new byte range patch；保留现有 API 兼容。
-    - 在 `md_buffer` 新增 `BufferEditSummary`，包含 old range、new range、byte delta、row delta、old/new affected rows、transaction id。
-    - 所有 editor edit action 改用 summary 版本；undo/redo 也走同一条 invalidation 管线。
+    - 在 `md_text` 让 `edit/undo/redo` 返回 `Vec<Edit<usize>>` 样式的 old/new byte range patch。
+    - 在 `md_buffer` 新增 `BufferEditSummary`，包含 old range、new range、byte delta、row delta、old/new affected rows、transaction id，并作为主编辑返回值。
+    - 所有 editor edit action 改用 summary；undo/redo 也走同一条 invalidation 管线。
 
   - 修复 render 模式局部失效：
     - 替换 `local_source_edit_invalidation_rows` 为 mode-agnostic 的 `local_edit_invalidation`。
@@ -88,7 +92,7 @@
 
   ## Assumptions
 
-  - 兼容性优先：现有 public API 保留，新增 summary/incremental API，不强迫所有调用方迁移。
+  - 实时编辑主路径优先：相关调用方直接迁移到 summary/incremental API，不维护并行旧路径。
   - 正确性优先于激进局部化：不能证明安全的复杂编辑走 full fallback，但 fallback 必须可计数并被 perf 测试限制。
   - 第一批优化目标是用户实时输入路径：普通字符输入、删除、换行、undo/redo；批量多点编辑可以先走 fallback。
   - 不引入 Zed IDE crate；只使用现有 `md_*`、`markdown_wysiwyg`、`md_sum_tree`、`gpui` 边界内能力。

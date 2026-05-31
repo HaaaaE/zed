@@ -65,7 +65,8 @@ fn test_wait_for_version_resolves_after_local_edit() {
     let mut future = Box::pin(buffer.wait_for_version(target_version));
     assert!(matches!(poll_once(future.as_mut()), Poll::Pending));
 
-    let edit_timestamp = buffer.edit([(1..1, "B")]).timestamp();
+    let (edit_op, _) = buffer.edit([(1..1, "B")]);
+    let edit_timestamp = edit_op.timestamp();
     assert_eq!(edit_timestamp, target_timestamp);
 
     assert!(matches!(poll_once(future.as_mut()), Poll::Ready(Ok(()))));
@@ -771,11 +772,11 @@ fn test_concurrent_edits() {
     let mut buffer2 = Buffer::new(ReplicaId::new(2), BufferId::new(1).unwrap(), text);
     let mut buffer3 = Buffer::new(ReplicaId::new(3), BufferId::new(1).unwrap(), text);
 
-    let buf1_op = buffer1.edit([(1..2, "12")]);
+    let (buf1_op, _) = buffer1.edit([(1..2, "12")]);
     assert_eq!(buffer1.text(), "a12cdef");
-    let buf2_op = buffer2.edit([(3..4, "34")]);
+    let (buf2_op, _) = buffer2.edit([(3..4, "34")]);
     assert_eq!(buffer2.text(), "abc34ef");
-    let buf3_op = buffer3.edit([(5..6, "56")]);
+    let (buf3_op, _) = buffer3.edit([(5..6, "56")]);
     assert_eq!(buffer3.text(), "abcde56");
 
     buffer1.apply_op(buf2_op.clone());
