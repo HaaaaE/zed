@@ -25,6 +25,10 @@
     - `md_buffer::edit`/`edit_non_coalesce`/`undo`/`redo` 直接返回 `BufferEditSummary`。
     - editor 普通输入、删除、换行、undo/redo 改用 summary 的 transaction id 和 byte delta，不再手算 buffer 长度差。
     - 已通过 `cargo test -p md_text`、`cargo test -p md_buffer`、`cargo test -p md_editor`。
+  - [x] Syntax incremental reparse 热路径去除 old-source 复制：
+    - `PendingIncrementalReparse` 不再保存旧全文 `String`。
+    - `MarkdownSyntaxTree::reparse_after_edit_range` 使用现有 tree 的旧 `line_starts` 和 edit summary 的 old/new range 计算 tree-sitter `InputEdit`。
+    - 已通过 `cargo test -p markdown_wysiwyg` 和 `cargo test -p md_buffer`。
   - [ ] 待完成：Markdown syntax tree 基于 edit summary 的增量 reparse，移除 old/new 全文复制热路径。
   - [ ] 待完成：`RenderedDisplayIndex::update_after_edit` 真增量更新及等价性测试。
   - [ ] 待完成：md_editor perf suite 的 rendered edit 回归场景与 important perf gate。
@@ -50,7 +54,7 @@
     - `schedule_rendered_cache_prewarm` 不得因为 prewarm 重新触发 index build；只能复用当前 version 的 cached index。
 
   - Markdown syntax 增量化：
-    - `MarkdownSyntaxTree::reparse_after_edit_range` 不再复制整篇 old/new source。
+    - `MarkdownSyntaxTree::reparse_after_edit_range` 不再复制整篇 old source。
     - 用旧 `line_starts` 和 edit summary 计算 `InputEdit` positions；新文本通过 rope/chunk callback 喂给 tree-sitter。
     - `line_starts` 用 edit summary splice 增量维护。
     - block tree 用 tree-sitter incremental parse；根据 changed ranges 扩展到相邻 block/blank-run/list/table/code-fence 边界，只重收集 dirty range 的 blocks、tables、inline spans、projection

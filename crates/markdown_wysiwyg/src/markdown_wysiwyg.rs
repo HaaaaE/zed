@@ -243,37 +243,28 @@ impl MarkdownSyntaxTree {
         Self::parse_with_previous_tree(source, None)
     }
 
-    pub fn reparse_after_edit(
-        &self,
-        old_source: &str,
-        old_range: Range<usize>,
-        new_source: &str,
-    ) -> Self {
-        self.reparse_after_edit_range(old_source, old_range, new_source)
-    }
-
     pub fn reparse_after_edit_range(
         &self,
-        old_source: &str,
         old_range: Range<usize>,
+        new_range: Range<usize>,
         new_source: &str,
     ) -> Self {
-        let old_line_starts = line_starts(old_source);
         let new_line_starts = line_starts(new_source);
-        let inserted_len = new_source
-            .len()
-            .checked_sub(old_source.len() - (old_range.end - old_range.start))
-            .expect("new source must match the supplied edit range");
-        let new_end_byte = old_range.start + inserted_len;
+        let old_len = self.source_len - old_range.len();
+        let new_len = new_source.len() - new_range.len();
+        assert_eq!(
+            old_len, new_len,
+            "new source must match the supplied edit ranges"
+        );
 
         let mut edited_tree = self.tree.clone();
         edited_tree.edit(&InputEdit {
             start_byte: old_range.start,
             old_end_byte: old_range.end,
-            new_end_byte,
-            start_position: point_for_offset(&old_line_starts, old_range.start),
-            old_end_position: point_for_offset(&old_line_starts, old_range.end),
-            new_end_position: point_for_offset(&new_line_starts, new_end_byte),
+            new_end_byte: new_range.end,
+            start_position: point_for_offset(&self.line_starts, old_range.start),
+            old_end_position: point_for_offset(&self.line_starts, old_range.end),
+            new_end_position: point_for_offset(&new_line_starts, new_range.end),
         });
 
         Self::parse_with_previous_tree(new_source, Some(&edited_tree))
@@ -830,6 +821,26 @@ fn block_markers_require_marker_hit(kind: MarkdownBlockKind) -> bool {
 mod tests {
     use super::*;
 
+    fn block_semantics_without_id(
+        block: &MarkdownBlock,
+    ) -> (
+        MarkdownBlockKind,
+        Range<usize>,
+        Range<usize>,
+        Vec<Range<usize>>,
+        Range<usize>,
+        bool,
+    ) {
+        (
+            block.kind,
+            block.source_range.clone(),
+            block.content_range.clone(),
+            block.marker_ranges.clone(),
+            block.row_range.clone(),
+            block.tagfilter_disallowed,
+        )
+    }
+
     #[test]
     fn parses_atx_headings_with_tree_sitter() {
         let tree = MarkdownSyntaxTree::parse("# Title\n\nText\n");
@@ -1097,7 +1108,7 @@ mod tests {
         let old_source = "# Title\nBody\n";
         let tree = MarkdownSyntaxTree::parse(old_source);
         let new_source = "# Title!\nBody\n";
-        let tree = tree.reparse_after_edit(old_source, 7..7, new_source);
+        let tree = tree.reparse_after_edit_range(7..7, 7..8, new_source);
 
         assert_eq!(tree.source_len(), new_source.len());
         assert_eq!(
@@ -1113,13 +1124,26 @@ mod tests {
         let old_source = "# Title\nBody\n";
         let tree = MarkdownSyntaxTree::parse(old_source);
         let new_source = "# Title\n## Body\n";
-        let tree = tree.reparse_after_edit_range(old_source, 8..12, new_source);
+        let tree = tree.reparse_after_edit_range(8..12, 8..15, new_source);
+        let full_tree = MarkdownSyntaxTree::parse(new_source);
 
         assert_eq!(tree.source_len(), new_source.len());
         assert_eq!(
             tree.blocks()[1].kind,
             MarkdownBlockKind::AtxHeading { level: 2 }
         );
+        assert_eq!(
+            tree.blocks()
+                .iter()
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>(),
+            full_tree
+                .blocks()
+                .iter()
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(tree.inline_spans(), full_tree.inline_spans());
     }
 
     #[test]

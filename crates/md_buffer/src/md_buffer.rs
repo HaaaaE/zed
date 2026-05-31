@@ -37,8 +37,8 @@ pub struct BufferSnapshot {
 }
 
 struct PendingIncrementalReparse {
-    old_source: String,
     old_range: Range<usize>,
+    new_range: Range<usize>,
     syntax_tree: Arc<MarkdownSyntaxTree>,
 }
 
@@ -392,13 +392,9 @@ impl Buffer {
         }
 
         let old_snapshot = self.text.snapshot().clone();
-        let pending_incremental_reparse =
+        let incremental_reparse_syntax_tree =
             if edits.len() == 1 && self.cached_syntax_version == self.text.version() {
-                Some((
-                    self.text.snapshot().text(),
-                    edits[0].0.clone(),
-                    self.cached_syntax_tree.clone(),
-                ))
+                Some(self.cached_syntax_tree.clone())
             } else {
                 None
             };
@@ -409,18 +405,16 @@ impl Buffer {
             .text
             .peek_undo_stack()
             .map(|entry| entry.transaction_id());
+        let summary = summarize_patch(&old_snapshot, self.text.snapshot(), patch, transaction_id);
         self.pending_incremental_reparse =
-            pending_incremental_reparse.map(|(old_source, old_range, syntax_tree)| {
+            incremental_reparse_syntax_tree.map(|syntax_tree| {
                 PendingIncrementalReparse {
-                    old_source,
-                    old_range,
+                    old_range: summary.old_range.clone(),
+                    new_range: summary.new_range.clone(),
                     syntax_tree,
                 }
             });
-        Some((
-            timestamp,
-            summarize_patch(&old_snapshot, self.text.snapshot(), patch, transaction_id),
-        ))
+        Some((timestamp, summary))
     }
 
     fn refresh_syntax_tree(&mut self) {
@@ -435,8 +429,8 @@ impl Buffer {
                     pending_incremental_reparse
                         .syntax_tree
                         .reparse_after_edit_range(
-                            &pending_incremental_reparse.old_source,
                             pending_incremental_reparse.old_range,
+                            pending_incremental_reparse.new_range,
                             &new_source,
                         ),
                 )
