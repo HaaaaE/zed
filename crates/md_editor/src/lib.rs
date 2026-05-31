@@ -29,6 +29,7 @@ mod display_row_builder;
 mod edit;
 mod formula_render;
 mod inline_atom;
+mod inline_layout;
 mod interaction;
 mod layout;
 mod markdown_image;
@@ -74,6 +75,8 @@ use inline_atom::{
     INLINE_IMAGE_ATOM_SIZE, INLINE_IMAGE_PLACEHOLDER, INLINE_MATH_ATOM_EXTRA_HEIGHT,
     INLINE_MATH_ATOM_HORIZONTAL_PADDING, inline_image_atom_size_for_size,
 };
+#[cfg(test)]
+use inline_layout::display_inline_row_inputs;
 use interaction::{mouse_target_for_text_layout, task_checkbox_source_range_for_text_layout_click};
 use layout::{
     DisplayRowCacheKey, DisplayRowLayout, DisplayRowLayoutInputs, DisplayRowProjectionState,
@@ -83,8 +86,8 @@ use layout::{
 #[cfg(test)]
 use layout::{
     atom_range_containing_display_index, atomic_wrap_boundary_index,
-    display_fragments_for_text_layout, display_inline_fragments, display_inline_row_inputs,
-    forced_break_visual_rows, inline_style, line_fragments_for_wrapping, source_display_fragments,
+    display_fragments_for_text_layout, display_inline_fragments, forced_break_visual_rows,
+    inline_style, line_fragments_for_wrapping, source_display_fragments,
     text_segments_for_fragments, text_wrap_width_for_mode, unwrapped_visual_rows_if_fits,
     visual_row_height_for_range,
 };
