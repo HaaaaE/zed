@@ -30,7 +30,6 @@ pub(crate) struct RenderedDisplayIndex {
     version: md_text::Global,
     items: Vec<RenderedDisplayItem>,
     row_to_item: Vec<Option<usize>>,
-    #[cfg(test)]
     blank_row_roles: Vec<Option<BlankRowRole>>,
 }
 
@@ -154,7 +153,6 @@ impl RenderedDisplayIndex {
             version,
             items,
             row_to_item,
-            #[cfg(test)]
             blank_row_roles,
         })
     }
@@ -175,7 +173,6 @@ impl RenderedDisplayIndex {
         self.row_to_item.get(row).copied().flatten()
     }
 
-    #[cfg(test)]
     pub(crate) fn blank_row_role_for_source_row(&self, row: usize) -> Option<BlankRowRole> {
         self.blank_row_roles.get(row).copied().flatten()
     }

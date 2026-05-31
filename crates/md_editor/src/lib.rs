@@ -34,6 +34,7 @@ mod interaction;
 mod layout;
 mod markdown_image;
 mod render;
+mod rendered_caret;
 mod rendered_element;
 mod rendered_index;
 mod selection;
@@ -84,6 +85,7 @@ use markdown_image::MarkdownImageSource;
 #[cfg(test)]
 use render::{fragment_text_for_visual_row, selection_bounds_for_visual_row};
 use render::{render_display_row_layout, render_row_text};
+use rendered_caret::{RenderedCaretAffinity, normalize_rendered_caret};
 #[cfg(test)]
 use rendered_element::RenderedElementKind;
 use rendered_element::RenderedElementPlacement;
@@ -528,12 +530,46 @@ impl MarkdownEditor {
 
     pub fn set_cursor(&mut self, cursor: Point) {
         let previous_selection = self.selection.clone();
-        self.selection = collapsed_selection(clip_cursor_in_text_snapshot(
-            self.buffer.as_text_snapshot(),
-            cursor,
-        ));
+        let cursor = clip_cursor_in_text_snapshot(self.buffer.as_text_snapshot(), cursor);
+        self.selection = collapsed_selection(
+            self.normalize_rendered_caret(cursor, RenderedCaretAffinity::After),
+        );
         self.sync_rendered_rows_for_selection_change(&previous_selection);
         self.reveal_cursor_row();
+    }
+
+    fn normalize_rendered_caret(
+        &mut self,
+        cursor: Point,
+        affinity: RenderedCaretAffinity,
+    ) -> Point {
+        if self.mode != MarkdownEditorMode::Rendered {
+            return cursor;
+        }
+
+        let snapshot = self.buffer.snapshot();
+        let index = self.rendered_display_index(&snapshot);
+        normalize_rendered_caret(&snapshot, &index, cursor, affinity)
+    }
+
+    fn normalize_rendered_selection_head(
+        &mut self,
+        snapshot: &BufferSnapshot,
+        mut selection: Selection<Point>,
+        affinity: RenderedCaretAffinity,
+    ) -> Selection<Point> {
+        if self.mode != MarkdownEditorMode::Rendered {
+            return selection;
+        }
+
+        let index = self.rendered_display_index(snapshot);
+        let head = normalize_rendered_caret(snapshot, &index, selection.head(), affinity);
+        if selection.is_empty() {
+            selection.collapse_to(head, selection.goal);
+        } else {
+            selection.set_head(head, selection.goal);
+        }
+        selection
     }
 
     pub fn move_left(&mut self, _: &MoveLeft, window: &mut Window, cx: &mut Context<Self>) {
@@ -648,16 +684,24 @@ impl MarkdownEditor {
             }
         };
         if !extend_selection && !selection.is_empty() {
-            return fallback;
+            return self.normalize_rendered_selection_head(
+                &snapshot,
+                fallback,
+                rendered_caret_affinity_for_horizontal_direction(direction),
+            );
         }
 
         let Some((target, goal)) =
             self.visual_horizontal_target_point(&snapshot, &selection, direction, window, cx)
         else {
-            return fallback;
+            return self.normalize_rendered_selection_head(
+                &snapshot,
+                fallback,
+                rendered_caret_affinity_for_horizontal_direction(direction),
+            );
         };
 
-        if extend_selection {
+        let updated = if extend_selection {
             let mut updated = selection.clone();
             updated.set_head(target, goal);
             updated
@@ -665,7 +709,12 @@ impl MarkdownEditor {
             let mut updated = selection.clone();
             updated.collapse_to(target, goal);
             updated
-        }
+        };
+        self.normalize_rendered_selection_head(
+            &snapshot,
+            updated,
+            rendered_caret_affinity_for_horizontal_direction(direction),
+        )
     }
 
     fn move_source_selection_visual_horizontal(
@@ -740,10 +789,14 @@ impl MarkdownEditor {
         let Some((target, goal)) =
             self.visual_vertical_target_point(&snapshot, &selection, delta_visual_rows, window, cx)
         else {
-            return fallback;
+            return self.normalize_rendered_selection_head(
+                &snapshot,
+                fallback,
+                rendered_caret_affinity_for_vertical_delta(delta_visual_rows),
+            );
         };
 
-        if extend_selection {
+        let updated = if extend_selection {
             let mut updated = selection.clone();
             updated.set_head(target, goal);
             updated
@@ -751,7 +804,12 @@ impl MarkdownEditor {
             let mut updated = selection.clone();
             updated.collapse_to(target, goal);
             updated
-        }
+        };
+        self.normalize_rendered_selection_head(
+            &snapshot,
+            updated,
+            rendered_caret_affinity_for_vertical_delta(delta_visual_rows),
+        )
     }
 
     fn move_selection_visual_line_boundary(
@@ -792,7 +850,7 @@ impl MarkdownEditor {
             return fallback;
         };
 
-        if extend_selection {
+        let updated = if extend_selection {
             let mut updated = selection.clone();
             updated.set_head(target, goal);
             updated
@@ -800,7 +858,12 @@ impl MarkdownEditor {
             let mut updated = selection.clone();
             updated.collapse_to(target, goal);
             updated
-        }
+        };
+        self.normalize_rendered_selection_head(
+            &snapshot,
+            updated,
+            rendered_caret_affinity_for_line_boundary(boundary),
+        )
     }
 
     fn move_source_selection_visual_vertical(
@@ -2453,7 +2516,8 @@ fn rendered_item_display_source_range(
                 .is_some_and(|range| {
                     range.start == item.source_range.end && range.end == cursor_offset
                 })
-                || item.row_range.len() == 1
+                || cursor.row as usize == item.row_range.end
+                    && cursor_starts_multi_blank_run(text_snapshot, cursor.row as usize)
                 || cursor_at_trailing_blank_tail;
         if cursor_offset > item.source_range.end
             && active_trailing_break
@@ -2661,6 +2725,19 @@ fn row_source_range_in_text_snapshot(snapshot: &TextBufferSnapshot, row: u32) ->
     let start = snapshot.point_to_offset(Point::new(row, 0));
     let end = start + snapshot.line_len(row) as usize;
     start..end
+}
+
+fn cursor_starts_multi_blank_run(snapshot: &TextBufferSnapshot, row: usize) -> bool {
+    let row_count = snapshot.row_count() as usize;
+    row.saturating_add(1) < row_count
+        && source_row_is_blank_in_text_snapshot(snapshot, row)
+        && source_row_is_blank_in_text_snapshot(snapshot, row.saturating_add(1))
+}
+
+fn source_row_is_blank_in_text_snapshot(snapshot: &TextBufferSnapshot, row: usize) -> bool {
+    snapshot
+        .text_for_range(row_source_range_in_text_snapshot(snapshot, row as u32))
+        .all(|chunk| chunk.trim().is_empty())
 }
 
 fn project_display_row_text(
@@ -2886,6 +2963,32 @@ fn visual_row_index_for_horizontal_movement(
     }
 
     visual_row_index_for_caret(visual_rows, display_offset, text_len, SelectionGoal::None)
+}
+
+fn rendered_caret_affinity_for_horizontal_direction(
+    direction: HorizontalDirection,
+) -> RenderedCaretAffinity {
+    match direction {
+        HorizontalDirection::Left => RenderedCaretAffinity::Before,
+        HorizontalDirection::Right => RenderedCaretAffinity::After,
+    }
+}
+
+fn rendered_caret_affinity_for_vertical_delta(delta_visual_rows: i32) -> RenderedCaretAffinity {
+    if delta_visual_rows.is_negative() {
+        RenderedCaretAffinity::Before
+    } else {
+        RenderedCaretAffinity::After
+    }
+}
+
+fn rendered_caret_affinity_for_line_boundary(
+    boundary: VisualLineBoundary,
+) -> RenderedCaretAffinity {
+    match boundary {
+        VisualLineBoundary::Start => RenderedCaretAffinity::Before,
+        VisualLineBoundary::End => RenderedCaretAffinity::After,
+    }
 }
 
 fn buffer_byte_delta(before_len: usize, after_len: usize) -> Option<isize> {

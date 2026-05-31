@@ -64,6 +64,27 @@ fn source_mode_actions_follow_wrapped_visual_rows(cx: &mut gpui::TestAppContext)
 }
 
 #[gpui::test]
+fn rendered_mode_caret_skips_paragraph_separator_rows(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(240.), px(200.)));
+    let editor = cx.new(|cx| MarkdownEditor::for_text("A\n\nB\n", cx));
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+
+        editor.set_cursor(Point::new(0, 0));
+        editor.move_down(&MoveDown, window, cx);
+        assert_eq!(editor.cursor().row, 2);
+
+        editor.move_up(&MoveUp, window, cx);
+        assert_eq!(editor.cursor().row, 0);
+
+        editor.set_cursor(Point::new(1, 0));
+        assert_ne!(editor.cursor().row, 1);
+    });
+}
+
+#[gpui::test]
 fn source_interaction_layouts_cache_wrapped_text_rows(cx: &mut gpui::TestAppContext) {
     let cx = cx.add_empty_window();
     cx.simulate_resize(gpui::size(px(90.), px(200.)));
@@ -1346,6 +1367,71 @@ fn rendered_shift_enter_at_paragraph_end_remeasures_visible_item(cx: &mut gpui::
         assert!(
             after_height > before_height,
             "expected trailing soft break to increase item height: before {before_height:?}, after {after_height:?}"
+        );
+    });
+}
+
+#[gpui::test]
+fn rendered_shift_enter_after_merged_paragraph_keeps_caret_visible_before_next_paragraph(
+    cx: &mut gpui::TestAppContext,
+) {
+    let cx = cx.add_empty_window();
+    cx.simulate_resize(gpui::size(px(320.), px(200.)));
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text("AAA\n111\n\nBBB", cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.set_cursor(Point::new(1, "111".len() as u32));
+        editor
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.insert_soft_break(&InsertSoftBreak, window, cx);
+        assert_eq!(editor.buffer.text(), "AAA\n111\n\n\nBBB");
+        assert_eq!(editor.cursor(), Point::new(2, 0));
+
+        let snapshot = editor.buffer.snapshot();
+        let index = rendered_display_index_for_tests(&snapshot);
+        let paragraph_item = index
+            .item_index_for_source_row(2)
+            .expect("trailing soft-break row should map to previous paragraph item");
+        assert_eq!(paragraph_item, 0);
+
+        let display_row_state =
+            DisplayRowProjectionState::new(&snapshot, Some(&editor.selection), editor.mode);
+        let display_row = editor
+            .cached_display_row(&snapshot, paragraph_item, editor.mode, &display_row_state)
+            .expect("paragraph display row should exist");
+        assert_eq!(display_row.source_row_range, 0..3);
+        assert!(display_row.text.ends_with('\n'));
+
+        let row_style = row_display_style_for_display_row(&snapshot, &display_row, editor.mode);
+        let selection = editor.selection.clone();
+        let row_layout = editor.cached_row_layout(
+            &snapshot,
+            &display_row,
+            &selection,
+            editor.mode,
+            row_style,
+            text_wrap_width_for_mode(window, editor.mode),
+            false,
+            window,
+            cx,
+        );
+        let DisplayRowLayout::Text(text_layout) = row_layout else {
+            panic!("expected paragraph text layout");
+        };
+        let display_offset = display_row.source_to_display(
+            snapshot
+                .as_text_snapshot()
+                .point_to_offset(editor.selection.head()),
+        );
+        assert!(
+            visual_row_index_containing_caret(
+                &text_layout.visual_rows,
+                display_offset,
+                text_layout.text_len,
+            )
+            .is_some()
         );
     });
 }
