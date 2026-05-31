@@ -79,3 +79,6 @@
   - `md_editor` perf helper 不再只断言 rendered index full build；Render 普通等长/变长编辑 perf 路径现在同时断言 syntax stats 全 0、list full remeasure 为 0、仅局部 remeasure 当前 item。
   - Render 编辑 perf 输出拆出 `rendered_edit_equal_length_apply` / `rendered_edit_equal_length_draw_after_edit`、`rendered_edit_length_change_apply` / `rendered_edit_length_change_draw_after_edit`、`rendered_enter_delete_apply` / `rendered_enter_delete_draw_after_edit`。
   - 已验证：`cargo test -p md_editor --profile release-fast --lib --no-run --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]'`。
+  - `RenderedDisplayIndexStats` 增加 full build row/block 扫描数和 incremental item 扫描数，普通 Render 编辑测试/perf 断言现在确认走了 incremental scan。
+  - `RenderedDisplayIndex::update_after_edit` 增加 row-count dirty window splice：对插入换行、paragraph break、删除 blank boundary 等行数变化编辑，与 full build 的 items、row mappings、blank roles 保持一致，避免直接 fallback 到 full rendered index build。
+  - 已验证：`cargo test -p md_projection`、`cargo test -p md_editor rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build`、`cargo check -p updraft_editor`。

@@ -2892,13 +2892,10 @@ fn rendered_length_preserving_single_item_edit_keeps_other_display_rows(
             },
             cx,
         );
-        assert_eq!(
-            RenderedDisplayIndex::stats_for_tests(),
-            md_projection::RenderedDisplayIndexStats {
-                full_builds: 0,
-                incremental_updates: 1,
-            }
-        );
+        let index_stats = RenderedDisplayIndex::stats_for_tests();
+        assert_eq!(index_stats.full_builds, 0);
+        assert_eq!(index_stats.incremental_updates, 1);
+        assert!(index_stats.incremental_items_scanned > 0);
         assert_eq!(
             editor.buffer.cached_syntax_version_for_tests(),
             syntax_version_before_edit,
@@ -2977,14 +2974,10 @@ fn rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build(
                 cx,
             );
 
-            assert_eq!(
-                RenderedDisplayIndex::stats_for_tests(),
-                md_projection::RenderedDisplayIndexStats {
-                    full_builds: 0,
-                    incremental_updates: 1,
-                },
-                "{source:?}"
-            );
+            let index_stats = RenderedDisplayIndex::stats_for_tests();
+            assert_eq!(index_stats.full_builds, 0, "{source:?}");
+            assert_eq!(index_stats.incremental_updates, 1, "{source:?}");
+            assert!(index_stats.incremental_items_scanned > 0, "{source:?}");
             assert_eq!(
                 md_buffer::Buffer::syntax_stats_for_tests(),
                 md_buffer::BufferSyntaxStats::default(),

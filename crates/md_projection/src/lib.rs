@@ -40,6 +40,9 @@ thread_local! {
         const { std::cell::Cell::new(RenderedDisplayIndexStats {
             full_builds: 0,
             incremental_updates: 0,
+            full_build_rows: 0,
+            full_build_blocks: 0,
+            incremental_items_scanned: 0,
         }) };
 }
 
@@ -48,6 +51,9 @@ thread_local! {
 pub struct RenderedDisplayIndexStats {
     pub full_builds: usize,
     pub incremental_updates: usize,
+    pub full_build_rows: usize,
+    pub full_build_blocks: usize,
+    pub incremental_items_scanned: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -287,6 +293,8 @@ impl RenderedDisplayIndex {
         RENDERED_DISPLAY_INDEX_STATS.with(|stats| {
             let mut value = stats.get();
             value.full_builds += 1;
+            value.full_build_rows += snapshot.row_count() as usize;
+            value.full_build_blocks += snapshot.syntax_tree().blocks().len();
             stats.set(value);
         });
 
@@ -410,6 +418,10 @@ impl RenderedDisplayIndex {
         snapshot: &BufferSnapshot,
         edit_summary: &BufferEditSummary,
     ) -> Option<Arc<Self>> {
+        if edit_summary.row_delta != 0 {
+            return self.update_after_row_window_edit(snapshot, edit_summary);
+        }
+
         if edit_summary.row_delta != 0
             || edit_summary.old_affected_rows != edit_summary.new_affected_rows
             || edit_summary.new_affected_rows.len() != 1
@@ -501,6 +513,111 @@ impl RenderedDisplayIndex {
         RENDERED_DISPLAY_INDEX_STATS.with(|stats| {
             let mut value = stats.get();
             value.incremental_updates += 1;
+            value.incremental_items_scanned += self.items.len();
+            stats.set(value);
+        });
+
+        Some(Arc::new(Self {
+            version: snapshot.version().clone(),
+            items,
+            row_to_item,
+            blank_row_roles,
+        }))
+    }
+
+    fn update_after_row_window_edit(
+        &self,
+        snapshot: &BufferSnapshot,
+        edit_summary: &BufferEditSummary,
+    ) -> Option<Arc<Self>> {
+        let old_row_count = self.row_to_item.len();
+        let new_row_count = snapshot.row_count() as usize;
+        if apply_delta_usize(old_row_count, edit_summary.row_delta)? != new_row_count {
+            return None;
+        }
+
+        let old_dirty_rows =
+            expand_row_window(edit_summary.old_affected_rows.clone(), old_row_count, 1);
+        let new_dirty_rows =
+            expand_row_window(edit_summary.new_affected_rows.clone(), new_row_count, 1);
+        let replace_start = self
+            .items
+            .iter()
+            .position(|item| item.row_range.end > old_dirty_rows.start)
+            .unwrap_or(self.items.len());
+        let replace_end = self
+            .items
+            .iter()
+            .rposition(|item| item.row_range.start < old_dirty_rows.end)
+            .map_or(replace_start, |index| index + 1);
+
+        let mut items = Vec::new();
+        items.extend(self.items[..replace_start].iter().cloned());
+        items.extend(rendered_items_for_row_window(
+            snapshot,
+            new_dirty_rows.clone(),
+        )?);
+
+        let byte_delta = edit_summary.byte_delta;
+        for item in &self.items[replace_end..] {
+            items.push(RenderedDisplayItem {
+                id: DisplayItemId(display_item_id(
+                    &shift_range(item.source_range.clone(), byte_delta)?,
+                    &shift_range(item.row_range.clone(), edit_summary.row_delta)?,
+                    item.kind,
+                )),
+                index: 0,
+                source_range: shift_range(item.source_range.clone(), byte_delta)?,
+                row_range: shift_range(item.row_range.clone(), edit_summary.row_delta)?,
+                kind: item.kind,
+            });
+        }
+
+        items.sort_by_key(|item| (item.row_range.start, item.row_range.end, item.index));
+        items.dedup_by(|right, left| {
+            left.source_range == right.source_range
+                && left.row_range == right.row_range
+                && left.kind == right.kind
+        });
+        for (index, item) in items.iter_mut().enumerate() {
+            item.index = index;
+            item.id = DisplayItemId(display_item_id(
+                &item.source_range,
+                &item.row_range,
+                item.kind,
+            ));
+        }
+
+        let mut covered_rows = vec![false; new_row_count];
+        for item in &items {
+            if item.row_range.end > new_row_count {
+                return None;
+            }
+            for row in item.row_range.clone() {
+                if let Some(covered) = covered_rows.get_mut(row) {
+                    *covered = true;
+                }
+            }
+        }
+
+        let mut blank_row_roles = vec![None; new_row_count];
+        assign_blank_row_roles(snapshot, &covered_rows, &mut blank_row_roles);
+
+        let mut row_to_item = vec![None; new_row_count];
+        for item in &items {
+            for row in item.row_range.clone() {
+                if let Some(slot) = row_to_item.get_mut(row) {
+                    *slot = Some(item.index);
+                }
+            }
+        }
+        fill_blank_row_mappings(&mut row_to_item, &blank_row_roles);
+
+        #[cfg(any(test, feature = "test-support"))]
+        RENDERED_DISPLAY_INDEX_STATS.with(|stats| {
+            let mut value = stats.get();
+            value.incremental_updates += 1;
+            value.incremental_items_scanned += self.items.len();
             stats.set(value);
         });
 
@@ -586,6 +703,7 @@ impl RenderedDisplayIndex {
         RENDERED_DISPLAY_INDEX_STATS.with(|stats| {
             let mut value = stats.get();
             value.incremental_updates += 1;
+            value.incremental_items_scanned += self.items.len();
             stats.set(value);
         });
 
@@ -712,6 +830,47 @@ fn edit_preserves_plain_rendered_item(
         }
         RenderedDisplayItemKind::EmptyParagraph | RenderedDisplayItemKind::StructuredBlock => false,
     }
+}
+
+fn apply_delta_usize(value: usize, delta: isize) -> Option<usize> {
+    if delta >= 0 {
+        value.checked_add(delta as usize)
+    } else {
+        value.checked_sub(delta.unsigned_abs())
+    }
+}
+
+fn shift_range(range: Range<usize>, delta: isize) -> Option<Range<usize>> {
+    Some(apply_delta_usize(range.start, delta)?..apply_delta_usize(range.end, delta)?)
+}
+
+fn expand_row_window(range: Range<usize>, row_count: usize, extra_rows: usize) -> Range<usize> {
+    range.start.saturating_sub(extra_rows)..range.end.saturating_add(extra_rows).min(row_count)
+}
+
+fn rendered_items_for_row_window(
+    snapshot: &BufferSnapshot,
+    rows: Range<usize>,
+) -> Option<Vec<RenderedDisplayItem>> {
+    let row_count = snapshot.row_count() as usize;
+    if rows.start > rows.end || rows.end > row_count {
+        return None;
+    }
+
+    let mut items = Vec::new();
+    for row in rows {
+        let Some(item) = rendered_item_for_source_row(snapshot, row) else {
+            continue;
+        };
+        if !items.iter().any(|existing: &RenderedDisplayItem| {
+            existing.source_range == item.source_range
+                && existing.row_range == item.row_range
+                && existing.kind == item.kind
+        }) {
+            items.push(item);
+        }
+    }
+    Some(items)
 }
 
 fn is_table_delimiter_row(row_text: &str) -> bool {
@@ -1540,21 +1699,31 @@ mod tests {
     }
 
     #[test]
-    fn incremental_update_declines_row_count_changes() {
-        let mut buffer = Buffer::local("one\n\ntwo\n\nthree");
-        let old_snapshot = buffer.snapshot();
-        let old_index = RenderedDisplayIndex::build(&old_snapshot);
+    fn incremental_update_matches_full_build_for_row_count_changes() {
+        let cases = [
+            ("one\n\ntwo\n\nthree", 6..7, "X\nY"),
+            ("one two\n\nthree", 3..3, "\n\n"),
+            ("one\n\ntwo\n\nthree", 3..5, ""),
+        ];
 
-        let summary = buffer
-            .edit([(6..7, "X\nY")])
-            .expect("edit should produce summary");
-        let new_snapshot = buffer.snapshot();
+        for (source, range, replacement) in cases {
+            let mut buffer = Buffer::local(source);
+            let old_snapshot = buffer.snapshot();
+            let old_index = RenderedDisplayIndex::build(&old_snapshot);
 
-        assert!(
-            old_index
+            let summary = buffer
+                .edit([(range, replacement)])
+                .expect("edit should produce summary");
+            let new_snapshot = buffer.snapshot();
+            let incremental = old_index
                 .update_after_edit(&new_snapshot, &summary)
-                .is_none()
-        );
+                .unwrap_or_else(|| {
+                    panic!("row count edit should update dirty row window for {source:?}")
+                });
+            let full = RenderedDisplayIndex::build(&new_snapshot);
+
+            assert_index_matches_full_build(&incremental, &full);
+        }
     }
 
     #[test]

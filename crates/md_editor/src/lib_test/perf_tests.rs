@@ -1,7 +1,7 @@
 use super::test_support::*;
 use gpui::{px, size};
 use md_buffer::BufferSyntaxStats;
-use md_projection::{RenderedDisplayIndex, RenderedDisplayIndexStats};
+use md_projection::RenderedDisplayIndex;
 use std::time::{Duration, Instant};
 use util_macros::perf;
 
@@ -188,13 +188,10 @@ fn replace_middle_row_word_in_rendered_without_full_index_build(
     md_buffer::Buffer::reset_syntax_stats_for_tests();
     MdListState::reset_stats_for_tests();
     replace_middle_row_word(editor, cx, target_row, from, to);
-    assert_eq!(
-        RenderedDisplayIndex::stats_for_tests(),
-        RenderedDisplayIndexStats {
-            full_builds: 0,
-            incremental_updates: 1,
-        }
-    );
+    let index_stats = RenderedDisplayIndex::stats_for_tests();
+    assert_eq!(index_stats.full_builds, 0);
+    assert_eq!(index_stats.incremental_updates, 1);
+    assert!(index_stats.incremental_items_scanned > 0);
     assert_eq!(
         md_buffer::Buffer::syntax_stats_for_tests(),
         BufferSyntaxStats::default()
