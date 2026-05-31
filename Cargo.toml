@@ -6,6 +6,7 @@ members = [
     "crates/md_assets",
     "crates/md_buffer",
     "crates/md_editor",
+    "crates/md_projection",
     "crates/md_rope",
     "crates/md_settings",
     "crates/md_sum_tree",
@@ -26,6 +27,7 @@ markdown_wysiwyg = { path = "crates/markdown_wysiwyg" }
 md_assets = { path = "crates/md_assets" }
 md_buffer = { path = "crates/md_buffer" }
 md_editor = { path = "crates/md_editor" }
+md_projection = { path = "crates/md_projection" }
 md_rope = { path = "crates/md_rope" }
 md_settings = { path = "crates/md_settings" }
 md_sum_tree = { path = "crates/md_sum_tree" }

@@ -3469,6 +3469,7 @@ dependencies = [
  "markdown_wysiwyg",
  "md_assets",
  "md_buffer",
+ "md_projection",
  "md_settings",
  "md_sum_tree",
  "md_text",
@@ -3479,6 +3480,15 @@ dependencies = [
  "ratex-types",
  "smallvec",
  "util_macros",
+]
+
+[[package]]
+name = "md_projection"
+version = "0.1.0"
+dependencies = [
+ "markdown_wysiwyg",
+ "md_buffer",
+ "md_text",
 ]
 
 [[package]]

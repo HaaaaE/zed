@@ -16,6 +16,7 @@ doctest = false
 gpui.workspace = true
 image.workspace = true
 md_buffer.workspace = true
+md_projection.workspace = true
 md_text.workspace = true
 markdown_wysiwyg.workspace = true
 md_theme.workspace = true

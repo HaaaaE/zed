@@ -148,7 +148,7 @@
   - `InlineAtomMeasurementStore` 已提供统一清理方法；原有测量、pending、延迟 remeasure 行为保持在原调用路径中。
   - 已新增 `display_space.rs`，收拢 mode/cursor 到 display item 的纯映射逻辑；`MarkdownEditor` 仍负责 `MdListState` 和 GPUI 生命周期。
   - 测试中的缓存断言已改为 test-only stats/helper，不暴露可变 HashMap。
-  - 暂未拆 crate；下一阶段仍按本文 `Crate Split Criteria` 判断。
+  - 当时暂未拆 crate；随后按本文 `Crate Split Criteria` 继续评估候选模块。
 
   验证结果：
 
@@ -163,3 +163,26 @@
 
   - 继续观察 `display_row_builder` 与 rendered projection 是否能稳定满足拆出 `md_projection` 的 criteria。
   - 只有在 text measurement 与 GPUI shaping 隔离后，再评估 `md_layout_core`。
+
+  ### 2026-05-31 Follow-up
+
+  状态：已按 `Crate Split Criteria` 继续推进，不再停留在第一阶段。
+
+  拆分结论：
+
+  - `RenderedDisplayIndex` 已满足拆分条件：不依赖 `MarkdownEditor`，不依赖 `gpui::Window`、`gpui::Context`、`MdListState`，核心输入为 `BufferSnapshot`，输出为 plain index/item structs。
+  - 已新增 GPL crate `md_projection`，先承载 rendered display index 逻辑。
+  - `md_editor::rendered_index` 保留为内部 re-export，减少本轮调用点扰动并避免循环依赖。
+  - 已在 `md_projection` 添加独立单元测试，覆盖 paragraph grouping、structured rows、blank row role/empty paragraph 映射。
+
+  仍不拆的部分：
+
+  - `display_row_builder` 仍依赖 `DisplayRow`、inline atom/rendered element 描述、document path 等 `md_editor` 内部渲染模型，本轮不满足稳定 crate 边界。
+  - `rendered_topology` 仍与 `DisplayRowProjectionState` 和 active selection projection 绑定，先留在 `md_editor`。
+  - `md_layout_core` 仍受 GPUI shaping/text measurement 影响，尚不满足拆分条件。
+
+  补充验证结果：
+
+  - `cargo test -p md_projection` 通过。
+  - `cargo check -p updraft_editor` 通过。
+  - 原完整测试矩阵继续通过。
