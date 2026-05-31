@@ -551,3 +551,6 @@ Acceptance:
 - Phase 5 Backspace 部分完成：caret 位于 unordered/task/ordered list 正文开头时删除当前 list marker；caret 位于 blockquote 正文开头时删除 quote marker；blockquote 内 list item 开头 Backspace 保留外层 quote marker。
 - 更新 regression test 覆盖 list/task/ordered/blockquote content-start Backspace。
 - 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。
+- Phase 5 Tab/Shift+Tab 完成：list item 内 Tab 插入缩进，Shift+Tab 反缩进；非 list 保留原 tab 行为。
+- 更新 regression test 覆盖 rendered Tab/Shift+Tab list indent/outdent。
+- 验证：`cargo test -p md_editor --lib` 通过；`cargo test -p md_settings` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。

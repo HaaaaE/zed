@@ -151,6 +151,7 @@ impl Render for MarkdownEditor {
             .on_action(cx.listener(Self::insert_newline))
             .on_action(cx.listener(Self::insert_soft_break))
             .on_action(cx.listener(Self::tab))
+            .on_action(cx.listener(Self::shift_tab))
             .on_action(cx.listener(Self::toggle_bold))
             .on_action(cx.listener(Self::toggle_italic))
             .on_action(cx.listener(Self::toggle_inline_code))

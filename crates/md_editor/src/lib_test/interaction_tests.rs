@@ -3307,6 +3307,37 @@ fn rendered_backspace_at_line_content_start_removes_list_and_quote_markers() {
     }
 }
 
+#[gpui::test]
+fn rendered_tab_and_shift_tab_adjust_list_indent(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let editor = cx.new(|cx| MarkdownEditor::for_text("- item\n  - nested\n> - quoted\n", cx));
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+
+        editor.selection = collapsed_selection(Point::new(0, 2));
+        editor.tab(&Tab, window, cx);
+        assert_eq!(
+            editor.serialized_text(),
+            "  - item\n  - nested\n> - quoted\n"
+        );
+        assert_eq!(editor.cursor(), Point::new(0, 4));
+
+        editor.selection = collapsed_selection(Point::new(1, 4));
+        editor.shift_tab(&ShiftTab, window, cx);
+        assert_eq!(editor.serialized_text(), "  - item\n- nested\n> - quoted\n");
+        assert_eq!(editor.cursor(), Point::new(1, 2));
+
+        editor.selection = collapsed_selection(Point::new(2, 4));
+        editor.tab(&Tab, window, cx);
+        assert_eq!(
+            editor.serialized_text(),
+            "  - item\n- nested\n>   - quoted\n"
+        );
+        assert_eq!(editor.cursor(), Point::new(2, 6));
+    });
+}
+
 #[test]
 fn source_enter_preserves_auto_indent() {
     let mut buffer = Buffer::local("    ab");

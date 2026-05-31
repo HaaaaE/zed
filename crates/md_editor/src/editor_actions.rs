@@ -89,12 +89,24 @@ impl MarkdownEditor {
     }
 
     pub fn tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
+        if self.mode == MarkdownEditorMode::Rendered && self.adjust_rendered_list_indent(false, cx)
+        {
+            return;
+        }
+
         let tab_text = if self.settings.use_soft_tabs {
             " ".repeat(self.settings.tab_size)
         } else {
             "\t".to_string()
         };
         self.replace_current_selection(&tab_text, cx);
+    }
+
+    pub fn shift_tab(&mut self, _: &ShiftTab, _: &mut Window, cx: &mut Context<Self>) {
+        if self.mode == MarkdownEditorMode::Rendered && self.adjust_rendered_list_indent(true, cx) {
+            return;
+        }
+        cx.notify();
     }
 
     pub fn toggle_bold(&mut self, _: &ToggleBold, _: &mut Window, cx: &mut Context<Self>) {
@@ -370,6 +382,23 @@ impl MarkdownEditor {
         );
     }
 
+    fn adjust_rendered_list_indent(&mut self, outdent: bool, cx: &mut Context<Self>) -> bool {
+        let Some(adjustment) = rendered_list_indent_adjustment(
+            self.buffer.as_text_snapshot(),
+            &self.selection,
+            outdent,
+        ) else {
+            return false;
+        };
+
+        self.apply_source_edits_with_selection(
+            vec![(adjustment.range, adjustment.replacement)],
+            adjustment.selection_after,
+            cx,
+        );
+        true
+    }
+
     fn insert_line_break(&mut self, cx: &mut Context<Self>, soft_break: bool) {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
@@ -533,4 +562,95 @@ fn selection_for_source_offsets(
         reversed: false,
         goal: SelectionGoal::None,
     }
+}
+
+struct RenderedListIndentAdjustment {
+    range: Range<usize>,
+    replacement: String,
+    selection_after: Selection<Point>,
+}
+
+fn rendered_list_indent_adjustment(
+    snapshot: &TextBufferSnapshot,
+    selection: &Selection<Point>,
+    outdent: bool,
+) -> Option<RenderedListIndentAdjustment> {
+    let selection = clip_selection_in_text_snapshot(snapshot, selection);
+    if !selection.is_empty() {
+        return None;
+    }
+
+    let row = selection.head().row;
+    let line_start = snapshot.point_to_offset(Point::new(row, 0));
+    let line_end = line_start + snapshot.line_len(row) as usize;
+    let line = snapshot
+        .text_for_range(line_start..line_end)
+        .collect::<String>();
+    let marker_start = list_marker_start_column(&line)?;
+    let cursor_offset = snapshot.point_to_offset(selection.head());
+    if outdent {
+        let removable = line[..marker_start]
+            .as_bytes()
+            .iter()
+            .rev()
+            .take_while(|byte| **byte == b' ')
+            .take(2)
+            .count();
+        if removable == 0 {
+            return None;
+        }
+        let range = line_start + marker_start - removable..line_start + marker_start;
+        let cursor = snapshot.offset_to_point(cursor_offset.saturating_sub(removable));
+        Some(RenderedListIndentAdjustment {
+            range,
+            replacement: String::new(),
+            selection_after: collapsed_selection(cursor),
+        })
+    } else {
+        let insert_at = line_start + marker_start;
+        let cursor = snapshot.offset_to_point(cursor_offset + 2);
+        Some(RenderedListIndentAdjustment {
+            range: insert_at..insert_at,
+            replacement: "  ".to_string(),
+            selection_after: collapsed_selection(cursor),
+        })
+    }
+}
+
+fn list_marker_start_column(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut cursor = 0;
+    while cursor < bytes.len() && matches!(bytes[cursor], b' ' | b'\t') {
+        cursor += 1;
+    }
+    while bytes.get(cursor) == Some(&b'>') {
+        cursor += 1;
+        if bytes.get(cursor) == Some(&b' ') {
+            cursor += 1;
+        }
+        while cursor < bytes.len() && matches!(bytes[cursor], b' ' | b'\t') {
+            cursor += 1;
+        }
+    }
+
+    let marker_start = cursor;
+    if bytes.len() >= cursor + 2
+        && matches!(bytes[cursor], b'-' | b'*' | b'+')
+        && bytes[cursor + 1] == b' '
+    {
+        return Some(marker_start);
+    }
+
+    let digit_start = cursor;
+    while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+        cursor += 1;
+    }
+    if cursor > digit_start
+        && bytes.len() >= cursor + 2
+        && matches!(bytes[cursor], b'.' | b')')
+        && bytes[cursor + 1] == b' '
+    {
+        return Some(marker_start);
+    }
+    None
 }

@@ -96,6 +96,7 @@ pub const DEFAULT_EDITOR_KEYBINDINGS: &[KeyBindingSpec] = &[
     key_binding("enter", "InsertNewline"),
     key_binding("shift-enter", "InsertSoftBreak"),
     key_binding("tab", "Tab"),
+    key_binding("shift-tab", "ShiftTab"),
     key_binding("ctrl-b", "ToggleBold"),
     key_binding("cmd-b", "ToggleBold"),
     key_binding("ctrl-i", "ToggleItalic"),
