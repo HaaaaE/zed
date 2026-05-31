@@ -95,6 +95,7 @@ impl MarkdownEditor {
                     display_row.rendered_indent_width(),
                 ),
         };
+        self.freeze_rendered_drag_projection(&snapshot);
         let previous_selection = self.selection.clone();
         self.selection = if event.modifiers.shift {
             select_to_point_with_goal(&snapshot, &self.selection, point, goal)
@@ -197,6 +198,7 @@ impl MarkdownEditor {
         self.is_selecting_with_mouse = true;
 
         let snapshot = self.buffer.snapshot();
+        self.freeze_rendered_drag_projection(&snapshot);
         let (point, goal) =
             block_layout.mouse_target_for_x_with_indent(&snapshot, event.position.x, indent_width);
         let previous_selection = self.selection.clone();
@@ -240,6 +242,7 @@ impl MarkdownEditor {
         self.is_selecting_with_mouse = true;
 
         let snapshot = self.buffer.snapshot();
+        self.freeze_rendered_drag_projection(&snapshot);
         let (point, goal) =
             table_layout.mouse_target_for_x_with_indent(&snapshot, event.position.x, indent_width);
         let previous_selection = self.selection.clone();
@@ -275,8 +278,13 @@ impl MarkdownEditor {
         &mut self,
         _: &MouseUpEvent,
         _: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
         self.is_selecting_with_mouse = false;
+        if self.rendered_drag_projection_state.take().is_some() {
+            self.clear_display_row_cache();
+            self.clear_row_layout_cache();
+            cx.notify();
+        }
     }
 }

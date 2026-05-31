@@ -531,3 +531,6 @@ Acceptance:
 - Phase 1 严格 reveal 部分推进：非空 selection 不再触发 raw reveal；list/blockquote/list item/task marker 只有 caret 命中 marker 或 marker 边界时才 reveal，正文内部保持 rendered。
 - 更新 regression tests 覆盖 list/blockquote marker-hit reveal、非空 selection 隐藏 marker、部分选中 inline atom 保持 rendered。
 - 验证：`cargo test -p markdown_wysiwyg` 通过；`cargo test -p md_editor --lib` 通过；`cargo fmt --check` 通过。
+- Phase 2 部分完成：Rendered mouse drag 开始时冻结 projection state，render/prewarm 使用 frozen projection，mouse up 清除 frozen state 并重算 display/layout cache。
+- 更新 regression test 覆盖 frozen projection 下 selection 改变不改变当前 rendered row projection。
+- 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。

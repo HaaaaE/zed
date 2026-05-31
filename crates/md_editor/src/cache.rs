@@ -15,7 +15,6 @@ use super::{
     InlineAtomMeasurementState, MarkdownEditor, MarkdownEditorMode, RowDisplayStyle,
     RowLayoutCacheKey, RowLayoutInputCacheKey, TableLayoutCacheKey, clip_selection,
     invalidation::LocalSourceEditInvalidation, layout::DisplayRowCacheKey, ranges_overlap,
-    rendered_projection_state,
 };
 use crate::display_row_builder::{rendered_display_row, source_display_row_in_text_snapshot};
 use crate::layout::{
@@ -849,8 +848,7 @@ impl MarkdownEditor {
         let has_more_rows = !state.rows.is_empty();
         let wrap_width = state.wrap_width;
 
-        let display_row_state =
-            rendered_projection_state(&snapshot, Some(&selection), MarkdownEditorMode::Rendered);
+        let display_row_state = self.current_rendered_projection_state(&snapshot, &selection);
         for item in items {
             let Some(display_row) = self.cached_display_row(
                 &snapshot,

@@ -269,6 +269,7 @@ pub struct MarkdownEditor {
     mode: MarkdownEditorMode,
     selection: Selection<Point>,
     is_selecting_with_mouse: bool,
+    rendered_drag_projection_state: Option<RenderedProjectionState>,
     selection_history: HashMap<md_text::TransactionId, TransactionSelectionState>,
     settings: EditorSettings,
     last_text_wrap_width: Option<gpui::Pixels>,
@@ -337,6 +338,7 @@ impl MarkdownEditor {
             mode: MarkdownEditorMode::Source,
             selection: collapsed_selection(Point::zero()),
             is_selecting_with_mouse: false,
+            rendered_drag_projection_state: None,
             selection_history: HashMap::default(),
             settings: EditorSettings::default(),
             last_text_wrap_width: None,
@@ -418,6 +420,7 @@ impl MarkdownEditor {
         let row_count_before = self.display_list_state.item_count();
         self.mode = mode;
         self.selection = selection_without_goal(&self.selection);
+        self.rendered_drag_projection_state = None;
         self.clear_display_row_cache();
         self.clear_row_layout_cache();
         self.sync_display_list_state(row_count_before, &self.selection.clone());
@@ -427,6 +430,35 @@ impl MarkdownEditor {
 
     pub fn toggle_mode(&mut self, cx: &mut Context<Self>) {
         self.set_mode(self.mode.toggle(), cx);
+    }
+
+    fn current_rendered_projection_state(
+        &self,
+        snapshot: &BufferSnapshot,
+        selection: &Selection<Point>,
+    ) -> RenderedProjectionState {
+        if self.mode == MarkdownEditorMode::Rendered
+            && let Some(state) = self.rendered_drag_projection_state.as_ref()
+        {
+            return state.clone();
+        }
+
+        rendered_projection_state(snapshot, Some(selection), self.mode)
+    }
+
+    fn freeze_rendered_drag_projection(&mut self, snapshot: &BufferSnapshot) {
+        if self.mode != MarkdownEditorMode::Rendered
+            || self.rendered_drag_projection_state.is_some()
+        {
+            return;
+        }
+
+        let selection = clip_selection(snapshot, &self.selection);
+        self.rendered_drag_projection_state = Some(rendered_projection_state(
+            snapshot,
+            Some(&selection),
+            self.mode,
+        ));
     }
 
     pub fn mark_saved(&mut self, cx: &mut Context<Self>) {
@@ -905,7 +937,7 @@ mod test_support {
     ) -> String {
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
-            rendered_projection_state(&snapshot, Some(&editor.selection), editor.mode);
+            editor.current_rendered_projection_state(&snapshot, &editor.selection);
         editor
             .cached_display_row(&snapshot, row, editor.mode, &display_row_state)
             .expect("display row should exist")

@@ -542,6 +542,41 @@ fn rendered_display_rows_keep_markers_hidden_for_non_empty_selection() {
     assert_eq!(rows[1].text, "item");
 }
 
+#[gpui::test]
+fn rendered_drag_projection_state_freezes_row_projection(cx: &mut gpui::TestAppContext) {
+    let source = "Before **bold** after\n";
+    let editor = cx.new(|cx| {
+        let mut editor = MarkdownEditor::for_text(source, cx);
+        editor.set_mode(MarkdownEditorMode::Rendered, cx);
+        editor.selection = collapsed_selection(Point::new(0, 10));
+        editor
+    });
+
+    editor.update(cx, |editor, _cx| {
+        let snapshot = editor.buffer.snapshot();
+        editor.freeze_rendered_drag_projection(&snapshot);
+
+        editor.selection = Selection {
+            id: 0,
+            start: Point::new(0, 9),
+            end: Point::new(0, 13),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        assert_eq!(
+            cached_row_text_for_current_selection(editor, 0),
+            "Before **bold** after"
+        );
+
+        editor.rendered_drag_projection_state = None;
+        editor.clear_display_row_cache();
+        assert_eq!(
+            cached_row_text_for_current_selection(editor, 0),
+            "Before bold after"
+        );
+    });
+}
+
 #[test]
 fn rendered_display_rows_track_nested_blockquote_indent() {
     let source = "> quote\n> > nested\n\nbody\n";
