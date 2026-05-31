@@ -664,6 +664,67 @@ fn rendered_display_rows_track_task_list_indent() {
 }
 
 #[test]
+fn rendered_display_rows_derive_adornments_from_markdown_blocks() {
+    let source = "> - [x] done\n1) ordered\n- bullet\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+
+    let rows = display_rows_in_mode(&snapshot, 0..3, None, MarkdownEditorMode::Rendered);
+
+    assert_eq!(
+        rows[0]
+            .adornments
+            .iter()
+            .map(|adornment| &adornment.kind)
+            .collect::<Vec<_>>(),
+        vec![
+            &RenderedAdornmentKind::QuoteBar { depth: 1 },
+            &RenderedAdornmentKind::TaskCheckbox { checked: true }
+        ]
+    );
+    assert_eq!(
+        rows[0].adornments[0].placement,
+        RenderedAdornmentPlacement::BlockEdge
+    );
+    assert_eq!(
+        rows[0].adornments[1].placement,
+        RenderedAdornmentPlacement::Leading
+    );
+    assert_eq!(
+        rows[1].adornments[0].kind,
+        RenderedAdornmentKind::OrderedMarker {
+            text: "1)".to_string()
+        }
+    );
+    assert_eq!(
+        rows[2].adornments[0].kind,
+        RenderedAdornmentKind::ListBullet
+    );
+}
+
+#[test]
+fn rendered_display_rows_derive_container_presentation() {
+    let source = "> quote\n```rust\ncode\n```\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+
+    let rows = display_rows_in_mode(&snapshot, 0..4, None, MarkdownEditorMode::Rendered);
+
+    assert_eq!(
+        rows[0].presentation.container,
+        Some(RenderedContainerKind::BlockQuote { depth: 1 })
+    );
+    assert_eq!(
+        rows[1].presentation.container,
+        Some(RenderedContainerKind::CodeBlock)
+    );
+    assert_eq!(
+        rows[2].presentation.background,
+        Some(RenderedBackgroundKind::CodeBlock)
+    );
+}
+
+#[test]
 fn rendered_display_rows_keep_inline_atom_boundaries_inactive() {
     let mut buffer = Buffer::local("Before $x + y$ after\n");
     let snapshot = buffer.snapshot();

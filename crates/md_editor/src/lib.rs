@@ -833,6 +833,10 @@ mod test_support {
     pub(super) use gpui::{LineFragment, TextRun, font};
 
     pub(super) use super::*;
+    pub(super) use crate::display_model::{
+        RenderedAdornmentKind, RenderedAdornmentPlacement, RenderedBackgroundKind,
+        RenderedContainerKind,
+    };
     pub(super) use crate::layout::text_runs_on_char_boundaries;
     pub(super) use crate::render::caret_position_for_visual_row;
 

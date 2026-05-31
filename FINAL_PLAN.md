@@ -534,3 +534,6 @@ Acceptance:
 - Phase 2 部分完成：Rendered mouse drag 开始时冻结 projection state，render/prewarm 使用 frozen projection，mouse up 清除 frozen state 并重算 display/layout cache。
 - 更新 regression test 覆盖 frozen projection 下 selection 改变不改变当前 rendered row projection。
 - 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。
+- Phase 3 数据层开始：`DisplayRow` 增加 `RenderedAdornment` 和 `RenderedItemPresentation` metadata，并从 Markdown blocks 派生 quote bar、list bullet、ordered marker、task checkbox、blockquote/code container presentation。
+- 更新 regression tests 覆盖 adornment 派生和 container presentation 派生。
+- 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过。

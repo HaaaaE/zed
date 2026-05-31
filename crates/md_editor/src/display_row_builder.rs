@@ -15,7 +15,10 @@ use md_text::{BufferSnapshot as TextBufferSnapshot, Point};
 use crate::rendered_projection_state;
 use crate::{
     MarkdownEditorMode,
-    display_model::{DisplayInsertion, DisplayRow},
+    display_model::{
+        DisplayInsertion, DisplayRow, RenderedAdornment, RenderedAdornmentKind,
+        RenderedAdornmentPlacement, RenderedContainerKind, RenderedItemPresentation,
+    },
     inline_atom::INLINE_IMAGE_PLACEHOLDER,
     range_contains, ranges_overlap,
     rendered_element::{
@@ -156,6 +159,10 @@ pub(crate) fn rendered_display_row(
     );
     let heading_level = heading_level_for_display_row(&markdown_blocks, row);
     let rendered_indent_level = rendered_indent_level_for_display_row(&markdown_blocks, row);
+    let presentation =
+        rendered_item_presentation_for_display_row(&markdown_blocks, rendered_indent_level, row);
+    let adornments =
+        rendered_adornments_for_display_row(&markdown_blocks, &source_text, &source_range, row);
     DisplayRow {
         item_id,
         item_index,
@@ -168,6 +175,8 @@ pub(crate) fn rendered_display_row(
         markdown_blocks,
         heading_level,
         rendered_indent_level,
+        presentation,
+        adornments,
         inline_spans,
         rendered_element_descriptors,
         rendered_element_descriptors_have_document_path: document_path.is_some(),
@@ -209,12 +218,144 @@ pub(crate) fn source_display_row_in_text_snapshot(
         markdown_blocks: Vec::new(),
         heading_level: None,
         rendered_indent_level: 0,
+        presentation: RenderedItemPresentation::default(),
+        adornments: Vec::new(),
         inline_spans: Vec::new(),
         rendered_element_descriptors: Vec::new(),
         rendered_element_descriptors_have_document_path: false,
         projection,
         insertions: Vec::new(),
     }
+}
+
+fn rendered_item_presentation_for_display_row(
+    markdown_blocks: &[MarkdownBlock],
+    blockquote_depth: u16,
+    row: u32,
+) -> RenderedItemPresentation {
+    let has_code_block = markdown_blocks.iter().any(|block| {
+        matches!(
+            block.kind,
+            MarkdownBlockKind::FencedCodeBlock | MarkdownBlockKind::IndentedCodeBlock
+        ) && block.row_range.contains(&(row as usize))
+    });
+    if has_code_block {
+        return RenderedItemPresentation {
+            background: Some(crate::display_model::RenderedBackgroundKind::CodeBlock),
+            container: Some(RenderedContainerKind::CodeBlock),
+            ..Default::default()
+        };
+    }
+
+    if blockquote_depth > 0 {
+        return RenderedItemPresentation {
+            background: Some(crate::display_model::RenderedBackgroundKind::BlockQuote),
+            container: Some(RenderedContainerKind::BlockQuote {
+                depth: blockquote_depth,
+            }),
+            ..Default::default()
+        };
+    }
+
+    RenderedItemPresentation::default()
+}
+
+fn rendered_adornments_for_display_row(
+    markdown_blocks: &[MarkdownBlock],
+    source_text: &str,
+    source_range: &Range<usize>,
+    row: u32,
+) -> Vec<RenderedAdornment> {
+    let mut adornments = Vec::new();
+    let mut quote_depth = 0;
+    for block in markdown_blocks {
+        if !block.row_range.contains(&(row as usize)) {
+            continue;
+        }
+
+        match block.kind {
+            MarkdownBlockKind::BlockQuote => {
+                quote_depth += 1;
+                let source_range = block
+                    .marker_ranges
+                    .iter()
+                    .find(|marker_range| ranges_overlap(marker_range, source_range))
+                    .cloned();
+                adornments.push(RenderedAdornment {
+                    kind: RenderedAdornmentKind::QuoteBar { depth: quote_depth },
+                    source_range,
+                    row_range: row as usize..row as usize + 1,
+                    placement: RenderedAdornmentPlacement::BlockEdge,
+                });
+            }
+            MarkdownBlockKind::ListItem => {
+                if let Some((marker_range, marker_text)) =
+                    list_marker_for_block(block, source_text, source_range)
+                {
+                    let marker_text = marker_text.trim().to_string();
+                    let kind = if marker_text
+                        .as_bytes()
+                        .first()
+                        .is_some_and(u8::is_ascii_digit)
+                    {
+                        RenderedAdornmentKind::OrderedMarker { text: marker_text }
+                    } else {
+                        RenderedAdornmentKind::ListBullet
+                    };
+                    adornments.push(RenderedAdornment {
+                        kind,
+                        source_range: Some(marker_range),
+                        row_range: row as usize..row as usize + 1,
+                        placement: RenderedAdornmentPlacement::Leading,
+                    });
+                }
+            }
+            MarkdownBlockKind::TaskListItem { checked } => {
+                if let Some((marker_range, marker_text)) =
+                    list_marker_for_block(block, source_text, source_range)
+                {
+                    let task_marker_range = task_marker_source_range(&marker_range, &marker_text)
+                        .unwrap_or(marker_range);
+                    adornments.push(RenderedAdornment {
+                        kind: RenderedAdornmentKind::TaskCheckbox { checked },
+                        source_range: Some(task_marker_range),
+                        row_range: row as usize..row as usize + 1,
+                        placement: RenderedAdornmentPlacement::Leading,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    adornments
+}
+
+fn list_marker_for_block(
+    block: &MarkdownBlock,
+    source_text: &str,
+    source_range: &Range<usize>,
+) -> Option<(Range<usize>, String)> {
+    let marker_range = block
+        .marker_ranges
+        .iter()
+        .find(|marker_range| ranges_overlap(marker_range, source_range))?
+        .clone();
+    let local_start = marker_range.start.checked_sub(source_range.start)?;
+    let local_end = marker_range.end.checked_sub(source_range.start)?;
+    Some((
+        marker_range,
+        source_text.get(local_start..local_end)?.to_string(),
+    ))
+}
+
+fn task_marker_source_range(
+    marker_range: &Range<usize>,
+    marker_text: &str,
+) -> Option<Range<usize>> {
+    let marker_start = marker_text
+        .find("[ ]")
+        .or_else(|| marker_text.find("[x]").or_else(|| marker_text.find("[X]")))?;
+    Some(marker_range.start + marker_start..marker_range.start + marker_start + 3)
 }
 
 fn rendered_indent_level_for_display_row(markdown_blocks: &[MarkdownBlock], row: u32) -> u16 {

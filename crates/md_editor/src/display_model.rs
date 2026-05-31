@@ -20,6 +20,10 @@ pub struct DisplayRow {
     pub(crate) markdown_blocks: Vec<MarkdownBlock>,
     pub(crate) heading_level: Option<u8>,
     pub(crate) rendered_indent_level: u16,
+    #[allow(dead_code)]
+    pub(crate) presentation: RenderedItemPresentation,
+    #[allow(dead_code)]
+    pub(crate) adornments: Vec<RenderedAdornment>,
     pub(crate) inline_spans: Vec<MarkdownInlineSpan>,
     pub(crate) rendered_element_descriptors: Vec<RenderedElementDescriptor>,
     pub(crate) rendered_element_descriptors_have_document_path: bool,
@@ -75,6 +79,64 @@ impl DisplayRow {
         }
         self.projection.display_to_source(projected_offset)
     }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RenderedItemPresentation {
+    pub(crate) before_spacing: RenderedSpacing,
+    pub(crate) after_spacing: RenderedSpacing,
+    pub(crate) content_padding: RenderedPadding,
+    pub(crate) background: Option<RenderedBackgroundKind>,
+    pub(crate) container: Option<RenderedContainerKind>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RenderedSpacing {
+    pub(crate) px: u16,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct RenderedPadding {
+    pub(crate) top: u16,
+    pub(crate) right: u16,
+    pub(crate) bottom: u16,
+    pub(crate) left: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RenderedBackgroundKind {
+    CodeBlock,
+    BlockQuote,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RenderedContainerKind {
+    CodeBlock,
+    BlockQuote { depth: u16 },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RenderedAdornment {
+    pub(crate) kind: RenderedAdornmentKind,
+    pub(crate) source_range: Option<Range<usize>>,
+    pub(crate) row_range: Range<usize>,
+    pub(crate) placement: RenderedAdornmentPlacement,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RenderedAdornmentKind {
+    ListBullet,
+    OrderedMarker { text: String },
+    TaskCheckbox { checked: bool },
+    QuoteBar { depth: u16 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) enum RenderedAdornmentPlacement {
+    Leading,
+    BlockEdge,
+    Overlay,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
