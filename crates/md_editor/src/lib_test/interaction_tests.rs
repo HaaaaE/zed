@@ -3586,6 +3586,93 @@ fn tab_inserts_hard_tab_character() {
     assert!(transaction_id.is_some());
 }
 
+#[gpui::test]
+fn inline_format_actions_wrap_unwrap_and_insert_markers(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let editor = cx.new(|cx| MarkdownEditor::for_text("bold plain\n", cx));
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.selection = Selection {
+            id: 1,
+            start: Point::new(0, 0),
+            end: Point::new(0, 4),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        editor.toggle_bold(&ToggleBold, window, cx);
+        assert_eq!(editor.serialized_text(), "**bold** plain\n");
+        assert_eq!(
+            editor.selection,
+            Selection {
+                id: 1,
+                start: Point::new(0, 2),
+                end: Point::new(0, 6),
+                reversed: false,
+                goal: SelectionGoal::None,
+            }
+        );
+
+        editor.toggle_bold(&ToggleBold, window, cx);
+        assert_eq!(editor.serialized_text(), "bold plain\n");
+        assert_eq!(
+            editor.selection,
+            Selection {
+                id: 1,
+                start: Point::new(0, 0),
+                end: Point::new(0, 4),
+                reversed: false,
+                goal: SelectionGoal::None,
+            }
+        );
+
+        editor.selection = collapsed_selection(Point::new(0, 4));
+        editor.toggle_inline_code(&ToggleInlineCode, window, cx);
+        assert_eq!(editor.serialized_text(), "bold`` plain\n");
+        assert_eq!(editor.cursor(), Point::new(0, 5));
+    });
+}
+
+#[gpui::test]
+fn inline_format_actions_cover_italic_strike_link_and_undo(cx: &mut gpui::TestAppContext) {
+    let cx = cx.add_empty_window();
+    let editor = cx.new(|cx| MarkdownEditor::for_text("word link\n", cx));
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.selection = Selection {
+            id: 1,
+            start: Point::new(0, 0),
+            end: Point::new(0, 4),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        editor.toggle_italic(&ToggleItalic, window, cx);
+        assert_eq!(editor.serialized_text(), "*word* link\n");
+
+        editor.selection = Selection {
+            id: 1,
+            start: Point::new(0, 7),
+            end: Point::new(0, 11),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        editor.toggle_strikethrough(&ToggleStrikethrough, window, cx);
+        assert_eq!(editor.serialized_text(), "*word* ~~link~~\n");
+
+        editor.undo(&Undo, window, cx);
+        assert_eq!(editor.serialized_text(), "*word* link\n");
+
+        editor.selection = Selection {
+            id: 1,
+            start: Point::new(0, 7),
+            end: Point::new(0, 11),
+            reversed: false,
+            goal: SelectionGoal::None,
+        };
+        editor.insert_link(&InsertLink, window, cx);
+        assert_eq!(editor.serialized_text(), "*word* [link](https://)\n");
+    });
+}
+
 #[test]
 fn auto_indent_preserves_current_line_indent_on_newline() {
     let mut buffer = Buffer::local("    hello");

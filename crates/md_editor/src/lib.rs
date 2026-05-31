@@ -173,6 +173,13 @@ gpui::actions!(
         InsertNewline,
         InsertSoftBreak,
         Tab,
+        ToggleBold,
+        ToggleItalic,
+        ToggleInlineCode,
+        ToggleStrikethrough,
+        InsertLink,
+        EditLink,
+        ToggleSourceRevealCurrentBlock,
         Undo,
         Redo,
     ]
@@ -246,6 +253,17 @@ fn editor_keybindings() -> Vec<KeyBinding> {
                 "InsertNewline" => KeyBinding::new(spec.keystroke, InsertNewline, context),
                 "InsertSoftBreak" => KeyBinding::new(spec.keystroke, InsertSoftBreak, context),
                 "Tab" => KeyBinding::new(spec.keystroke, Tab, context),
+                "ToggleBold" => KeyBinding::new(spec.keystroke, ToggleBold, context),
+                "ToggleItalic" => KeyBinding::new(spec.keystroke, ToggleItalic, context),
+                "ToggleInlineCode" => KeyBinding::new(spec.keystroke, ToggleInlineCode, context),
+                "ToggleStrikethrough" => {
+                    KeyBinding::new(spec.keystroke, ToggleStrikethrough, context)
+                }
+                "InsertLink" => KeyBinding::new(spec.keystroke, InsertLink, context),
+                "EditLink" => KeyBinding::new(spec.keystroke, EditLink, context),
+                "ToggleSourceRevealCurrentBlock" => {
+                    KeyBinding::new(spec.keystroke, ToggleSourceRevealCurrentBlock, context)
+                }
                 "Undo" => KeyBinding::new(spec.keystroke, Undo, context),
                 "Redo" => KeyBinding::new(spec.keystroke, Redo, context),
                 _ => panic!(

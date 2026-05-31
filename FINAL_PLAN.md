@@ -539,3 +539,6 @@ Acceptance:
 - 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过。
 - Phase 3 layout/render 接入推进：`DisplayRow` 增加 `content_origin_x()` / `content_wrap_width()` helpers，text wrap、hit-test、selection/caret offset、block/table indent 统一走 content origin；render 层开始绘制 quote bar、unordered bullet、ordered marker adornments。
 - 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。
+- Phase 4 基础完成：新增 `ToggleBold`、`ToggleItalic`、`ToggleInlineCode`、`ToggleStrikethrough`、`InsertLink`、`EditLink`、`ToggleSourceRevealCurrentBlock` actions；`ctrl/cmd-b` 和 `ctrl/cmd-i` 默认绑定；bold/italic/code/strike 支持 collapsed marker insertion、selection wrap、wrapped selection unwrap；InsertLink 支持 collapsed/selection Markdown link insertion。
+- 更新 regression tests 覆盖 inline formatting wrap/unwrap/collapsed insertion、italic/strike/link 和 undo。
+- 验证：`cargo test -p md_editor --lib` 通过；`cargo test -p md_settings` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。

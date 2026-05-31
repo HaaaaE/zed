@@ -97,6 +97,52 @@ impl MarkdownEditor {
         self.replace_current_selection(&tab_text, cx);
     }
 
+    pub fn toggle_bold(&mut self, _: &ToggleBold, _: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_inline_marker_pair("**", cx);
+    }
+
+    pub fn toggle_italic(&mut self, _: &ToggleItalic, _: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_inline_marker_pair("*", cx);
+    }
+
+    pub fn toggle_inline_code(
+        &mut self,
+        _: &ToggleInlineCode,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_inline_marker_pair("`", cx);
+    }
+
+    pub fn toggle_strikethrough(
+        &mut self,
+        _: &ToggleStrikethrough,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.toggle_inline_marker_pair("~~", cx);
+    }
+
+    pub fn insert_link(&mut self, _: &InsertLink, _: &mut Window, cx: &mut Context<Self>) {
+        self.insert_markdown_link(cx);
+    }
+
+    pub fn edit_link(&mut self, _: &EditLink, _: &mut Window, cx: &mut Context<Self>) {
+        self.insert_markdown_link(cx);
+    }
+
+    pub fn toggle_source_reveal_current_block(
+        &mut self,
+        _: &ToggleSourceRevealCurrentBlock,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.selection = selection_without_goal(&self.selection);
+        self.clear_display_row_cache();
+        self.clear_row_layout_cache();
+        cx.notify();
+    }
+
     /// Update editor settings at runtime.
     pub fn set_settings(&mut self, settings: EditorSettings, _cx: &mut Context<Self>) {
         self.settings = settings;
@@ -215,6 +261,105 @@ impl MarkdownEditor {
         let changed = transaction_id.is_some();
         let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
         self.selection = selection;
+        self.record_selection_history(transaction_id, selection_before, self.selection.clone());
+        self.notify_after_edit(
+            changed,
+            row_count_before,
+            &previous_selection,
+            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+            cx,
+        );
+    }
+
+    fn toggle_inline_marker_pair(&mut self, marker: &'static str, cx: &mut Context<Self>) {
+        let (edits, after_selection) = {
+            let snapshot = self.buffer.as_text_snapshot();
+            let selection = clip_selection_in_text_snapshot(snapshot, &self.selection);
+            let range = selection_byte_range_in_text_snapshot(snapshot, &selection);
+            if selection.is_empty() {
+                let text = format!("{marker}{marker}");
+                let cursor = snapshot.offset_to_point(range.start + marker.len());
+                (
+                    vec![(range, text)],
+                    collapsed_selection_with_goal(cursor, SelectionGoal::None),
+                )
+            } else if selection_is_wrapped_by_marker(snapshot, &range, marker) {
+                let marker_len = marker.len();
+                let start_marker = range.start - marker_len..range.start;
+                let end_marker = range.end..range.end + marker_len;
+                let after_start = range.start - marker_len;
+                let after_end = range.end - marker_len;
+                (
+                    vec![(start_marker, String::new()), (end_marker, String::new())],
+                    selection_for_source_offsets(snapshot, selection.id, after_start..after_end),
+                )
+            } else {
+                let after_start = range.start + marker.len();
+                let after_end = range.end + marker.len();
+                (
+                    vec![
+                        (range.start..range.start, marker.to_string()),
+                        (range.end..range.end, marker.to_string()),
+                    ],
+                    selection_for_source_offsets(snapshot, selection.id, after_start..after_end),
+                )
+            }
+        };
+
+        self.apply_source_edits_with_selection(edits, after_selection, cx);
+    }
+
+    fn insert_markdown_link(&mut self, cx: &mut Context<Self>) {
+        const URL_PLACEHOLDER: &str = "https://";
+        let (edits, after_selection) = {
+            let snapshot = self.buffer.as_text_snapshot();
+            let selection = clip_selection_in_text_snapshot(snapshot, &self.selection);
+            let range = selection_byte_range_in_text_snapshot(snapshot, &selection);
+            if selection.is_empty() {
+                let text = format!("[]({URL_PLACEHOLDER})");
+                let cursor = snapshot.offset_to_point(range.start + 1);
+                (
+                    vec![(range, text)],
+                    collapsed_selection_with_goal(cursor, SelectionGoal::None),
+                )
+            } else {
+                let after_start = range.start + 1;
+                let after_end = range.end + 1;
+                (
+                    vec![
+                        (range.start..range.start, "[".to_string()),
+                        (range.end..range.end, format!("]({URL_PLACEHOLDER})")),
+                    ],
+                    selection_for_source_offsets(snapshot, selection.id, after_start..after_end),
+                )
+            }
+        };
+
+        self.apply_source_edits_with_selection(edits, after_selection, cx);
+    }
+
+    fn apply_source_edits_with_selection(
+        &mut self,
+        edits: Vec<(Range<usize>, String)>,
+        after_selection: Selection<Point>,
+        cx: &mut Context<Self>,
+    ) {
+        if edits.is_empty() {
+            cx.notify();
+            return;
+        }
+
+        let selection_before = self.selection.clone();
+        let previous_selection = self.selection.clone();
+        let row_count_before = self.display_list_state.item_count();
+        let buffer_len_before = self.buffer.len();
+        self.buffer.start_transaction();
+        self.buffer.edit(edits);
+        let transaction_id = self.buffer.end_transaction();
+        let changed = transaction_id.is_some();
+        let byte_delta = buffer_byte_delta(buffer_len_before, self.buffer.len());
+        self.selection =
+            clip_selection_in_text_snapshot(self.buffer.as_text_snapshot(), &after_selection);
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(
             changed,
@@ -358,5 +503,34 @@ impl MarkdownEditor {
         } else {
             cx.notify();
         }
+    }
+}
+
+fn selection_is_wrapped_by_marker(
+    snapshot: &TextBufferSnapshot,
+    range: &Range<usize>,
+    marker: &str,
+) -> bool {
+    if range.start < marker.len() || range.end + marker.len() > snapshot.len() {
+        return false;
+    }
+
+    let before = range.start - marker.len()..range.start;
+    let after = range.end..range.end + marker.len();
+    snapshot.text_for_range(before).collect::<String>() == marker
+        && snapshot.text_for_range(after).collect::<String>() == marker
+}
+
+fn selection_for_source_offsets(
+    snapshot: &TextBufferSnapshot,
+    id: usize,
+    range: Range<usize>,
+) -> Selection<Point> {
+    Selection {
+        id,
+        start: snapshot.offset_to_point(range.start),
+        end: snapshot.offset_to_point(range.end),
+        reversed: false,
+        goal: SelectionGoal::None,
     }
 }
