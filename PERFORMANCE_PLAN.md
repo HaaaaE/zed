@@ -36,7 +36,11 @@
     - 已通过 `cargo test -p md_projection`、`cargo test -p md_editor` 和 `cargo check -p updraft_editor`。
   - [ ] 待完成：Markdown syntax tree 基于 edit summary 的增量 reparse，移除 old/new 全文复制热路径。
   - [ ] 待完成：`RenderedDisplayIndex::update_after_edit` 扩展到 dirty row window、blank-run/list/table/code-fence 等结构边界编辑。
-  - [ ] 待完成：md_editor perf suite 的 rendered edit 回归场景与 important perf gate。
+  - [x] md_editor perf suite 普通 rendered edit 回归场景：
+    - 增加 `rendered_edit_equal_length`、`rendered_edit_length_change`、`rendered_enter_delete` segment。
+    - 普通 rendered 替换场景断言不触发 full rendered index build，并走一次 incremental update。
+    - `rendered_enter_delete` 已纳入计时覆盖；结构性编辑的 no-full-build gate 等 dirty row window 扩展后再收紧。
+  - [ ] 待完成：md_editor important perf gate 完整收紧 full syntax fallback、结构性 rendered index build、全量 list measurement。
 
   ## Key Changes
 

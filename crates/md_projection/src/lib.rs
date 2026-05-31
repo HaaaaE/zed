@@ -1,6 +1,4 @@
 use std::{ops::Range, sync::Arc};
-#[cfg(any(test, feature = "test-support"))]
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use markdown_wysiwyg::MarkdownBlockKind;
 use md_buffer::{BufferEditSummary, BufferSnapshot};
@@ -37,9 +35,13 @@ pub struct RenderedDisplayIndex {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-static RENDERED_DISPLAY_INDEX_FULL_BUILDS: AtomicUsize = AtomicUsize::new(0);
-#[cfg(any(test, feature = "test-support"))]
-static RENDERED_DISPLAY_INDEX_INCREMENTAL_UPDATES: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    static RENDERED_DISPLAY_INDEX_STATS: std::cell::Cell<RenderedDisplayIndexStats> =
+        const { std::cell::Cell::new(RenderedDisplayIndexStats {
+            full_builds: 0,
+            incremental_updates: 0,
+        }) };
+}
 
 #[cfg(any(test, feature = "test-support"))]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -282,7 +284,11 @@ impl<'a> RenderedTopology<'a> {
 impl RenderedDisplayIndex {
     pub fn build(snapshot: &BufferSnapshot) -> Arc<Self> {
         #[cfg(any(test, feature = "test-support"))]
-        RENDERED_DISPLAY_INDEX_FULL_BUILDS.fetch_add(1, Ordering::Relaxed);
+        RENDERED_DISPLAY_INDEX_STATS.with(|stats| {
+            let mut value = stats.get();
+            value.full_builds += 1;
+            stats.set(value);
+        });
 
         let version = snapshot.version().clone();
         let row_count = snapshot.row_count() as usize;
@@ -419,12 +425,7 @@ impl RenderedDisplayIndex {
         if !old_item.row_range.contains(&row)
             || edit_summary.old_range.start < old_item.source_range.start
             || edit_summary.old_range.end > old_item.source_range.end
-            || self
-                .blank_row_roles
-                .get(row)
-                .copied()
-                .flatten()
-                .is_some()
+            || self.blank_row_roles.get(row).copied().flatten().is_some()
         {
             return None;
         }
@@ -497,7 +498,11 @@ impl RenderedDisplayIndex {
         fill_blank_row_mappings(&mut row_to_item, &blank_row_roles);
 
         #[cfg(any(test, feature = "test-support"))]
-        RENDERED_DISPLAY_INDEX_INCREMENTAL_UPDATES.fetch_add(1, Ordering::Relaxed);
+        RENDERED_DISPLAY_INDEX_STATS.with(|stats| {
+            let mut value = stats.get();
+            value.incremental_updates += 1;
+            stats.set(value);
+        });
 
         Some(Arc::new(Self {
             version: snapshot.version().clone(),
@@ -509,16 +514,12 @@ impl RenderedDisplayIndex {
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn reset_stats_for_tests() {
-        RENDERED_DISPLAY_INDEX_FULL_BUILDS.store(0, Ordering::Relaxed);
-        RENDERED_DISPLAY_INDEX_INCREMENTAL_UPDATES.store(0, Ordering::Relaxed);
+        RENDERED_DISPLAY_INDEX_STATS.with(|stats| stats.set(RenderedDisplayIndexStats::default()));
     }
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn stats_for_tests() -> RenderedDisplayIndexStats {
-        RenderedDisplayIndexStats {
-            full_builds: RENDERED_DISPLAY_INDEX_FULL_BUILDS.load(Ordering::Relaxed),
-            incremental_updates: RENDERED_DISPLAY_INDEX_INCREMENTAL_UPDATES.load(Ordering::Relaxed),
-        }
+        RENDERED_DISPLAY_INDEX_STATS.with(std::cell::Cell::get)
     }
 
     pub fn version(&self) -> &md_text::Global {
@@ -1232,7 +1233,11 @@ mod tests {
             .expect("edit should produce summary");
         let new_snapshot = buffer.snapshot();
 
-        assert!(old_index.update_after_edit(&new_snapshot, &summary).is_none());
+        assert!(
+            old_index
+                .update_after_edit(&new_snapshot, &summary)
+                .is_none()
+        );
     }
 
     #[test]

@@ -2745,8 +2745,7 @@ fn source_single_row_edit_rekeys_display_row_cache_before_edited_row(
         let previous_selection = collapsed_selection(Point::new(1, 1));
         editor.selection = previous_selection.clone();
         let row_count_before = editor.display_list_state.item_count();
-        let (selection, summary) =
-            replace_selection(&mut editor.buffer, &editor.selection, "XX");
+        let (selection, summary) = replace_selection(&mut editor.buffer, &editor.selection, "XX");
         let summary = summary.expect("edit should produce summary");
         editor.selection = selection;
 
@@ -2812,8 +2811,7 @@ fn source_length_preserving_single_row_edit_keeps_later_display_rows(
         };
         editor.selection = previous_selection.clone();
         let row_count_before = editor.display_list_state.item_count();
-        let (selection, summary) =
-            replace_selection(&mut editor.buffer, &editor.selection, "X");
+        let (selection, summary) = replace_selection(&mut editor.buffer, &editor.selection, "X");
         let summary = summary.expect("edit should produce summary");
         editor.selection = selection;
 
@@ -2880,8 +2878,7 @@ fn rendered_length_preserving_single_item_edit_keeps_other_display_rows(
 
         RenderedDisplayIndex::reset_stats_for_tests();
         let row_count_before = editor.display_list_state.item_count();
-        let (selection, summary) =
-            replace_selection(&mut editor.buffer, &editor.selection, "X");
+        let (selection, summary) = replace_selection(&mut editor.buffer, &editor.selection, "X");
         let summary = summary.expect("edit should produce summary");
         editor.selection = selection;
 
@@ -2949,8 +2946,7 @@ fn source_undo_redo_single_row_edit_keeps_later_display_rows(cx: &mut gpui::Test
         };
         editor.selection = previous_selection.clone();
         let row_count_before = editor.display_list_state.item_count();
-        let (selection, summary) =
-            replace_selection(&mut editor.buffer, &editor.selection, "X");
+        let (selection, summary) = replace_selection(&mut editor.buffer, &editor.selection, "X");
         let summary = summary.expect("edit should produce summary");
         let transaction_id = summary.transaction_id;
         editor.selection = selection;

@@ -407,12 +407,10 @@ impl Buffer {
             .map(|entry| entry.transaction_id());
         let summary = summarize_patch(&old_snapshot, self.text.snapshot(), patch, transaction_id);
         self.pending_incremental_reparse =
-            incremental_reparse_syntax_tree.map(|syntax_tree| {
-                PendingIncrementalReparse {
-                    old_range: summary.old_range.clone(),
-                    new_range: summary.new_range.clone(),
-                    syntax_tree,
-                }
+            incremental_reparse_syntax_tree.map(|syntax_tree| PendingIncrementalReparse {
+                old_range: summary.old_range.clone(),
+                new_range: summary.new_range.clone(),
+                syntax_tree,
             });
         Some((timestamp, summary))
     }
@@ -531,7 +529,9 @@ fn range_len_isize(range: &Range<usize>) -> isize {
 }
 
 fn affected_rows_for_range(snapshot: &TextBufferSnapshot, range: Range<usize>) -> Range<usize> {
-    let start = snapshot.offset_to_point(range.start.min(snapshot.len())).row as usize;
+    let start = snapshot
+        .offset_to_point(range.start.min(snapshot.len()))
+        .row as usize;
     let end_offset = if range.is_empty() {
         range.end
     } else {
@@ -756,10 +756,18 @@ mod tests {
     fn edit_summary_reports_byte_and_row_impact() {
         let mut buffer = Buffer::local("one\ntwo\nthree");
 
-        let summary = buffer.edit([(5..6, "XX")]).expect("edit should produce a summary");
+        let summary = buffer
+            .edit([(5..6, "XX")])
+            .expect("edit should produce a summary");
 
         assert_eq!(buffer.text(), "one\ntXXo\nthree");
-        assert_eq!(summary.edits, vec![Edit { old: 5..6, new: 5..7 }]);
+        assert_eq!(
+            summary.edits,
+            vec![Edit {
+                old: 5..6,
+                new: 5..7
+            }]
+        );
         assert_eq!(summary.old_range, 5..6);
         assert_eq!(summary.new_range, 5..7);
         assert_eq!(summary.byte_delta, 1);
@@ -783,7 +791,9 @@ mod tests {
     #[test]
     fn undo_and_redo_summary_reports_inverse_impact() {
         let mut buffer = Buffer::local("one\ntwo\nthree");
-        let edit_summary = buffer.edit([(5..6, "XX")]).expect("edit should produce a summary");
+        let edit_summary = buffer
+            .edit([(5..6, "XX")])
+            .expect("edit should produce a summary");
 
         let undo_summary = buffer.undo().expect("undo should produce a summary");
 

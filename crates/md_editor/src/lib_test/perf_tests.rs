@@ -1,5 +1,6 @@
 use super::test_support::*;
 use gpui::{px, size};
+use md_projection::{RenderedDisplayIndex, RenderedDisplayIndexStats};
 use std::time::{Duration, Instant};
 use util_macros::perf;
 
@@ -128,8 +129,6 @@ fn replace_middle_row_word(
     to: &str,
 ) {
     editor.update(cx, |editor, cx| {
-        assert_eq!(editor.mode(), MarkdownEditorMode::Source);
-
         let row_text = editor.row_text(target_row);
         let column = row_text
             .find(from)
@@ -167,6 +166,40 @@ fn replace_middle_row_word(
             cx,
         );
 
+        assert!(!editor.serialized_text().is_empty());
+    });
+}
+
+fn replace_middle_row_word_in_rendered_without_full_index_build(
+    editor: &gpui::Entity<MarkdownEditor>,
+    cx: &mut gpui::VisualTestContext,
+    target_row: u32,
+    from: &str,
+    to: &str,
+) {
+    editor.update(cx, |editor, _| {
+        assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
+        let snapshot = editor.buffer.snapshot();
+        let _ = editor.rendered_display_index(&snapshot);
+    });
+
+    RenderedDisplayIndex::reset_stats_for_tests();
+    replace_middle_row_word(editor, cx, target_row, from, to);
+    assert_eq!(
+        RenderedDisplayIndex::stats_for_tests(),
+        RenderedDisplayIndexStats {
+            full_builds: 0,
+            incremental_updates: 1,
+        }
+    );
+}
+
+fn rendered_enter_delete(editor: &gpui::Entity<MarkdownEditor>, cx: &mut gpui::VisualTestContext) {
+    editor.update_in(cx, |editor, window, cx| {
+        assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
+
+        editor.insert_newline(&InsertNewline, window, cx);
+        editor.delete(&Delete, window, cx);
         assert!(!editor.serialized_text().is_empty());
     });
 }
@@ -338,6 +371,26 @@ fn run_editor_session(target_bytes: usize) {
         record_segment(&mut segments, "rendered_first_draw", || {
             clear_editor_layout_caches(&editor, cx);
             reset_layout_computation_counts(&editor, cx);
+            warm_draw(&editor, cx);
+        });
+        record_segment(&mut segments, "rendered_edit_equal_length", || {
+            replace_middle_row_word_in_rendered_without_full_index_build(
+                &editor, cx, target_row, "row", "raw",
+            );
+            warm_draw(&editor, cx);
+        });
+        record_segment(&mut segments, "rendered_edit_length_change", || {
+            replace_middle_row_word_in_rendered_without_full_index_build(
+                &editor,
+                cx,
+                target_row,
+                "raw",
+                "source-row",
+            );
+            warm_draw(&editor, cx);
+        });
+        record_segment(&mut segments, "rendered_enter_delete", || {
+            rendered_enter_delete(&editor, cx);
             warm_draw(&editor, cx);
         });
 

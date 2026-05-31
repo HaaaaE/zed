@@ -398,7 +398,9 @@ fn newline_run_position_at_cursor(
     let text_snapshot = snapshot.as_text_snapshot();
     let cursor = text_snapshot.clip_point(cursor, md_text::Bias::Left);
     let run = if source_row_is_blank(snapshot, cursor.row as usize) {
-        context.topology.newline_run_containing_row(cursor.row as usize)
+        context
+            .topology
+            .newline_run_containing_row(cursor.row as usize)
     } else {
         context.topology.newline_run_after_line_end(cursor)
     }?;
@@ -419,7 +421,9 @@ fn newline_run_position_for_delete(
     let text_snapshot = snapshot.as_text_snapshot();
     let cursor = text_snapshot.clip_point(cursor, md_text::Bias::Left);
     let run = if source_row_is_blank(snapshot, cursor.row as usize) {
-        context.topology.newline_run_containing_row(cursor.row as usize)
+        context
+            .topology
+            .newline_run_containing_row(cursor.row as usize)
     } else {
         match direction {
             HorizontalDirection::Left => context.topology.newline_run_before_line_start(cursor),
