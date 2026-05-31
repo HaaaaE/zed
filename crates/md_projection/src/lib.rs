@@ -41,6 +41,27 @@ pub enum BlankRowRole {
     IgnoredExtra,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenderedNewlineRun {
+    pub source_range: Range<usize>,
+    pub left_point: Point,
+    pub right_point: Point,
+    pub newline_count: usize,
+    pub left_item: Option<usize>,
+    pub right_item: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RenderedNewlineRunKind {
+    SoftBreak,
+    ParagraphBoundary,
+    BoundaryWithSoftBreakSlot,
+    EmptyParagraphs {
+        count: usize,
+        has_soft_break_slot: bool,
+    },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RenderedCaretAffinity {
     Before,
@@ -94,6 +115,75 @@ impl<'a> RenderedTopology<'a> {
         }
     }
 
+    pub fn newline_run_after_line_end(&self, point: Point) -> Option<RenderedNewlineRun> {
+        let text_snapshot = self.snapshot.as_text_snapshot();
+        let point = text_snapshot.clip_point(point, md_text::Bias::Left);
+        if point.column != text_snapshot.line_len(point.row) {
+            return None;
+        }
+
+        let row = point.row as usize;
+        let row_count = text_snapshot.row_count() as usize;
+        if row.saturating_add(1) >= row_count {
+            return None;
+        }
+
+        let right_row = if source_row_is_blank_in_text_snapshot(text_snapshot, row + 1) {
+            next_nonblank_row_after_blank_run(text_snapshot, row + 1)
+        } else {
+            row + 1
+        };
+        self.newline_run_between_rows(row, right_row)
+    }
+
+    pub fn newline_run_before_line_start(&self, point: Point) -> Option<RenderedNewlineRun> {
+        let text_snapshot = self.snapshot.as_text_snapshot();
+        let point = text_snapshot.clip_point(point, md_text::Bias::Left);
+        if point.column != 0 || point.row == 0 {
+            return None;
+        }
+
+        let row = point.row as usize;
+        let left_row = if source_row_is_blank_in_text_snapshot(text_snapshot, row - 1) {
+            previous_nonblank_row_before_blank_run(text_snapshot, row - 1)?
+        } else {
+            row - 1
+        };
+        self.newline_run_between_rows(left_row, row)
+    }
+
+    pub fn newline_run_containing_row(&self, row: usize) -> Option<RenderedNewlineRun> {
+        let text_snapshot = self.snapshot.as_text_snapshot();
+        let row_count = text_snapshot.row_count() as usize;
+        if row >= row_count {
+            return None;
+        }
+
+        if !source_row_is_blank_in_text_snapshot(text_snapshot, row) {
+            let line_end = Point::new(row as u32, text_snapshot.line_len(row as u32));
+            return self
+                .newline_run_after_line_end(line_end)
+                .or_else(|| self.newline_run_before_line_start(Point::new(row as u32, 0)));
+        }
+
+        let left_row = previous_nonblank_row_before_blank_run(text_snapshot, row)?;
+        let right_row = next_nonblank_row_after_blank_run(text_snapshot, row);
+        self.newline_run_between_rows(left_row, right_row)
+    }
+
+    pub fn classify_newline_run(&self, run: &RenderedNewlineRun) -> RenderedNewlineRunKind {
+        match run.newline_count {
+            0 => RenderedNewlineRunKind::SoftBreak,
+            1 => RenderedNewlineRunKind::SoftBreak,
+            2 => RenderedNewlineRunKind::ParagraphBoundary,
+            3 => RenderedNewlineRunKind::BoundaryWithSoftBreakSlot,
+            newline_count => RenderedNewlineRunKind::EmptyParagraphs {
+                count: (newline_count - 2) / 2,
+                has_soft_break_slot: newline_count % 2 == 1,
+            },
+        }
+    }
+
     pub fn item_display_source_range(
         &self,
         item: &RenderedDisplayItem,
@@ -143,6 +233,35 @@ impl<'a> RenderedTopology<'a> {
             source_range,
             source_row_range,
         }
+    }
+
+    fn newline_run_between_rows(
+        &self,
+        left_row: usize,
+        right_row: usize,
+    ) -> Option<RenderedNewlineRun> {
+        if left_row >= right_row {
+            return None;
+        }
+
+        let text_snapshot = self.snapshot.as_text_snapshot();
+        let row_count = text_snapshot.row_count() as usize;
+        if left_row >= row_count || right_row >= row_count {
+            return None;
+        }
+
+        let left_point = Point::new(left_row as u32, text_snapshot.line_len(left_row as u32));
+        let right_point = Point::new(right_row as u32, 0);
+        let source_range =
+            text_snapshot.point_to_offset(left_point)..text_snapshot.point_to_offset(right_point);
+        Some(RenderedNewlineRun {
+            source_range,
+            left_point,
+            right_point,
+            newline_count: right_row - left_row,
+            left_item: self.index.item_index_for_source_row(left_row),
+            right_item: self.index.item_index_for_source_row(right_row),
+        })
     }
 }
 
@@ -322,6 +441,28 @@ fn source_row_is_blank_in_text_snapshot(snapshot: &TextBufferSnapshot, row: usiz
     snapshot
         .text_for_range(row_source_range_in_text_snapshot(snapshot, row as u32))
         .all(|chunk| chunk.trim().is_empty())
+}
+
+fn previous_nonblank_row_before_blank_run(
+    snapshot: &TextBufferSnapshot,
+    blank_row: usize,
+) -> Option<usize> {
+    let mut row = blank_row;
+    loop {
+        if !source_row_is_blank_in_text_snapshot(snapshot, row) {
+            return Some(row);
+        }
+        row = row.checked_sub(1)?;
+    }
+}
+
+fn next_nonblank_row_after_blank_run(snapshot: &TextBufferSnapshot, blank_row: usize) -> usize {
+    let row_count = snapshot.row_count() as usize;
+    let mut row = blank_row;
+    while row + 1 < row_count && source_row_is_blank_in_text_snapshot(snapshot, row) {
+        row += 1;
+    }
+    row
 }
 
 fn is_line_break_char(ch: char) -> bool {
@@ -710,6 +851,93 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn classifies_source_backed_newline_runs() {
+        let cases = [
+            ("1\n2", 1, RenderedNewlineRunKind::SoftBreak),
+            ("1\n\n2", 2, RenderedNewlineRunKind::ParagraphBoundary),
+            (
+                "1\n\n\n2",
+                3,
+                RenderedNewlineRunKind::BoundaryWithSoftBreakSlot,
+            ),
+            (
+                "1\n\n\n\n2",
+                4,
+                RenderedNewlineRunKind::EmptyParagraphs {
+                    count: 1,
+                    has_soft_break_slot: false,
+                },
+            ),
+            (
+                "1\n\n\n\n\n2",
+                5,
+                RenderedNewlineRunKind::EmptyParagraphs {
+                    count: 1,
+                    has_soft_break_slot: true,
+                },
+            ),
+            (
+                "1\n\n\n\n\n\n2",
+                6,
+                RenderedNewlineRunKind::EmptyParagraphs {
+                    count: 2,
+                    has_soft_break_slot: false,
+                },
+            ),
+        ];
+
+        for (source, expected_newline_count, expected_kind) in cases {
+            let mut buffer = Buffer::local(source);
+            let snapshot = buffer.snapshot();
+            let index = RenderedDisplayIndex::build(&snapshot);
+            let topology = RenderedTopology::new(&snapshot, index);
+            let run = topology
+                .newline_run_after_line_end(Point::new(0, 1))
+                .expect("expected newline run");
+
+            assert_eq!(run.newline_count, expected_newline_count, "{source:?}");
+            assert_eq!(
+                topology.classify_newline_run(&run),
+                expected_kind,
+                "{source:?}"
+            );
+            assert_eq!(
+                topology.newline_run_before_line_start(run.right_point),
+                Some(run.clone()),
+                "{source:?}"
+            );
+            assert_eq!(
+                topology.newline_run_containing_row(1),
+                Some(run),
+                "{source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn newline_run_ranges_are_byte_safe() {
+        let mut buffer = Buffer::local("甲🙂\n\n乙🚀");
+        let snapshot = buffer.snapshot();
+        let index = RenderedDisplayIndex::build(&snapshot);
+        let topology = RenderedTopology::new(&snapshot, index);
+        let left_column = "甲🙂".len() as u32;
+        let run = topology
+            .newline_run_after_line_end(Point::new(0, left_column))
+            .expect("expected newline run");
+
+        assert_eq!(run.left_point, Point::new(0, left_column));
+        assert_eq!(run.right_point, Point::new(2, 0));
+        assert_eq!(run.newline_count, 2);
+        assert_eq!(
+            snapshot
+                .as_text_snapshot()
+                .text_for_range(run.source_range)
+                .collect::<String>(),
+            "\n\n"
+        );
     }
 
     #[test]

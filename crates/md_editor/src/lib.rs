@@ -40,6 +40,7 @@ mod layout;
 mod markdown_image;
 mod movement;
 mod render;
+mod rendered_edit;
 mod rendered_element;
 mod selection;
 mod table;
