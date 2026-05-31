@@ -220,11 +220,7 @@ pub(super) fn active_source_range_for_selection(
 ) -> Option<Range<usize>> {
     let selection = clip_selection(snapshot, selection);
     if !selection.is_empty() {
-        let selection_range = selection_byte_range(snapshot, &selection);
-        if selection_range_is_whole_rendered_element(snapshot, &selection_range) {
-            return None;
-        }
-        return Some(selection_range);
+        return None;
     }
 
     let text_snapshot = snapshot.as_text_snapshot();
@@ -247,19 +243,6 @@ pub(super) fn active_source_range_for_selection(
             .floor_char_boundary(offset.saturating_sub(1));
         Some(start..offset)
     }
-}
-
-fn selection_range_is_whole_rendered_element(
-    snapshot: &BufferSnapshot,
-    selection_range: &Range<usize>,
-) -> bool {
-    snapshot
-        .syntax_tree()
-        .inline_spans_in_source_range(selection_range.clone())
-        .any(|span| {
-            rendered_element_descriptor_for_span(snapshot, span)
-                .is_some_and(|descriptor| &descriptor.source_range == selection_range)
-        })
 }
 
 pub(super) fn inactive_rendered_element_source_ranges_for_selection(

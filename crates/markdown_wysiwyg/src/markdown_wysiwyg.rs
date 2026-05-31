@@ -498,7 +498,14 @@ impl MarkdownSyntaxTree {
                     inactive_source_ranges,
                 )
             };
-            if block_is_active {
+            let block_markers_are_active = if block_markers_require_marker_hit(block.kind) {
+                block.marker_ranges.iter().any(|marker_range| {
+                    marker_range_is_hit(marker_range, active_source_range, inactive_source_ranges)
+                })
+            } else {
+                block_is_active
+            };
+            if block_markers_are_active {
                 continue;
             }
 
@@ -768,6 +775,26 @@ fn source_range_is_active(
         .any(|inactive_source_range| range_contains(inactive_source_range, source_range))
 }
 
+fn marker_range_is_hit(
+    marker_range: &Range<usize>,
+    active_source_range: Option<&Range<usize>>,
+    inactive_source_ranges: &[Range<usize>],
+) -> bool {
+    let Some(active_source_range) = active_source_range else {
+        return false;
+    };
+    let overlaps_or_touches = ranges_overlap(marker_range, active_source_range)
+        || active_source_range.start == marker_range.end
+        || active_source_range.end == marker_range.start;
+    if !overlaps_or_touches {
+        return false;
+    }
+
+    !inactive_source_ranges
+        .iter()
+        .any(|inactive_source_range| range_contains(inactive_source_range, marker_range))
+}
+
 fn table_row_source_range_is_active(
     table_source_range: &Range<usize>,
     row_source_range: &Range<usize>,
@@ -786,6 +813,17 @@ fn table_row_source_range_is_active(
     !inactive_source_ranges
         .iter()
         .any(|inactive_source_range| range_contains(inactive_source_range, row_source_range))
+}
+
+fn block_markers_require_marker_hit(kind: MarkdownBlockKind) -> bool {
+    matches!(
+        kind,
+        MarkdownBlockKind::BlockQuote
+            | MarkdownBlockKind::OrderedList
+            | MarkdownBlockKind::UnorderedList
+            | MarkdownBlockKind::ListItem
+            | MarkdownBlockKind::TaskListItem { .. }
+    )
 }
 
 #[cfg(test)]
@@ -1275,13 +1313,35 @@ mod tests {
             "quote\n☐ todo\nnested\nordered\n"
         );
 
-        let active_quote = source.find("quote").expect("expected quote text");
+        let active_quote = source.find("> ").expect("expected quote marker");
         let projection =
             tree.projection_for_visible_rows(0..4, Some(active_quote..active_quote + 1));
 
         assert_eq!(
             projection.project_source_text(source),
             "> quote\n☐ todo\nnested\nordered\n"
+        );
+
+        let active_quote_content = source.find("quote").expect("expected quote text");
+        let projection = tree.projection_for_visible_rows(
+            0..4,
+            Some(active_quote_content + 1..active_quote_content + 2),
+        );
+
+        assert_eq!(
+            projection.project_source_text(source),
+            "quote\n☐ todo\nnested\nordered\n"
+        );
+
+        let active_list_content = source.find("todo").expect("expected list text");
+        let projection = tree.projection_for_visible_rows(
+            0..4,
+            Some(active_list_content + 1..active_list_content + 2),
+        );
+
+        assert_eq!(
+            projection.project_source_text(source),
+            "quote\n☐ todo\nnested\nordered\n"
         );
     }
 

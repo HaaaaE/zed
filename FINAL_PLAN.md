@@ -522,3 +522,12 @@ Acceptance:
 11. 全量测试和 validation。
 
 每一步都应保持 Source mode 不变，并优先补 targeted regression tests。
+
+## Progress Log
+
+### 2026-05-31
+
+- Phase 1 部分完成：`markdown_editor` shell 新建/打开默认进入 Rendered mode。
+- Phase 1 严格 reveal 部分推进：非空 selection 不再触发 raw reveal；list/blockquote/list item/task marker 只有 caret 命中 marker 或 marker 边界时才 reveal，正文内部保持 rendered。
+- 更新 regression tests 覆盖 list/blockquote marker-hit reveal、非空 selection 隐藏 marker、部分选中 inline atom 保持 rendered。
+- 验证：`cargo test -p markdown_wysiwyg` 通过；`cargo test -p md_editor --lib` 通过；`cargo fmt --check` 通过。

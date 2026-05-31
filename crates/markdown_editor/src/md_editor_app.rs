@@ -24,7 +24,7 @@ struct MarkdownEditorShell {
 
 impl MarkdownEditorShell {
     fn new(path: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mode = MarkdownEditorMode::Source;
+        let mode = MarkdownEditorMode::Rendered;
         let (path, contents, error_message) = match path {
             Some(path) => read_markdown_file(&path)
                 .map(|contents| (Some(path), contents, None))

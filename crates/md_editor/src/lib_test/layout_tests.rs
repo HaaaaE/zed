@@ -480,15 +480,27 @@ fn rendered_display_rows_hide_inactive_blockquote_and_list_markers() {
 }
 
 #[test]
-fn rendered_display_rows_reveal_active_blockquote_and_list_markers() {
+fn rendered_display_rows_reveal_only_hit_blockquote_and_list_markers() {
     let source = "> quote\n- item\n\nbody\n";
     let mut buffer = Buffer::local(source);
     let snapshot = buffer.snapshot();
 
-    let quote_rows = display_rows_in_mode(
+    let quote_content_rows = display_rows_in_mode(
         &snapshot,
         0..2,
         Some(&collapsed_selection(Point::new(0, 3))),
+        MarkdownEditorMode::Rendered,
+    );
+    let quote_marker_rows = display_rows_in_mode(
+        &snapshot,
+        0..2,
+        Some(&collapsed_selection(Point::new(0, 1))),
+        MarkdownEditorMode::Rendered,
+    );
+    let list_content_rows = display_rows_in_mode(
+        &snapshot,
+        0..2,
+        Some(&collapsed_selection(Point::new(1, 3))),
         MarkdownEditorMode::Rendered,
     );
     let list_rows = display_rows_in_mode(
@@ -498,10 +510,36 @@ fn rendered_display_rows_reveal_active_blockquote_and_list_markers() {
         MarkdownEditorMode::Rendered,
     );
 
-    assert_eq!(quote_rows[0].text, "> quote");
-    assert_eq!(quote_rows[1].text, "item");
+    assert_eq!(quote_content_rows[0].text, "quote");
+    assert_eq!(quote_content_rows[1].text, "item");
+    assert_eq!(quote_marker_rows[0].text, "> quote");
+    assert_eq!(quote_marker_rows[1].text, "item");
+    assert_eq!(list_content_rows[0].text, "quote");
+    assert_eq!(list_content_rows[1].text, "item");
     assert_eq!(list_rows[0].text, "quote");
     assert_eq!(list_rows[1].text, "- item");
+}
+
+#[test]
+fn rendered_display_rows_keep_markers_hidden_for_non_empty_selection() {
+    let source = "**bold**\n- item\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+    let rows = display_rows_in_mode(
+        &snapshot,
+        0..2,
+        Some(&Selection {
+            id: 0,
+            start: Point::new(0, 2),
+            end: Point::new(0, 6),
+            reversed: false,
+            goal: SelectionGoal::None,
+        }),
+        MarkdownEditorMode::Rendered,
+    );
+
+    assert_eq!(rows[0].text, "bold");
+    assert_eq!(rows[1].text, "item");
 }
 
 #[test]
@@ -700,7 +738,7 @@ fn rendered_display_rows_keep_contained_inline_atom_inactive_when_selected() {
 }
 
 #[test]
-fn rendered_display_rows_reveal_partially_selected_inline_atom() {
+fn rendered_display_rows_keep_partially_selected_inline_atom_rendered() {
     let mut buffer = Buffer::local("Before $x + y$ after\n");
     let snapshot = buffer.snapshot();
     let content_start = "Before $".len();
@@ -719,7 +757,7 @@ fn rendered_display_rows_reveal_partially_selected_inline_atom() {
         MarkdownEditorMode::Rendered,
     );
 
-    assert_eq!(rows[0].text, "Before $x + y$ after");
+    assert_eq!(rows[0].text, "Before x + y after");
 }
 
 #[test]
