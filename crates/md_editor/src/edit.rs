@@ -341,11 +341,57 @@ pub(crate) fn insert_soft_break_in_mode(
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
 ) -> (Selection<Point>, Option<md_text::TransactionId>) {
+    let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Source {
-        return insert_newline_in_mode(buffer, selection, mode);
+        return insert_newline_in_mode(buffer, &selection, mode);
     }
 
-    replace_selection(buffer, selection, "\n")
+    if selection.is_empty() {
+        let snapshot = buffer.snapshot();
+        if let Some(cursor) = rendered_existing_soft_break_at_cursor(&snapshot, selection.head()) {
+            return (collapsed_selection(cursor), None);
+        }
+    }
+
+    replace_selection(buffer, &selection, "\n")
+}
+
+fn rendered_existing_soft_break_at_cursor(
+    snapshot: &BufferSnapshot,
+    cursor: Point,
+) -> Option<Point> {
+    let text_snapshot = snapshot.as_text_snapshot();
+    let cursor = text_snapshot.clip_point(cursor, md_text::Bias::Left);
+    let cursor_row = cursor.row as usize;
+    let row_count = text_snapshot.row_count() as usize;
+    if cursor_row >= row_count
+        || cursor.column != text_snapshot.line_len(cursor.row)
+        || source_row_is_blank(snapshot, cursor_row)
+    {
+        return None;
+    }
+
+    let index = RenderedDisplayIndex::build(snapshot);
+    let item = index
+        .item_index_for_source_row(cursor_row)
+        .and_then(|item_index| index.item(item_index))?;
+    if !matches!(
+        item.kind,
+        RenderedDisplayItemKind::Paragraph | RenderedDisplayItemKind::Heading
+    ) {
+        return None;
+    }
+
+    let blank_run_start = cursor_row.saturating_add(1);
+    if blank_run_start >= row_count || !source_row_is_blank(snapshot, blank_run_start) {
+        return None;
+    }
+
+    let mut blank_run_end = blank_run_start;
+    while blank_run_end < row_count && source_row_is_blank(snapshot, blank_run_end) {
+        blank_run_end += 1;
+    }
+    (blank_run_end - blank_run_start > 1).then_some(Point::new(blank_run_start as u32, 0))
 }
 
 pub(crate) fn backspace_selection_in_mode(

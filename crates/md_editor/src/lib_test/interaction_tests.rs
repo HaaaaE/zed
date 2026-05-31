@@ -3191,6 +3191,19 @@ fn rendered_shift_enter_inserts_soft_break() {
 }
 
 #[test]
+fn rendered_shift_enter_at_noncanonical_boundary_uses_existing_blank_row() {
+    let mut buffer = Buffer::local("1\n\n\n2");
+    let selection = collapsed_selection(Point::new(0, 1));
+
+    let (selection, transaction_id) =
+        insert_soft_break_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "1\n\n\n2");
+    assert_eq!(selection, collapsed_selection(Point::new(1, 0)));
+    assert!(transaction_id.is_none());
+}
+
+#[test]
 fn rendered_enter_in_empty_paragraph_creates_next_empty_paragraph() {
     let mut buffer = Buffer::local("a\n\n\n\nb\n");
     let selection = collapsed_selection(Point::new(2, 0));
