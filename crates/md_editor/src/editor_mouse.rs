@@ -92,7 +92,7 @@ impl MarkdownEditor {
                 .mouse_target_for_x_with_indent(
                     &snapshot,
                     event.position.x,
-                    display_row.rendered_indent_width(),
+                    display_row.content_origin_x(),
                 ),
         };
         self.freeze_rendered_drag_projection(&snapshot);
@@ -178,7 +178,7 @@ impl MarkdownEditor {
                 .mouse_target_for_x_with_indent(
                     &snapshot,
                     event.position.x,
-                    display_row.rendered_indent_width(),
+                    display_row.content_origin_x(),
                 ),
         };
         let previous_selection = self.selection.clone();

@@ -7,8 +7,9 @@ use md_theme::editor_palette;
 
 use super::{
     DisplayInlineFragment, MarkdownEditor, RowDisplayStyle, TextBufferSnapshot,
-    clip_cursor_in_text_snapshot, display_model::DisplayRow, render_text_piece,
-    selected_range_for_row_in_text_snapshot,
+    clip_cursor_in_text_snapshot,
+    display_model::{DisplayRow, RenderedAdornmentKind, RenderedAdornmentPlacement},
+    render_text_piece, selected_range_for_row_in_text_snapshot,
 };
 use super::{
     layout::{DisplayRowLayout, DisplayRowTextLayout, VisualDisplayRow, segment_text},
@@ -68,11 +69,11 @@ pub(super) fn render_display_row_layout(
             snapshot,
             selection,
             row_style,
-            display_row.rendered_indent_width(),
+            display_row.content_origin_x(),
             cx,
         ),
         DisplayRowLayout::TableRow(table_layout) => {
-            table_layout.render(row_style, display_row.rendered_indent_width(), cx)
+            table_layout.render(row_style, display_row.content_origin_x(), cx)
         }
     }
 }
@@ -140,7 +141,7 @@ fn render_visual_text_row(
     row_style: RowDisplayStyle,
     cx: &mut Context<MarkdownEditor>,
 ) -> gpui::AnyElement {
-    let indent_width = display_row.rendered_indent_width();
+    let content_origin_x = display_row.content_origin_x();
     let mouse_down_row = display_row.clone();
     let mouse_down_visual_row_index = visual_row_index;
     let mouse_down_visual_row = visual_row.clone();
@@ -184,9 +185,16 @@ fn render_visual_text_row(
             text_layout,
             selected_range,
             &visual_row,
-            indent_width,
+            content_origin_x,
         ))
-        .child(div().flex_none().w(indent_width).h_full())
+        .children(render_adornments_for_visual_row(
+            display_row,
+            visual_row_index,
+            &visual_row,
+            content_origin_x,
+            row_style,
+        ))
+        .child(div().flex_none().w(content_origin_x).h_full())
         .children(render_fragments_for_visual_row(
             &display_row.text,
             &text_layout.fragments,
@@ -203,7 +211,7 @@ fn render_visual_text_row(
                 visual_row_index,
                 &visual_row,
             ),
-            |this, caret_x| this.child(caret_element(caret_x + indent_width, row_style)),
+            |this, caret_x| this.child(caret_element(caret_x + content_origin_x, row_style)),
         )
         .into_any_element()
 }
@@ -212,7 +220,7 @@ fn selection_elements_for_visual_row(
     text_layout: &DisplayRowTextLayout,
     selected_range: Option<&Range<usize>>,
     visual_row: &VisualDisplayRow,
-    indent_width: gpui::Pixels,
+    content_origin_x: gpui::Pixels,
 ) -> Vec<gpui::AnyElement> {
     let Some((start_x, width)) =
         selection_bounds_for_visual_row(text_layout, selected_range, visual_row)
@@ -225,13 +233,74 @@ fn selection_elements_for_visual_row(
     vec![
         div()
             .absolute()
-            .left(indent_width + start_x)
+            .left(content_origin_x + start_x)
             .top_0()
             .h(visual_row.height)
             .w(width)
             .bg(palette.selection_background)
             .into_any_element(),
     ]
+}
+
+fn render_adornments_for_visual_row(
+    display_row: &DisplayRow,
+    visual_row_index: usize,
+    visual_row: &VisualDisplayRow,
+    content_origin_x: gpui::Pixels,
+    row_style: RowDisplayStyle,
+) -> Vec<gpui::AnyElement> {
+    let palette = editor_palette();
+    let mut elements = Vec::new();
+    for adornment in &display_row.adornments {
+        match (&adornment.kind, adornment.placement) {
+            (RenderedAdornmentKind::QuoteBar { depth }, RenderedAdornmentPlacement::BlockEdge) => {
+                let left = px(f32::from(depth.saturating_sub(1)) * 24. + 7.);
+                elements.push(
+                    div()
+                        .absolute()
+                        .left(left)
+                        .top_0()
+                        .w(px(2.))
+                        .h(visual_row.height)
+                        .bg(palette.muted_text)
+                        .into_any_element(),
+                );
+            }
+            (RenderedAdornmentKind::ListBullet, RenderedAdornmentPlacement::Leading)
+                if visual_row_index == 0 =>
+            {
+                elements.push(render_leading_adornment("•", content_origin_x, row_style));
+            }
+            (
+                RenderedAdornmentKind::OrderedMarker { text },
+                RenderedAdornmentPlacement::Leading,
+            ) if visual_row_index == 0 => {
+                elements.push(render_leading_adornment(text, content_origin_x, row_style));
+            }
+            (RenderedAdornmentKind::TaskCheckbox { .. }, _) => {}
+            _ => {}
+        }
+    }
+    elements
+}
+
+fn render_leading_adornment(
+    text: impl Into<SharedString>,
+    content_origin_x: gpui::Pixels,
+    row_style: RowDisplayStyle,
+) -> gpui::AnyElement {
+    let palette = editor_palette();
+    div()
+        .absolute()
+        .left((content_origin_x - px(20.)).max(px(0.)))
+        .top_0()
+        .h(row_style.line_height)
+        .w(px(18.))
+        .text_size(row_style.text_size)
+        .line_height(row_style.line_height)
+        .text_color(palette.muted_text)
+        .child(text.into())
+        .into_any_element()
 }
 
 fn render_fragments_for_visual_row(

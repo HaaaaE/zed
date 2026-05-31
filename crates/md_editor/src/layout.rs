@@ -169,7 +169,7 @@ pub(super) fn effective_text_wrap_width(
     display_row: &DisplayRow,
     wrap_width: gpui::Pixels,
 ) -> gpui::Pixels {
-    (wrap_width - display_row.rendered_indent_width()).max(px(1.))
+    display_row.content_wrap_width(wrap_width)
 }
 
 pub(super) fn display_row_layout_inputs(

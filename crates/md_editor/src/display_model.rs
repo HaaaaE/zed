@@ -53,6 +53,14 @@ impl DisplayRow {
         px(f32::from(self.rendered_indent_level) * 24.)
     }
 
+    pub(crate) fn content_origin_x(&self) -> Pixels {
+        self.rendered_indent_width()
+    }
+
+    pub(crate) fn content_wrap_width(&self, wrap_width: Pixels) -> Pixels {
+        (wrap_width - self.content_origin_x()).max(px(1.))
+    }
+
     pub(crate) fn source_to_display(&self, source_offset: usize) -> usize {
         let mut display_offset = self.projection.source_to_display(source_offset);
         for insertion in &self.insertions {

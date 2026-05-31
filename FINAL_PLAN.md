@@ -537,3 +537,5 @@ Acceptance:
 - Phase 3 数据层开始：`DisplayRow` 增加 `RenderedAdornment` 和 `RenderedItemPresentation` metadata，并从 Markdown blocks 派生 quote bar、list bullet、ordered marker、task checkbox、blockquote/code container presentation。
 - 更新 regression tests 覆盖 adornment 派生和 container presentation 派生。
 - 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过。
+- Phase 3 layout/render 接入推进：`DisplayRow` 增加 `content_origin_x()` / `content_wrap_width()` helpers，text wrap、hit-test、selection/caret offset、block/table indent 统一走 content origin；render 层开始绘制 quote bar、unordered bullet、ordered marker adornments。
+- 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。
