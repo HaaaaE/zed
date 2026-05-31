@@ -1,3 +1,5 @@
+#[cfg(any(test, perf_enabled))]
+use std::{cell::Cell, time::Instant};
 use std::{collections::HashMap, fmt, ops::Range};
 
 use tree_sitter::{InputEdit, Node, Point, Tree};
@@ -16,6 +18,32 @@ use inline::{
 };
 use parser::parse_markdown;
 use tables::collect_tables;
+
+#[cfg(any(test, perf_enabled))]
+thread_local! {
+    static MARKDOWN_SYNTAX_STATS: Cell<MarkdownSyntaxStats> =
+        const { Cell::new(MarkdownSyntaxStats {
+            parse_calls: 0,
+            parse_ns: 0,
+            line_start_collect_ns: 0,
+            block_collect_ns: 0,
+            table_collect_ns: 0,
+            inline_collect_ns: 0,
+            projection_collect_ns: 0,
+        }) };
+}
+
+#[cfg(any(test, perf_enabled))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MarkdownSyntaxStats {
+    pub parse_calls: usize,
+    pub parse_ns: u128,
+    pub line_start_collect_ns: u128,
+    pub block_collect_ns: u128,
+    pub table_collect_ns: u128,
+    pub inline_collect_ns: u128,
+    pub projection_collect_ns: u128,
+}
 
 #[derive(Clone)]
 pub struct MarkdownSyntaxTree {
@@ -241,6 +269,16 @@ pub struct MarkdownRangeSemantics {
 impl MarkdownSyntaxTree {
     pub fn parse(source: &str) -> Self {
         Self::parse_with_previous_tree(source, None)
+    }
+
+    #[cfg(any(test, perf_enabled))]
+    pub fn reset_stats_for_tests() {
+        MARKDOWN_SYNTAX_STATS.with(|stats| stats.set(MarkdownSyntaxStats::default()));
+    }
+
+    #[cfg(any(test, perf_enabled))]
+    pub fn stats_for_tests() -> MarkdownSyntaxStats {
+        MARKDOWN_SYNTAX_STATS.with(Cell::get)
     }
 
     pub fn reparse_after_edit_range(
@@ -632,19 +670,33 @@ impl MarkdownSyntaxTree {
     }
 
     fn parse_with_previous_tree(source: &str, old_tree: Option<&MarkdownParseTree>) -> Self {
-        let tree = parse_markdown(source, old_tree);
-        let line_starts = line_starts(source);
-        let blocks = collect_blocks(source, &line_starts, tree.block_tree());
-        let tables = collect_tables(source, &line_starts, &blocks);
-        let inline_spans = collect_inline_spans(source, &tree);
+        let tree = record_timed_parse(|| parse_markdown(source, old_tree));
+        let line_starts = record_timed_line_start_collect(|| line_starts(source));
+        let blocks =
+            record_timed_block_collect(|| collect_blocks(source, &line_starts, tree.block_tree()));
+        let tables = record_timed_table_collect(|| collect_tables(source, &line_starts, &blocks));
+        let inline_spans = record_timed_inline_collect(|| collect_inline_spans(source, &tree));
         let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
-        let projection_replacements = collect_projection_replacements(source, &tree);
-        let projection_replacement_prefix_maximum_ends =
-            projection_replacement_prefix_maximum_ends(&projection_replacements);
-        let projection_marker_dependencies =
-            projection_marker_dependencies(&blocks, &inline_spans, &projection_replacements);
-        let projection_marker_prefix_maximum_ends =
-            projection_marker_prefix_maximum_ends(&projection_marker_dependencies);
+        let (
+            projection_replacements,
+            projection_replacement_prefix_maximum_ends,
+            projection_marker_dependencies,
+            projection_marker_prefix_maximum_ends,
+        ) = record_timed_projection_collect(|| {
+            let projection_replacements = collect_projection_replacements(source, &tree);
+            let projection_replacement_prefix_maximum_ends =
+                projection_replacement_prefix_maximum_ends(&projection_replacements);
+            let projection_marker_dependencies =
+                projection_marker_dependencies(&blocks, &inline_spans, &projection_replacements);
+            let projection_marker_prefix_maximum_ends =
+                projection_marker_prefix_maximum_ends(&projection_marker_dependencies);
+            (
+                projection_replacements,
+                projection_replacement_prefix_maximum_ends,
+                projection_marker_dependencies,
+                projection_marker_prefix_maximum_ends,
+            )
+        });
 
         Self {
             tree,
@@ -680,6 +732,100 @@ impl MarkdownSyntaxTree {
         self.projection_replacement_prefix_maximum_ends
             .partition_point(|end| *end <= offset)
     }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn update_markdown_syntax_stats(update: impl FnOnce(&mut MarkdownSyntaxStats)) {
+    MARKDOWN_SYNTAX_STATS.with(|stats| {
+        let mut value = stats.get();
+        update(&mut value);
+        stats.set(value);
+    });
+}
+
+#[cfg(any(test, perf_enabled))]
+fn record_timed<T>(
+    run: impl FnOnce() -> T,
+    update: impl FnOnce(&mut MarkdownSyntaxStats, u128),
+) -> T {
+    let start = Instant::now();
+    let value = run();
+    let elapsed = start.elapsed().as_nanos();
+    update_markdown_syntax_stats(|stats| update(stats, elapsed));
+    value
+}
+
+#[cfg(any(test, perf_enabled))]
+fn record_timed_parse<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.parse_calls += 1;
+        stats.parse_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+fn record_timed_parse<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
+fn record_timed_line_start_collect<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.line_start_collect_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+fn record_timed_line_start_collect<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
+fn record_timed_block_collect<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.block_collect_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+fn record_timed_block_collect<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
+fn record_timed_table_collect<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.table_collect_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+fn record_timed_table_collect<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
+fn record_timed_inline_collect<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.inline_collect_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+fn record_timed_inline_collect<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
+fn record_timed_projection_collect<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.projection_collect_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+fn record_timed_projection_collect<T>(run: impl FnOnce() -> T) -> T {
+    run()
 }
 
 fn line_starts(source: &str) -> Vec<usize> {

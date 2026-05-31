@@ -91,3 +91,8 @@
   - `cargo perf-test -p md_editor -- --important` 已跑通并输出 apply/draw 分段：大文档 `rendered_edit_equal_length_apply` 约 9.77ms、`rendered_edit_length_change_apply` 约 8.86ms，普通编辑同步 apply 已不再是多秒级。
   - 当前 perf 仍显示剩余热点：大文档 `rendered_edit_equal_length_draw_after_edit` 约 2.68s、`rendered_edit_length_change_draw_after_edit` 约 2.27s、`rendered_enter_delete_apply` 约 4.78s；下一步继续收紧 draw-after-edit syntax/derived semantics 和 enter/delete dirty-window fallback。
   - 已验证：`cargo perf-test -p md_editor -- --important`。
+  - 给 `markdown_wysiwyg` 增加 `MarkdownSyntaxStats`，按 parse、line starts、blocks、tables、inlines、projection 六段记录 syntax refresh 内部耗时。
+  - `md_editor` important perf 现在在 Render 编辑 apply/draw 子段后输出 syntax 阶段分段；普通字符编辑 apply 阶段 syntax 分段为 0，确认 apply fast path 没有触发 syntax refresh。
+  - 新 perf 定位显示大文档普通字符编辑剩余卡顿主要来自首次 draw 的 incremental syntax refresh：`rendered_edit_equal_length_draw_syntax_parse` 约 1.95s，`rendered_edit_length_change_draw_syntax_parse` 约 1.58s，projection 收集约 0.26s。
+  - 新 perf 定位显示大文档 `rendered_enter_delete_apply` 主要来自 apply 内 syntax refresh：parse 约 3.18s，projection 收集约 0.54s。
+  - 已验证：`cargo fmt --check`、`cargo test -p markdown_wysiwyg`、`cargo test -p md_editor --profile release-fast --lib --no-run --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]'`、`cargo check -p updraft_editor`、`cargo perf-test -p md_editor -- --important`。
