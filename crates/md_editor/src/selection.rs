@@ -5,10 +5,16 @@ use md_buffer::BufferSnapshot;
 use md_text::{Bias, BufferSnapshot as TextBufferSnapshot, Point, Selection, SelectionGoal};
 
 use super::{
-    MarkdownEditorMode, MdListState, TransactionSelectionState, merge_overlapping_row_ranges,
+    MarkdownEditorMode, MdListState, merge_overlapping_row_ranges,
     rendered_element::{projection_replacement_range_at_cursor, rendered_element_range_at_cursor},
     source_range_to_row_range,
 };
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct TransactionSelectionState {
+    pub(crate) before: Selection<Point>,
+    pub(crate) after: Selection<Point>,
+}
 
 pub(crate) fn collapsed_selection(point: Point) -> Selection<Point> {
     collapsed_selection_with_goal(point, SelectionGoal::None)

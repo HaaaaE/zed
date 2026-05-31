@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::HashMap,
     ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
@@ -26,6 +26,7 @@ mod block;
 mod cache;
 mod display_model;
 mod display_row_builder;
+mod display_space;
 mod edit;
 mod editor_actions;
 mod editor_mouse;
@@ -34,6 +35,7 @@ mod formula_render;
 mod inline_atom;
 mod inline_layout;
 mod interaction;
+mod invalidation;
 mod layout;
 mod markdown_image;
 mod movement;
@@ -54,6 +56,9 @@ use block::{
     RenderedImageBlock, RenderedImageBlockLayout, image_block_size_for_size,
     image_block_source_offset_for_x, rendered_formula_block_for_row, rendered_image_block_for_row,
     rendered_source_block_layout_for_tests,
+};
+use cache::{
+    DisplayCacheStore, InlineAtomMeasurementStore, RenderedPrewarmState, SourcePrewarmState,
 };
 use display_model::{DisplayRow, DisplayTextStyle, StyledDisplaySegment};
 #[cfg(test)]
@@ -81,9 +86,10 @@ use inline_atom::{
 #[cfg(test)]
 use inline_layout::display_inline_row_inputs;
 use interaction::{mouse_target_for_text_layout, task_checkbox_source_range_for_text_layout_click};
+use invalidation::{EditLayoutInvalidation, LocalSourceEditInvalidation};
 use layout::{
-    DisplayRowCacheKey, DisplayRowLayout, DisplayRowLayoutInputs, DisplayRowProjectionState,
-    DisplayRowTextLayout, RowLayoutCacheKey, RowLayoutInputCacheKey, VisualDisplayRow,
+    DisplayRowLayout, DisplayRowLayoutInputs, DisplayRowProjectionState, DisplayRowTextLayout,
+    RowDisplayStyle, RowLayoutCacheKey, RowLayoutInputCacheKey, VisualDisplayRow,
     row_display_style_for_display_row, text_wrap_width,
 };
 #[cfg(test)]
@@ -120,9 +126,9 @@ use selection::{
     HorizontalDirection, move_horizontal_in_mode, select_left_in_mode, select_right_in_mode,
 };
 use selection::{
-    apply_rendered_active_source_range_change, apply_text_wrap_width_change,
-    clip_cursor_in_text_snapshot, clip_selection_in_text_snapshot, collapsed_selection,
-    collapsed_selection_with_goal, reveal_selection_head_row_in_text_snapshot,
+    TransactionSelectionState, apply_rendered_active_source_range_change,
+    apply_text_wrap_width_change, clip_cursor_in_text_snapshot, clip_selection_in_text_snapshot,
+    collapsed_selection, collapsed_selection_with_goal, reveal_selection_head_row_in_text_snapshot,
     reveal_selection_item, select_to_point_in_text_snapshot_with_goal, select_to_point_with_goal,
     selection_byte_range_in_text_snapshot, selection_for_source_range, selection_without_goal,
     source_rows_for_active_range_change, transaction_selection_state_without_goals,
@@ -246,17 +252,10 @@ pub struct MarkdownEditor {
     selection_history: HashMap<md_text::TransactionId, TransactionSelectionState>,
     settings: EditorSettings,
     last_text_wrap_width: Option<gpui::Pixels>,
-    display_row_cache: HashMap<DisplayRowCacheKey, Arc<DisplayRow>>,
-    row_layout_input_cache: HashMap<RowLayoutInputCacheKey, DisplayRowLayoutInputs>,
-    row_layout_cache: HashMap<RowLayoutCacheKey, DisplayRowLayout>,
-    table_layout_cache: HashMap<TableLayoutCacheKey, Arc<DisplayTableLayout>>,
-    inline_atom_measurement_cache: HashMap<InlineAtomMeasurementKey, InlineAtomMeasurementState>,
-    pending_inline_atom_rows: HashMap<InlineAtomMeasurementKey, HashSet<usize>>,
-    pending_inline_atom_remeasure_rows: HashSet<usize>,
-    inline_atom_remeasure_scheduled: bool,
+    display_cache: DisplayCacheStore,
+    inline_atoms: InlineAtomMeasurementStore,
     source_prewarm: Option<SourcePrewarmState>,
     rendered_prewarm: Option<RenderedPrewarmState>,
-    rendered_display_index: Option<Arc<RenderedDisplayIndex>>,
     #[cfg(perf_enabled)]
     layout_computation_counts: LayoutComputationCounts,
 }
@@ -294,62 +293,6 @@ impl MarkdownEditorMode {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct TransactionSelectionState {
-    before: Selection<Point>,
-    after: Selection<Point>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum EditLayoutInvalidation {
-    Conservative,
-    LocalSourceSelection { byte_delta: Option<isize> },
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct LocalSourceEditInvalidation {
-    rows: Range<usize>,
-    byte_delta: Option<isize>,
-}
-
-struct SourcePrewarmState {
-    version: md_text::Global,
-    wrap_width: gpui::Pixels,
-    row_style: RowDisplayStyle,
-    anchor_row: usize,
-    rows: VecDeque<usize>,
-    scheduled: bool,
-}
-
-struct RenderedPrewarmState {
-    version: md_text::Global,
-    wrap_width: gpui::Pixels,
-    #[allow(dead_code)]
-    selection: Selection<Point>,
-    anchor_row: usize,
-    rows: VecDeque<usize>,
-    scheduled: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct RowDisplayStyle {
-    min_height: gpui::Pixels,
-    text_size: gpui::Pixels,
-    line_height: gpui::Pixels,
-    caret_height: gpui::Pixels,
-}
-
-impl From<md_theme::RowMetrics> for RowDisplayStyle {
-    fn from(metrics: md_theme::RowMetrics) -> Self {
-        Self {
-            min_height: metrics.min_height,
-            text_size: metrics.text_size,
-            line_height: metrics.line_height,
-            caret_height: metrics.caret_height,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MarkdownEditorEvent {
     DirtyChanged(bool),
@@ -377,17 +320,10 @@ impl MarkdownEditor {
             selection_history: HashMap::default(),
             settings: EditorSettings::default(),
             last_text_wrap_width: None,
-            display_row_cache: HashMap::default(),
-            row_layout_input_cache: HashMap::default(),
-            row_layout_cache: HashMap::default(),
-            table_layout_cache: HashMap::default(),
-            inline_atom_measurement_cache: HashMap::default(),
-            pending_inline_atom_rows: HashMap::default(),
-            pending_inline_atom_remeasure_rows: HashSet::default(),
-            inline_atom_remeasure_scheduled: false,
+            display_cache: DisplayCacheStore::default(),
+            inline_atoms: InlineAtomMeasurementStore::default(),
             source_prewarm: None,
             rendered_prewarm: None,
-            rendered_display_index: None,
             #[cfg(perf_enabled)]
             layout_computation_counts: LayoutComputationCounts::default(),
         }
@@ -429,9 +365,7 @@ impl MarkdownEditor {
         self.document_path = path;
         self.clear_display_row_cache();
         self.clear_row_layout_cache();
-        self.inline_atom_measurement_cache.clear();
-        self.pending_inline_atom_rows.clear();
-        self.pending_inline_atom_remeasure_rows.clear();
+        self.clear_inline_atom_measurement_cache();
         self.display_list_state.remeasure();
         cx.notify();
     }
@@ -486,10 +420,19 @@ impl MarkdownEditor {
 
     pub(crate) fn display_item_count_for_mode(&mut self, mode: MarkdownEditorMode) -> usize {
         match mode {
-            MarkdownEditorMode::Source => self.buffer.as_text_snapshot().row_count() as usize,
+            MarkdownEditorMode::Source => display_space::display_item_count_for_mode(
+                mode,
+                self.buffer.as_text_snapshot(),
+                None,
+            ),
             MarkdownEditorMode::Rendered => {
                 let snapshot = self.buffer.snapshot();
-                self.rendered_display_index(&snapshot).item_count()
+                let index = self.rendered_display_index(&snapshot);
+                display_space::display_item_count_for_mode(
+                    mode,
+                    snapshot.as_text_snapshot(),
+                    Some(&index),
+                )
             }
         }
     }
@@ -501,10 +444,13 @@ impl MarkdownEditor {
         mode: MarkdownEditorMode,
     ) -> Option<usize> {
         match mode {
-            MarkdownEditorMode::Source => Some(cursor.row as usize),
-            MarkdownEditorMode::Rendered => self
-                .rendered_display_index(snapshot)
-                .item_index_for_source_row(cursor.row as usize),
+            MarkdownEditorMode::Source => {
+                display_space::display_item_index_for_cursor(mode, None, cursor)
+            }
+            MarkdownEditorMode::Rendered => {
+                let index = self.rendered_display_index(snapshot);
+                display_space::display_item_index_for_cursor(mode, Some(&index), cursor)
+            }
         }
     }
 
@@ -512,15 +458,7 @@ impl MarkdownEditor {
         &mut self,
         snapshot: &BufferSnapshot,
     ) -> Arc<RenderedDisplayIndex> {
-        if let Some(index) = &self.rendered_display_index
-            && index.version() == snapshot.version()
-        {
-            return index.clone();
-        }
-
-        let index = RenderedDisplayIndex::build(snapshot);
-        self.rendered_display_index = Some(index.clone());
-        index
+        self.display_cache.rendered_index(snapshot)
     }
 
     pub fn row_text(&mut self, row: u32) -> String {
@@ -673,10 +611,9 @@ impl MarkdownEditor {
         if self.mode == MarkdownEditorMode::Rendered {
             let snapshot = self.buffer.snapshot();
             let cursor = clip_cursor(&snapshot, self.selection.head());
-            let source_offset = snapshot.as_text_snapshot().point_to_offset(cursor);
-            let item_index = self
-                .rendered_display_index(&snapshot)
-                .item_index_for_source_offset(&snapshot, source_offset);
+            let index = self.rendered_display_index(&snapshot);
+            let item_index =
+                display_space::rendered_item_index_for_cursor(&snapshot, &index, cursor);
             reveal_selection_item(&self.display_list_state, item_index);
         } else {
             reveal_selection_head_row_in_text_snapshot(

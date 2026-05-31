@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     ops::Range,
     sync::Arc,
     time::{Duration, Instant},
@@ -11,49 +11,117 @@ use md_text::{BufferSnapshot as TextBufferSnapshot, Point, Selection};
 
 use super::{
     DisplayBlockLayout, DisplayInlineAtomKind, DisplayRow, DisplayRowLayout,
-    DisplayRowLayoutInputs, DisplayRowProjectionState, DisplayRowTextLayout,
-    InlineAtomMeasurementKey, InlineAtomMeasurementState, LocalSourceEditInvalidation,
-    MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, RowLayoutCacheKey, RowLayoutInputCacheKey,
-    clip_selection, layout::DisplayRowCacheKey, ranges_overlap,
+    DisplayRowLayoutInputs, DisplayRowProjectionState, DisplayRowTextLayout, DisplayTableLayout,
+    InlineAtomMeasurementKey, InlineAtomMeasurementState, MarkdownEditor, MarkdownEditorMode,
+    RowDisplayStyle, RowLayoutCacheKey, RowLayoutInputCacheKey, TableLayoutCacheKey,
+    clip_selection, invalidation::LocalSourceEditInvalidation, layout::DisplayRowCacheKey,
+    ranges_overlap,
 };
 use crate::display_row_builder::{rendered_display_row, source_display_row_in_text_snapshot};
 use crate::layout::{
     display_row_layout_inputs, effective_text_wrap_width, source_display_row_layout_inputs,
     text_layout_for_display_row_inputs,
 };
-use crate::rendered_index::source_display_item_id;
+use crate::rendered_index::{RenderedDisplayIndex, source_display_item_id};
 use crate::rendered_topology::RenderedTopology;
 
-fn row_source_range_in_text_snapshot_for_cache(
-    snapshot: &TextBufferSnapshot,
-    row: u32,
-) -> Range<usize> {
-    if row >= snapshot.row_count() {
-        let end = snapshot.len();
-        return end..end;
-    }
-
-    let start = snapshot.point_to_offset(Point::new(row, 0));
-    let end = start + snapshot.line_len(row) as usize;
-    start..end
+pub(crate) struct DisplayCacheStore {
+    pub(super) display_row_cache: HashMap<DisplayRowCacheKey, Arc<DisplayRow>>,
+    pub(super) row_layout_input_cache: HashMap<RowLayoutInputCacheKey, DisplayRowLayoutInputs>,
+    pub(super) row_layout_cache: HashMap<RowLayoutCacheKey, DisplayRowLayout>,
+    pub(super) table_layout_cache: HashMap<TableLayoutCacheKey, Arc<DisplayTableLayout>>,
+    pub(super) rendered_display_index: Option<Arc<RenderedDisplayIndex>>,
 }
 
-impl MarkdownEditor {
-    pub(crate) fn clear_row_layout_cache(&mut self) {
-        self.row_layout_cache.clear();
-        self.table_layout_cache.clear();
+impl Default for DisplayCacheStore {
+    fn default() -> Self {
+        Self {
+            display_row_cache: HashMap::default(),
+            row_layout_input_cache: HashMap::default(),
+            row_layout_cache: HashMap::default(),
+            table_layout_cache: HashMap::default(),
+            rendered_display_index: None,
+        }
     }
+}
 
-    pub(crate) fn clear_display_row_cache(&mut self) {
+impl DisplayCacheStore {
+    pub(crate) fn clear_all_display_rows(&mut self) {
         self.display_row_cache.clear();
         self.row_layout_input_cache.clear();
         self.table_layout_cache.clear();
         self.rendered_display_index = None;
-        self.source_prewarm = None;
-        self.rendered_prewarm = None;
     }
 
-    pub(crate) fn rekey_source_display_row_cache_for_local_edit(
+    pub(crate) fn clear_all_layouts(&mut self) {
+        self.row_layout_cache.clear();
+        self.table_layout_cache.clear();
+    }
+
+    pub(crate) fn clear_table_layouts(&mut self) {
+        self.table_layout_cache.clear();
+    }
+
+    pub(crate) fn clear_rows(&mut self, row_ranges: &[Range<usize>]) {
+        self.display_row_cache.retain(|key, _| {
+            !row_ranges
+                .iter()
+                .any(|rows| ranges_overlap(rows, &key.source_row_range))
+        });
+        self.clear_layout_inputs_for_row_ranges(row_ranges);
+    }
+
+    pub(crate) fn clear_layout_rows(&mut self, rows: Range<usize>) {
+        self.row_layout_cache
+            .retain(|key, _| !ranges_overlap(&rows, &key.source_row_range));
+    }
+
+    pub(crate) fn clear_layout_inputs_for_rows(&mut self, rows: Range<usize>) {
+        self.row_layout_input_cache
+            .retain(|key, _| !ranges_overlap(&rows, &key.source_row_range));
+    }
+
+    pub(crate) fn clear_layout_rows_for_row_ranges(&mut self, row_ranges: &[Range<usize>]) {
+        self.row_layout_cache.retain(|key, _| {
+            !row_ranges
+                .iter()
+                .any(|rows| ranges_overlap(rows, &key.source_row_range))
+        });
+    }
+
+    pub(crate) fn clear_layout_inputs_for_row_ranges(&mut self, row_ranges: &[Range<usize>]) {
+        self.row_layout_input_cache.retain(|key, _| {
+            !row_ranges
+                .iter()
+                .any(|rows| ranges_overlap(rows, &key.source_row_range))
+        });
+    }
+
+    pub(crate) fn rekey_source_rows_for_local_edit(
+        &mut self,
+        invalidation: &LocalSourceEditInvalidation,
+        version: md_text::Global,
+    ) {
+        self.rekey_source_display_rows_for_local_edit(invalidation, version.clone());
+        self.rekey_source_layout_inputs_for_local_edit(invalidation, version);
+    }
+
+    pub(crate) fn rendered_index(
+        &mut self,
+        snapshot: &BufferSnapshot,
+    ) -> Arc<RenderedDisplayIndex> {
+        if let Some(index) = &self.rendered_display_index
+            && index.version() == snapshot.version()
+        {
+            return index.clone();
+        }
+
+        let index = RenderedDisplayIndex::build(snapshot);
+        self.rendered_display_index = Some(index.clone());
+        index
+    }
+
+    fn rekey_source_display_rows_for_local_edit(
         &mut self,
         invalidation: &LocalSourceEditInvalidation,
         version: md_text::Global,
@@ -85,7 +153,7 @@ impl MarkdownEditor {
             .collect();
     }
 
-    pub(crate) fn rekey_source_row_layout_input_cache_for_local_edit(
+    fn rekey_source_layout_inputs_for_local_edit(
         &mut self,
         invalidation: &LocalSourceEditInvalidation,
         version: md_text::Global,
@@ -116,43 +184,176 @@ impl MarkdownEditor {
             })
             .collect();
     }
+}
+
+pub(crate) struct InlineAtomMeasurementStore {
+    pub(super) measurement_cache: HashMap<InlineAtomMeasurementKey, InlineAtomMeasurementState>,
+    pub(super) pending_rows: HashMap<InlineAtomMeasurementKey, HashSet<usize>>,
+    pub(super) pending_remeasure_rows: HashSet<usize>,
+    pub(super) remeasure_scheduled: bool,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct DisplayCacheStats {
+    pub(crate) display_row_count: usize,
+    pub(crate) row_layout_input_count: usize,
+    pub(crate) row_layout_count: usize,
+    pub(crate) table_layout_count: usize,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct InlineAtomStats {
+    pub(crate) measurement_count: usize,
+    pub(crate) pending_row_key_count: usize,
+    pub(crate) remeasure_scheduled: bool,
+}
+
+impl Default for InlineAtomMeasurementStore {
+    fn default() -> Self {
+        Self {
+            measurement_cache: HashMap::default(),
+            pending_rows: HashMap::default(),
+            pending_remeasure_rows: HashSet::default(),
+            remeasure_scheduled: false,
+        }
+    }
+}
+
+impl InlineAtomMeasurementStore {
+    pub(crate) fn clear_all(&mut self) {
+        self.measurement_cache.clear();
+        self.pending_rows.clear();
+        self.pending_remeasure_rows.clear();
+        self.remeasure_scheduled = false;
+    }
+}
+
+pub(crate) struct SourcePrewarmState {
+    pub(crate) version: md_text::Global,
+    pub(crate) wrap_width: gpui::Pixels,
+    pub(crate) row_style: RowDisplayStyle,
+    pub(crate) anchor_row: usize,
+    pub(crate) rows: VecDeque<usize>,
+    pub(crate) scheduled: bool,
+}
+
+pub(crate) struct RenderedPrewarmState {
+    pub(crate) version: md_text::Global,
+    pub(crate) wrap_width: gpui::Pixels,
+    #[allow(dead_code)]
+    pub(crate) selection: Selection<Point>,
+    pub(crate) anchor_row: usize,
+    pub(crate) rows: VecDeque<usize>,
+    pub(crate) scheduled: bool,
+}
+
+fn row_source_range_in_text_snapshot_for_cache(
+    snapshot: &TextBufferSnapshot,
+    row: u32,
+) -> Range<usize> {
+    if row >= snapshot.row_count() {
+        let end = snapshot.len();
+        return end..end;
+    }
+
+    let start = snapshot.point_to_offset(Point::new(row, 0));
+    let end = start + snapshot.line_len(row) as usize;
+    start..end
+}
+
+impl MarkdownEditor {
+    #[cfg(test)]
+    pub(crate) fn display_cache_stats_for_tests(&self) -> DisplayCacheStats {
+        DisplayCacheStats {
+            display_row_count: self.display_cache.display_row_cache.len(),
+            row_layout_input_count: self.display_cache.row_layout_input_cache.len(),
+            row_layout_count: self.display_cache.row_layout_cache.len(),
+            table_layout_count: self.display_cache.table_layout_cache.len(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn row_layout_cache_has_item_index_for_tests(&self, item_index: u32) -> bool {
+        self.display_cache
+            .row_layout_cache
+            .keys()
+            .any(|key| key.item_index == item_index)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inline_atom_stats_for_tests(&self) -> InlineAtomStats {
+        InlineAtomStats {
+            measurement_count: self.inline_atoms.measurement_cache.len(),
+            pending_row_key_count: self.inline_atoms.pending_rows.len(),
+            remeasure_scheduled: self.inline_atoms.remeasure_scheduled,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inline_atom_measurements_all_ready_for_tests(&self) -> bool {
+        self.inline_atoms
+            .measurement_cache
+            .values()
+            .all(|state| matches!(state, InlineAtomMeasurementState::Ready(_)))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn track_pending_inline_atom_row_for_tests(
+        &mut self,
+        key: InlineAtomMeasurementKey,
+        row: usize,
+    ) {
+        self.inline_atoms
+            .pending_rows
+            .entry(key)
+            .or_default()
+            .insert(row);
+    }
+
+    pub(crate) fn clear_row_layout_cache(&mut self) {
+        self.display_cache.clear_all_layouts();
+    }
+
+    pub(crate) fn clear_table_layout_cache(&mut self) {
+        self.display_cache.clear_table_layouts();
+    }
+
+    pub(crate) fn clear_display_row_cache(&mut self) {
+        self.display_cache.clear_all_display_rows();
+        self.source_prewarm = None;
+        self.rendered_prewarm = None;
+    }
+
+    pub(crate) fn clear_inline_atom_measurement_cache(&mut self) {
+        self.inline_atoms.clear_all();
+    }
+
+    pub(crate) fn rekey_source_rows_for_local_edit(
+        &mut self,
+        invalidation: &LocalSourceEditInvalidation,
+        version: md_text::Global,
+    ) {
+        self.display_cache
+            .rekey_source_rows_for_local_edit(invalidation, version);
+    }
 
     pub(crate) fn clear_display_row_cache_for_row_ranges(&mut self, row_ranges: &[Range<usize>]) {
-        self.display_row_cache.retain(|key, _| {
-            !row_ranges
-                .iter()
-                .any(|rows| ranges_overlap(rows, &key.source_row_range))
-        });
-        self.clear_row_layout_input_cache_for_row_ranges(row_ranges);
+        self.display_cache.clear_rows(row_ranges);
     }
 
     pub(crate) fn clear_row_layout_cache_for_rows(&mut self, rows: Range<usize>) {
-        self.row_layout_cache
-            .retain(|key, _| !ranges_overlap(&rows, &key.source_row_range));
+        self.display_cache.clear_layout_rows(rows);
     }
 
     pub(crate) fn clear_row_layout_input_cache_for_rows(&mut self, rows: Range<usize>) {
-        self.row_layout_input_cache
-            .retain(|key, _| !ranges_overlap(&rows, &key.source_row_range));
+        self.display_cache.clear_layout_inputs_for_rows(rows);
     }
 
     pub(crate) fn clear_row_layout_cache_for_row_ranges(&mut self, row_ranges: &[Range<usize>]) {
-        self.row_layout_cache.retain(|key, _| {
-            !row_ranges
-                .iter()
-                .any(|rows| ranges_overlap(rows, &key.source_row_range))
-        });
-    }
-
-    pub(crate) fn clear_row_layout_input_cache_for_row_ranges(
-        &mut self,
-        row_ranges: &[Range<usize>],
-    ) {
-        self.row_layout_input_cache.retain(|key, _| {
-            !row_ranges
-                .iter()
-                .any(|rows| ranges_overlap(rows, &key.source_row_range))
-        });
+        self.display_cache
+            .clear_layout_rows_for_row_ranges(row_ranges);
     }
 
     pub(crate) fn cached_display_row(
@@ -194,7 +395,7 @@ impl MarkdownEditor {
             active_projection_source_ranges: active_projection_source_ranges.clone(),
         };
 
-        if let Some(display_row) = self.display_row_cache.get(&cache_key) {
+        if let Some(display_row) = self.display_cache.display_row_cache.get(&cache_key) {
             return Some(display_row.clone());
         }
 
@@ -219,7 +420,8 @@ impl MarkdownEditor {
             range_semantics,
             self.document_path(),
         ));
-        self.display_row_cache
+        self.display_cache
+            .display_row_cache
             .insert(cache_key, display_row.clone());
         Some(display_row)
     }
@@ -246,7 +448,7 @@ impl MarkdownEditor {
             active_projection_source_ranges: Vec::new(),
         };
 
-        if let Some(display_row) = self.display_row_cache.get(&cache_key) {
+        if let Some(display_row) = self.display_cache.display_row_cache.get(&cache_key) {
             return Some(display_row.clone());
         }
 
@@ -255,7 +457,8 @@ impl MarkdownEditor {
             self.layout_computation_counts.display_rows_created += 1;
         }
         let display_row = Arc::new(source_display_row_in_text_snapshot(snapshot, row));
-        self.display_row_cache
+        self.display_cache
+            .display_row_cache
             .insert(cache_key, display_row.clone());
         Some(display_row)
     }
@@ -284,7 +487,7 @@ impl MarkdownEditor {
             active_projection_source_ranges: display_row.active_projection_source_ranges.clone(),
         };
 
-        if let Some(cached_layout) = self.row_layout_cache.get(&cache_key) {
+        if let Some(cached_layout) = self.display_cache.row_layout_cache.get(&cache_key) {
             return cached_layout.clone();
         }
 
@@ -342,7 +545,9 @@ impl MarkdownEditor {
             )))
         };
         if layout.cacheable() {
-            self.row_layout_cache.insert(cache_key, layout.clone());
+            self.display_cache
+                .row_layout_cache
+                .insert(cache_key, layout.clone());
         }
         layout
     }
@@ -375,16 +580,18 @@ impl MarkdownEditor {
             wrap_width,
             row_style,
         };
-        let table_layout = if let Some(table_layout) = self.table_layout_cache.get(&cache_key) {
-            table_layout.clone()
-        } else {
-            let table_layout = Arc::new(super::DisplayTableLayout::new(
-                snapshot, table, wrap_width, row_style, window,
-            ));
-            self.table_layout_cache
-                .insert(cache_key, table_layout.clone());
-            table_layout
-        };
+        let table_layout =
+            if let Some(table_layout) = self.display_cache.table_layout_cache.get(&cache_key) {
+                table_layout.clone()
+            } else {
+                let table_layout = Arc::new(super::DisplayTableLayout::new(
+                    snapshot, table, wrap_width, row_style, window,
+                ));
+                self.display_cache
+                    .table_layout_cache
+                    .insert(cache_key, table_layout.clone());
+                table_layout
+            };
 
         Some(super::DisplayTableRowLayout::new(
             snapshot,
@@ -416,7 +623,9 @@ impl MarkdownEditor {
             active_projection_source_ranges: Vec::new(),
         };
 
-        if let Some(DisplayRowLayout::Text(cached_layout)) = self.row_layout_cache.get(&cache_key) {
+        if let Some(DisplayRowLayout::Text(cached_layout)) =
+            self.display_cache.row_layout_cache.get(&cache_key)
+        {
             return cached_layout.clone();
         }
 
@@ -448,7 +657,8 @@ impl MarkdownEditor {
             cx,
         ));
         if layout.cacheable {
-            self.row_layout_cache
+            self.display_cache
+                .row_layout_cache
                 .insert(cache_key, DisplayRowLayout::Text(layout.clone()));
         }
         layout
@@ -705,7 +915,7 @@ impl MarkdownEditor {
             row_style,
         };
 
-        if let Some(inputs) = self.row_layout_input_cache.get(&cache_key) {
+        if let Some(inputs) = self.display_cache.row_layout_input_cache.get(&cache_key) {
             return inputs.clone();
         }
 
@@ -721,7 +931,8 @@ impl MarkdownEditor {
             self.document_path(),
             window,
         );
-        self.row_layout_input_cache
+        self.display_cache
+            .row_layout_input_cache
             .insert(cache_key, inputs.clone());
         inputs
     }
@@ -743,7 +954,7 @@ impl MarkdownEditor {
             row_style,
         };
 
-        if let Some(inputs) = self.row_layout_input_cache.get(&cache_key) {
+        if let Some(inputs) = self.display_cache.row_layout_input_cache.get(&cache_key) {
             return inputs.clone();
         }
 
@@ -752,7 +963,8 @@ impl MarkdownEditor {
             self.layout_computation_counts.row_layout_inputs_created += 1;
         }
         let inputs = source_display_row_layout_inputs(display_row, row_style, window);
-        self.row_layout_input_cache
+        self.display_cache
+            .row_layout_input_cache
             .insert(cache_key, inputs.clone());
         inputs
     }
@@ -779,7 +991,7 @@ impl MarkdownEditor {
                     window.scale_factor(),
                     image_max_width,
                 );
-                if let Some(measurement) = self.inline_atom_measurement_cache.get(&key).copied() {
+                if let Some(measurement) = self.inline_atoms.measurement_cache.get(&key).copied() {
                     if measure_inline_atoms && atom.kind() == DisplayInlineAtomKind::InlineImage {
                         let measured = atom.measure_size_state(
                             fallback_size,
@@ -797,7 +1009,8 @@ impl MarkdownEditor {
                                 return measured;
                             }
                             InlineAtomMeasurementState::Pending(_) => {
-                                self.pending_inline_atom_rows
+                                self.inline_atoms
+                                    .pending_rows
                                     .entry(key)
                                     .or_default()
                                     .insert(row);
@@ -825,7 +1038,8 @@ impl MarkdownEditor {
                         );
                     }
                     InlineAtomMeasurementState::Pending(_) => {
-                        self.pending_inline_atom_rows
+                        self.inline_atoms
+                            .pending_rows
                             .entry(key)
                             .or_default()
                             .insert(row);
@@ -845,10 +1059,12 @@ impl MarkdownEditor {
         cx: &mut Context<Self>,
     ) {
         let previous = self
-            .inline_atom_measurement_cache
+            .inline_atoms
+            .measurement_cache
             .insert(key.clone(), measurement);
         let mut rows_to_remeasure = self
-            .pending_inline_atom_rows
+            .inline_atoms
+            .pending_rows
             .remove(&key)
             .unwrap_or_default();
         let changed = previous.is_some_and(|previous| previous.size() != measurement.size());
@@ -866,21 +1082,22 @@ impl MarkdownEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.pending_inline_atom_remeasure_rows.insert(row);
-        if self.inline_atom_remeasure_scheduled {
+        self.inline_atoms.pending_remeasure_rows.insert(row);
+        if self.inline_atoms.remeasure_scheduled {
             return;
         }
 
-        self.inline_atom_remeasure_scheduled = true;
+        self.inline_atoms.remeasure_scheduled = true;
         cx.on_next_frame(window, |this, _window, cx| {
             this.flush_inline_atom_row_remeasures(cx);
         });
     }
 
     pub(crate) fn flush_inline_atom_row_remeasures(&mut self, cx: &mut Context<Self>) {
-        self.inline_atom_remeasure_scheduled = false;
+        self.inline_atoms.remeasure_scheduled = false;
         let mut rows = self
-            .pending_inline_atom_remeasure_rows
+            .inline_atoms
+            .pending_remeasure_rows
             .drain()
             .collect::<Vec<_>>();
         if rows.is_empty() {

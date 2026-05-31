@@ -334,12 +334,11 @@ impl MarkdownEditor {
 
         if changed {
             if self.mode == MarkdownEditorMode::Rendered {
-                self.table_layout_cache.clear();
+                self.clear_table_layout_cache();
             }
             if let Some(invalidation) = local_source_edit_invalidation.as_ref() {
                 let version = self.buffer.as_text_snapshot().version().clone();
-                self.rekey_source_display_row_cache_for_local_edit(invalidation, version.clone());
-                self.rekey_source_row_layout_input_cache_for_local_edit(invalidation, version);
+                self.rekey_source_rows_for_local_edit(invalidation, version);
                 self.clear_row_layout_input_cache_for_rows(invalidation.rows.clone());
                 self.clear_row_layout_cache_for_rows(invalidation.rows.clone());
             } else {

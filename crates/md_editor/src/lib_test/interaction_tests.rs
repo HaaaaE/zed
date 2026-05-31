@@ -91,14 +91,14 @@ fn source_interaction_layouts_cache_wrapped_text_rows(cx: &mut gpui::TestAppCont
     let editor = cx.new(|cx| MarkdownEditor::for_text("abcdefghijklmnopqrst\n", cx));
 
     editor.update_in(cx, |editor, window, cx| {
-        assert_eq!(editor.row_layout_cache.len(), 0);
+        assert_eq!(editor.display_cache_stats_for_tests().row_layout_count, 0);
 
         editor.set_cursor(Point::new(0, 0));
         editor.move_down(&MoveDown, window, cx);
-        assert_eq!(editor.row_layout_cache.len(), 1);
+        assert_eq!(editor.display_cache_stats_for_tests().row_layout_count, 1);
 
         editor.move_up(&MoveUp, window, cx);
-        assert_eq!(editor.row_layout_cache.len(), 1);
+        assert_eq!(editor.display_cache_stats_for_tests().row_layout_count, 1);
     });
 }
 
@@ -125,13 +125,23 @@ fn source_layout_input_cache_reuses_width_independent_inputs_without_refreshing_
         let row_style = default_row_metrics().into();
         let _ =
             editor.cached_source_text_layout(&display_row, row_style, px(120.), false, window, cx);
-        assert_eq!(editor.row_layout_input_cache.len(), 1);
-        assert_eq!(editor.row_layout_cache.len(), 1);
+        assert_eq!(
+            editor
+                .display_cache_stats_for_tests()
+                .row_layout_input_count,
+            1
+        );
+        assert_eq!(editor.display_cache_stats_for_tests().row_layout_count, 1);
 
         let _ =
             editor.cached_source_text_layout(&display_row, row_style, px(220.), false, window, cx);
-        assert_eq!(editor.row_layout_input_cache.len(), 1);
-        assert_eq!(editor.row_layout_cache.len(), 2);
+        assert_eq!(
+            editor
+                .display_cache_stats_for_tests()
+                .row_layout_input_count,
+            1
+        );
+        assert_eq!(editor.display_cache_stats_for_tests().row_layout_count, 2);
         assert_eq!(
             editor.buffer.cached_syntax_version_for_tests(),
             cached_syntax_version
@@ -159,16 +169,17 @@ fn source_render_prewarms_display_rows_and_layout_inputs(cx: &mut gpui::TestAppC
 
     editor.read_with(cx, |editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Source);
+        let stats = editor.display_cache_stats_for_tests();
         assert!(
-            editor.display_row_cache.len() >= 32,
+            stats.display_row_count >= 32,
             "source prewarm should populate display row cache beyond visible rows"
         );
         assert!(
-            editor.row_layout_input_cache.len() >= 32,
+            stats.row_layout_input_count >= 32,
             "source prewarm should populate layout input cache beyond visible rows"
         );
         assert!(
-            editor.row_layout_cache.len() >= 32,
+            stats.row_layout_count >= 32,
             "source prewarm should populate current-width row layout cache beyond visible rows"
         );
     });
@@ -197,16 +208,17 @@ fn rendered_render_prewarms_display_rows_and_layout_inputs(cx: &mut gpui::TestAp
 
     editor.read_with(cx, |editor, _| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
+        let stats = editor.display_cache_stats_for_tests();
         assert!(
-            editor.display_row_cache.len() >= 16,
+            stats.display_row_count >= 16,
             "rendered prewarm should populate display row cache beyond visible rows"
         );
         assert!(
-            editor.row_layout_input_cache.len() >= 16,
+            stats.row_layout_input_count >= 16,
             "rendered prewarm should populate layout input cache beyond visible rows"
         );
         assert!(
-            editor.row_layout_cache.len() >= 16,
+            stats.row_layout_count >= 16,
             "rendered prewarm should populate current-width row layout cache beyond visible rows"
         );
     });
@@ -361,7 +373,7 @@ fn rendered_interaction_layouts_cache_plain_text_rows(cx: &mut gpui::TestAppCont
     });
 
     editor.update_in(cx, |editor, window, cx| {
-        assert_eq!(editor.row_layout_cache.len(), 0);
+        assert_eq!(editor.display_cache_stats_for_tests().row_layout_count, 0);
 
         let snapshot = editor.buffer.snapshot();
         let display_row_state =
@@ -384,7 +396,7 @@ fn rendered_interaction_layouts_cache_plain_text_rows(cx: &mut gpui::TestAppCont
             window,
             cx,
         );
-        assert_eq!(editor.row_layout_cache.len(), 1);
+        assert_eq!(editor.display_cache_stats_for_tests().row_layout_count, 1);
 
         let _ = editor.cached_row_layout(
             &snapshot,
@@ -397,7 +409,7 @@ fn rendered_interaction_layouts_cache_plain_text_rows(cx: &mut gpui::TestAppCont
             window,
             cx,
         );
-        assert_eq!(editor.row_layout_cache.len(), 1);
+        assert_eq!(editor.display_cache_stats_for_tests().row_layout_count, 1);
     });
 }
 
@@ -468,7 +480,7 @@ fn rendered_table_rows_use_structured_layout_when_inactive(cx: &mut gpui::TestAp
             table_layout.cells[1].alignment,
             MarkdownTableAlignment::Right
         );
-        assert_eq!(editor.table_layout_cache.len(), 1);
+        assert_eq!(editor.display_cache_stats_for_tests().table_layout_count, 1);
 
         let body_row = editor
             .cached_display_row(&snapshot, 2, editor.mode, &display_row_state)
@@ -487,7 +499,7 @@ fn rendered_table_rows_use_structured_layout_when_inactive(cx: &mut gpui::TestAp
         );
         assert!(matches!(body_layout, DisplayRowLayout::TableRow(_)));
         assert_eq!(
-            editor.table_layout_cache.len(),
+            editor.display_cache_stats_for_tests().table_layout_count,
             1,
             "table metrics should be reused across visible rows"
         );
@@ -2283,12 +2295,7 @@ fn rendered_mode_does_not_cache_loading_image_block_layout(cx: &mut gpui::TestAp
     );
 
     editor.read_with(cx, |editor, _| {
-        assert!(
-            !editor
-                .row_layout_cache
-                .keys()
-                .any(|key| key.item_index == 0)
-        );
+        assert!(!editor.row_layout_cache_has_item_index_for_tests(0));
     });
 }
 
@@ -2436,15 +2443,12 @@ fn rendered_inline_math_ready_measurement_makes_row_layout_cacheable(
     );
 
     editor.read_with(cx, |editor, _| {
-        assert_eq!(editor.row_layout_input_cache.len(), 1);
-        assert_eq!(editor.inline_atom_measurement_cache.len(), 1);
-        assert!(
-            editor
-                .inline_atom_measurement_cache
-                .values()
-                .all(|state| { matches!(state, InlineAtomMeasurementState::Ready(_)) })
-        );
-        assert_eq!(editor.row_layout_cache.len(), 1);
+        let display_stats = editor.display_cache_stats_for_tests();
+        let inline_stats = editor.inline_atom_stats_for_tests();
+        assert_eq!(display_stats.row_layout_input_count, 1);
+        assert_eq!(inline_stats.measurement_count, 1);
+        assert!(editor.inline_atom_measurements_all_ready_for_tests());
+        assert_eq!(display_stats.row_layout_count, 1);
     });
 }
 
@@ -2465,12 +2469,15 @@ fn rendered_mode_does_not_cache_loading_inline_image_layout(cx: &mut gpui::TestA
     );
 
     assert_eq!(
-        editor.read_with(cx, |editor, _| editor.row_layout_cache.len()),
+        editor.read_with(cx, |editor, _| editor
+            .display_cache_stats_for_tests()
+            .row_layout_count),
         0
     );
     editor.read_with(cx, |editor, _| {
-        assert_eq!(editor.inline_atom_measurement_cache.len(), 0);
-        assert_eq!(editor.pending_inline_atom_rows.len(), 1);
+        let stats = editor.inline_atom_stats_for_tests();
+        assert_eq!(stats.measurement_count, 0);
+        assert_eq!(stats.pending_row_key_count, 1);
     });
 }
 
@@ -2524,7 +2531,7 @@ fn inline_atom_deferred_remeasure_only_clears_affected_row(cx: &mut gpui::TestAp
                 cx,
             );
         }
-        assert_eq!(editor.row_layout_cache.len(), 2);
+        assert_eq!(editor.display_cache_stats_for_tests().row_layout_count, 2);
 
         let row_style = default_row_metrics().into();
         let key = InlineAtomMeasurementKey {
@@ -2537,11 +2544,7 @@ fn inline_atom_deferred_remeasure_only_clears_affected_row(cx: &mut gpui::TestAp
             image_max_width: None,
             formula_scale_factor_bits: Some(window.scale_factor().to_bits()),
         };
-        editor
-            .pending_inline_atom_rows
-            .entry(key.clone())
-            .or_default()
-            .insert(0);
+        editor.track_pending_inline_atom_row_for_tests(key.clone(), 0);
         editor.update_inline_atom_measurement_cache(
             0,
             key,
@@ -2549,22 +2552,12 @@ fn inline_atom_deferred_remeasure_only_clears_affected_row(cx: &mut gpui::TestAp
             window,
             cx,
         );
-        assert!(editor.inline_atom_remeasure_scheduled);
-        assert_eq!(editor.row_layout_cache.len(), 2);
+        assert!(editor.inline_atom_stats_for_tests().remeasure_scheduled);
+        assert_eq!(editor.display_cache_stats_for_tests().row_layout_count, 2);
 
         editor.flush_inline_atom_row_remeasures(cx);
-        assert!(
-            !editor
-                .row_layout_cache
-                .keys()
-                .any(|key| key.item_index == 0)
-        );
-        assert!(
-            editor
-                .row_layout_cache
-                .keys()
-                .any(|key| key.item_index == 1)
-        );
+        assert!(!editor.row_layout_cache_has_item_index_for_tests(0));
+        assert!(editor.row_layout_cache_has_item_index_for_tests(1));
     });
 }
 

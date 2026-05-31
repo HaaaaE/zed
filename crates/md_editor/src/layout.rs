@@ -14,12 +14,31 @@ pub(super) use super::inline_layout::{
 use super::inline_layout::{has_inline_atoms, wrap_boundary_glyph};
 use super::{
     DisplayInlineAtom, DisplayInlineFragment, DisplayTableRowLayout, InlineAtomMeasurementState,
-    MarkdownEditorMode, RowDisplayStyle, active_source_range_for_selection,
+    MarkdownEditorMode, active_source_range_for_selection,
     block::DisplayBlockLayout,
     display_model::{DisplayRow, DisplayTextStyle},
     inactive_rendered_element_source_ranges_for_selection, left_rail_width, ranges_overlap,
     visual_row::display_x_for_offset,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct RowDisplayStyle {
+    pub(crate) min_height: gpui::Pixels,
+    pub(crate) text_size: gpui::Pixels,
+    pub(crate) line_height: gpui::Pixels,
+    pub(crate) caret_height: gpui::Pixels,
+}
+
+impl From<md_theme::RowMetrics> for RowDisplayStyle {
+    fn from(metrics: md_theme::RowMetrics) -> Self {
+        Self {
+            min_height: metrics.min_height,
+            text_size: metrics.text_size,
+            line_height: metrics.line_height,
+            caret_height: metrics.caret_height,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct VisualDisplayRow {
