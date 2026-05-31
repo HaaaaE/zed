@@ -96,3 +96,6 @@
   - 新 perf 定位显示大文档普通字符编辑剩余卡顿主要来自首次 draw 的 incremental syntax refresh：`rendered_edit_equal_length_draw_syntax_parse` 约 1.95s，`rendered_edit_length_change_draw_syntax_parse` 约 1.58s，projection 收集约 0.26s。
   - 新 perf 定位显示大文档 `rendered_enter_delete_apply` 主要来自 apply 内 syntax refresh：parse 约 3.18s，projection 收集约 0.54s。
   - 已验证：`cargo fmt --check`、`cargo test -p markdown_wysiwyg`、`cargo test -p md_editor --profile release-fast --lib --no-run --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]'`、`cargo check -p updraft_editor`、`cargo perf-test -p md_editor -- --important`。
+  - `rendered_edit_index_for_current_buffer` 现在会在 cached `RenderedDisplayIndex` 已经匹配当前文本版本时直接复用，避免为了取当前 rendered index 额外调用 `Buffer::snapshot()`。
+  - 尝试过 text-only paragraph row-window splice，但 `cargo perf-test -p md_editor -- --important` 显示当前 `rendered_enter_delete_apply` 仍约 4.66-4.76s、syntax parse 仍约 3.12-3.16s；该实验未作为修复保留，下一步需要继续拆分 enter/delete apply 内部 syntax refresh 触发点。
+  - 已验证：`cargo fmt --check`、`cargo test -p md_editor rendered_enter_continues_unordered_task_ordered_and_blockquote_lines`、`cargo check -p updraft_editor`、`cargo test -p md_editor --profile release-fast --lib --no-run --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]'`。

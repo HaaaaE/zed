@@ -498,6 +498,12 @@ impl MarkdownEditor {
             return None;
         }
 
+        if let Some(index) = &self.display_cache.rendered_display_index
+            && index.version() == self.buffer.as_text_snapshot().version()
+        {
+            return Some(index.clone());
+        }
+
         let snapshot = self.buffer.snapshot();
         Some(self.rendered_display_index(&snapshot))
     }
