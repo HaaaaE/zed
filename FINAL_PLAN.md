@@ -548,3 +548,6 @@ Acceptance:
 - Phase 5 Enter 继续推进：空 unordered/task/ordered list item 在 Rendered Enter 时删除当前 marker 并退出 list；空 blockquote 删除 `>` marker 并退出 quote；blockquote 内空 list item 保留外层 quote marker。
 - 更新 regression test 覆盖空 list/task/ordered/blockquote Enter exit。
 - 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。
+- Phase 5 Backspace 部分完成：caret 位于 unordered/task/ordered list 正文开头时删除当前 list marker；caret 位于 blockquote 正文开头时删除 quote marker；blockquote 内 list item 开头 Backspace 保留外层 quote marker。
+- 更新 regression test 覆盖 list/task/ordered/blockquote content-start Backspace。
+- 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。

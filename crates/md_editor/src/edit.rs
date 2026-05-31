@@ -360,6 +360,19 @@ pub(crate) fn backspace_selection_in_mode(
 
     if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
         let snapshot = buffer.snapshot();
+        if let Some(removal) = rendered_line_prefix_removal_at_cursor(&snapshot, selection.head()) {
+            let (_selection, transaction_id) = replace_selection(
+                buffer,
+                &selection_for_source_range(&snapshot, selection.id, removal.range),
+                &removal.replacement,
+            );
+            let selection = collapsed_selection(
+                buffer
+                    .as_text_snapshot()
+                    .offset_to_point(removal.cursor_offset_after_edit),
+            );
+            return (selection, transaction_id);
+        }
         if let Some(deletion) = rendered_blank_paragraph_deletion_at_cursor(
             &snapshot,
             selection.head(),
@@ -397,6 +410,82 @@ pub(crate) fn backspace_selection_in_mode(
     }
 
     backspace_selection(buffer, &selection)
+}
+
+struct RenderedLinePrefixRemoval {
+    range: std::ops::Range<usize>,
+    replacement: String,
+    cursor_offset_after_edit: usize,
+}
+
+fn rendered_line_prefix_removal_at_cursor(
+    snapshot: &BufferSnapshot,
+    cursor: Point,
+) -> Option<RenderedLinePrefixRemoval> {
+    let text_snapshot = snapshot.as_text_snapshot();
+    let line_start = text_snapshot.point_to_offset(Point::new(cursor.row, 0));
+    let line_end = line_start + text_snapshot.line_len(cursor.row) as usize;
+    let line = text_snapshot
+        .text_for_range(line_start..line_end)
+        .collect::<String>();
+    let removal = rendered_line_prefix_removal(&line, cursor.column as usize)?;
+    Some(RenderedLinePrefixRemoval {
+        range: line_start..line_start + removal.delete_len,
+        replacement: removal.replacement,
+        cursor_offset_after_edit: line_start + removal.cursor_column,
+    })
+}
+
+struct RenderedLinePrefixRemovalSpec {
+    delete_len: usize,
+    replacement: String,
+    cursor_column: usize,
+}
+
+fn rendered_line_prefix_removal(
+    line: &str,
+    cursor_column: usize,
+) -> Option<RenderedLinePrefixRemovalSpec> {
+    let (quote_prefix, after_quote) = split_blockquote_prefix(line);
+    let (indent, rest) = split_ascii_indent(after_quote);
+    if let Some((marker, content)) = unordered_list_marker(rest) {
+        let task_marker = task_marker_for_content(content);
+        let marker_len = quote_prefix.len() + indent.len() + marker.len() + task_marker.len();
+        if cursor_column != marker_len
+            || content_after_optional_task_marker(content)
+                .trim()
+                .is_empty()
+        {
+            return None;
+        }
+        return Some(RenderedLinePrefixRemovalSpec {
+            delete_len: marker_len,
+            replacement: quote_prefix.to_string(),
+            cursor_column: quote_prefix.len(),
+        });
+    }
+    if let Some((_number, _delimiter, content)) = ordered_list_marker(rest) {
+        let marker_len = quote_prefix.len() + indent.len() + (rest.len() - content.len());
+        if cursor_column != marker_len || content.trim().is_empty() {
+            return None;
+        }
+        return Some(RenderedLinePrefixRemovalSpec {
+            delete_len: marker_len,
+            replacement: quote_prefix.to_string(),
+            cursor_column: quote_prefix.len(),
+        });
+    }
+    if !quote_prefix.is_empty()
+        && cursor_column == quote_prefix.len()
+        && !after_quote.trim().is_empty()
+    {
+        return Some(RenderedLinePrefixRemovalSpec {
+            delete_len: quote_prefix.len(),
+            replacement: String::new(),
+            cursor_column: 0,
+        });
+    }
+    None
 }
 
 pub fn backspace_selection(

@@ -3287,6 +3287,27 @@ fn rendered_enter_exits_empty_list_task_ordered_and_blockquote_lines() {
 }
 
 #[test]
+fn rendered_backspace_at_line_content_start_removes_list_and_quote_markers() {
+    for (source, row, column, expected, cursor) in [
+        ("- item\n", 0, 2, "item\n", Point::new(0, 0)),
+        ("- [x] done\n", 0, 6, "done\n", Point::new(0, 0)),
+        ("3) ordered\n", 0, 3, "ordered\n", Point::new(0, 0)),
+        ("> quote\n", 0, 2, "quote\n", Point::new(0, 0)),
+        ("> - item\n", 0, 4, "> item\n", Point::new(0, 2)),
+    ] {
+        let mut buffer = Buffer::local(source);
+        let selection = collapsed_selection(Point::new(row, column));
+
+        let (selection, transaction_id) =
+            backspace_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+        assert_eq!(buffer.text(), expected);
+        assert_eq!(selection, collapsed_selection(cursor));
+        assert!(transaction_id.is_some());
+    }
+}
+
+#[test]
 fn source_enter_preserves_auto_indent() {
     let mut buffer = Buffer::local("    ab");
     let selection = collapsed_selection(Point::new(0, "    a".len() as u32));
