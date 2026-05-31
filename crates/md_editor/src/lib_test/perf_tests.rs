@@ -203,11 +203,19 @@ fn replace_middle_row_word_in_rendered_without_full_index_build(
     assert!(list_stats.remeasured_items > 0);
 }
 
-fn rendered_enter_delete(editor: &gpui::Entity<MarkdownEditor>, cx: &mut gpui::VisualTestContext) {
+fn rendered_enter(editor: &gpui::Entity<MarkdownEditor>, cx: &mut gpui::VisualTestContext) {
     editor.update_in(cx, |editor, window, cx| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
 
         editor.insert_newline(&InsertNewline, window, cx);
+        assert!(!editor.serialized_text().is_empty());
+    });
+}
+
+fn rendered_delete(editor: &gpui::Entity<MarkdownEditor>, cx: &mut gpui::VisualTestContext) {
+    editor.update_in(cx, |editor, window, cx| {
+        assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
+
         editor.delete(&Delete, window, cx);
         assert!(!editor.serialized_text().is_empty());
     });
@@ -491,17 +499,32 @@ fn run_editor_session(target_bytes: usize) {
         );
         record_segment_with_markdown_syntax_stats(
             &mut segments,
-            "rendered_enter_delete_apply",
+            "rendered_enter_apply",
             [
-                "rendered_enter_delete_apply_syntax_parse",
-                "rendered_enter_delete_apply_syntax_line_starts",
-                "rendered_enter_delete_apply_syntax_blocks",
-                "rendered_enter_delete_apply_syntax_tables",
-                "rendered_enter_delete_apply_syntax_inlines",
-                "rendered_enter_delete_apply_syntax_projection",
+                "rendered_enter_apply_syntax_parse",
+                "rendered_enter_apply_syntax_line_starts",
+                "rendered_enter_apply_syntax_blocks",
+                "rendered_enter_apply_syntax_tables",
+                "rendered_enter_apply_syntax_inlines",
+                "rendered_enter_apply_syntax_projection",
             ],
             || {
-                rendered_enter_delete(&editor, cx);
+                rendered_enter(&editor, cx);
+            },
+        );
+        record_segment_with_markdown_syntax_stats(
+            &mut segments,
+            "rendered_delete_apply",
+            [
+                "rendered_delete_apply_syntax_parse",
+                "rendered_delete_apply_syntax_line_starts",
+                "rendered_delete_apply_syntax_blocks",
+                "rendered_delete_apply_syntax_tables",
+                "rendered_delete_apply_syntax_inlines",
+                "rendered_delete_apply_syntax_projection",
+            ],
+            || {
+                rendered_delete(&editor, cx);
             },
         );
         record_segment_with_markdown_syntax_stats(

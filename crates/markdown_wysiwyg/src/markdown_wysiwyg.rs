@@ -106,7 +106,42 @@ impl MarkdownParseTree {
         self.block_tree.edit(edit);
         for inline_tree in &mut self.inline_trees {
             inline_tree.tree.edit(edit);
+            inline_tree.parent_range = edit_byte_range(inline_tree.parent_range.clone(), edit);
         }
+    }
+}
+
+fn edit_byte_range(range: Range<usize>, edit: &InputEdit) -> Range<usize> {
+    let start = edit.start_byte;
+    let old_end = edit.old_end_byte;
+    let new_end = edit.new_end_byte;
+
+    if range.end <= start {
+        return range;
+    }
+
+    if range.start >= old_end {
+        return shift_byte_range(range, old_end, new_end);
+    }
+
+    let edited_start = range.start.min(start);
+    let edited_end = if range.end >= old_end {
+        shift_byte_offset(range.end, old_end, new_end)
+    } else {
+        new_end
+    };
+    edited_start..edited_end
+}
+
+fn shift_byte_range(range: Range<usize>, old_end: usize, new_end: usize) -> Range<usize> {
+    shift_byte_offset(range.start, old_end, new_end)..shift_byte_offset(range.end, old_end, new_end)
+}
+
+fn shift_byte_offset(offset: usize, old_end: usize, new_end: usize) -> usize {
+    if new_end >= old_end {
+        offset + (new_end - old_end)
+    } else {
+        offset.saturating_sub(old_end - new_end)
     }
 }
 
@@ -268,7 +303,7 @@ pub struct MarkdownRangeSemantics {
 
 impl MarkdownSyntaxTree {
     pub fn parse(source: &str) -> Self {
-        Self::parse_with_previous_tree(source, None)
+        Self::parse_with_previous_tree(source, None, None)
     }
 
     #[cfg(any(test, perf_enabled))]
@@ -310,7 +345,7 @@ impl MarkdownSyntaxTree {
             new_end_position: point_for_offset(&new_line_starts, new_range.end),
         });
 
-        Self::parse_with_previous_tree(new_source, Some(&edited_tree))
+        Self::parse_with_previous_tree(new_source, Some(&edited_tree), Some(&new_range))
     }
 
     pub fn parse_tree(&self) -> &MarkdownParseTree {
@@ -669,8 +704,12 @@ impl MarkdownSyntaxTree {
         source_ranges
     }
 
-    fn parse_with_previous_tree(source: &str, old_tree: Option<&MarkdownParseTree>) -> Self {
-        let tree = record_timed_parse(|| parse_markdown(source, old_tree));
+    fn parse_with_previous_tree(
+        source: &str,
+        old_tree: Option<&MarkdownParseTree>,
+        changed_range: Option<&Range<usize>>,
+    ) -> Self {
+        let tree = record_timed_parse(|| parse_markdown(source, old_tree, changed_range));
         let line_starts = record_timed_line_start_collect(|| line_starts(source));
         let blocks =
             record_timed_block_collect(|| collect_blocks(source, &line_starts, tree.block_tree()));
