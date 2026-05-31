@@ -10,6 +10,7 @@ use md_buffer::BufferSnapshot;
 use md_text::{Point, Selection};
 use md_theme::{default_row_metrics, editor_palette, heading_row_metrics};
 
+use super::rendered_element::rendered_element_descriptor_for_inline_span_in_row;
 use super::{
     DisplayInlineAtom, DisplayInlineFragment, DisplayInlineRowInputs, DisplayTableRowLayout,
     InlineAtomMeasurementState, MarkdownEditorMode, RowDisplayStyle,
@@ -17,7 +18,6 @@ use super::{
     block::DisplayBlockLayout,
     display_model::{DisplayRow, DisplayTextStyle, StyledDisplaySegment},
     inactive_rendered_element_source_ranges_for_selection, left_rail_width, ranges_overlap,
-    rendered_element_descriptor_for_inline_span_in_row,
     visual_row::display_x_for_offset,
 };
 

@@ -3,6 +3,8 @@ use std::{ops::Range, sync::Arc};
 use markdown_wysiwyg::MarkdownBlockKind;
 use md_buffer::BufferSnapshot;
 
+use crate::display_row_builder::row_source_range;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DisplayItemId(pub(crate) u64);
 
@@ -68,7 +70,7 @@ impl RenderedDisplayIndex {
 
             if kind == RenderedDisplayItemKind::TableRow {
                 for row in block.row_range.clone() {
-                    let source_range = super::row_source_range(snapshot, row as u32);
+                    let source_range = row_source_range(snapshot, row as u32);
                     push_item(
                         &mut items,
                         &mut covered_rows,
@@ -94,7 +96,7 @@ impl RenderedDisplayIndex {
                 );
             } else {
                 for row in block.row_range.clone() {
-                    let source_range = super::row_source_range(snapshot, row as u32);
+                    let source_range = row_source_range(snapshot, row as u32);
                     push_item(
                         &mut items,
                         &mut covered_rows,
@@ -112,7 +114,7 @@ impl RenderedDisplayIndex {
             if covered_rows[row] {
                 continue;
             }
-            let source_range = super::row_source_range(snapshot, row as u32);
+            let source_range = row_source_range(snapshot, row as u32);
             if source_range_is_blank(snapshot, source_range.clone()) {
                 if blank_row_roles[row] == Some(BlankRowRole::EmptyParagraph) {
                     push_item(
@@ -205,7 +207,7 @@ fn assign_blank_row_roles(
     let mut row = 0;
     while row < blank_row_roles.len() {
         if covered_rows[row]
-            || !source_range_is_blank(snapshot, super::row_source_range(snapshot, row as u32))
+            || !source_range_is_blank(snapshot, row_source_range(snapshot, row as u32))
         {
             row += 1;
             continue;
@@ -214,7 +216,7 @@ fn assign_blank_row_roles(
         let run_start = row;
         while row < blank_row_roles.len()
             && !covered_rows[row]
-            && source_range_is_blank(snapshot, super::row_source_range(snapshot, row as u32))
+            && source_range_is_blank(snapshot, row_source_range(snapshot, row as u32))
         {
             row += 1;
         }
@@ -290,8 +292,8 @@ fn source_range_for_row_range(snapshot: &BufferSnapshot, row_range: Range<usize>
         return end..end;
     }
 
-    let start = super::row_source_range(snapshot, row_range.start as u32).start;
-    let end = super::row_source_range(snapshot, row_range.end.saturating_sub(1) as u32).end;
+    let start = row_source_range(snapshot, row_range.start as u32).start;
+    let end = row_source_range(snapshot, row_range.end.saturating_sub(1) as u32).end;
     start..end
 }
 

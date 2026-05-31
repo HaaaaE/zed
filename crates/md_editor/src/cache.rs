@@ -14,8 +14,10 @@ use super::{
     DisplayRowLayoutInputs, DisplayRowProjectionState, DisplayRowTextLayout,
     InlineAtomMeasurementKey, InlineAtomMeasurementState, LocalSourceEditInvalidation,
     MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, RowLayoutCacheKey, RowLayoutInputCacheKey,
-    clip_selection, layout::DisplayRowCacheKey, ranges_overlap, rendered_display_row,
-    source_display_row_in_text_snapshot,
+    clip_selection, layout::DisplayRowCacheKey, ranges_overlap,
+};
+use crate::display_row_builder::{
+    rendered_display_row, rendered_item_display_source_range, source_display_row_in_text_snapshot,
 };
 use crate::layout::{
     display_row_layout_inputs, effective_text_wrap_width, source_display_row_layout_inputs,
@@ -170,7 +172,7 @@ impl MarkdownEditor {
         let active_cursor_maps_to_item = display_row_state.active_cursor.is_some_and(|cursor| {
             index.item_index_for_source_row(cursor.row as usize) == Some(item_index)
         });
-        let (row, source_range, source_row_range) = super::rendered_item_display_source_range(
+        let (row, source_range, source_row_range) = rendered_item_display_source_range(
             snapshot,
             &item,
             display_row_state,

@@ -6,6 +6,7 @@ use super::rendered_element::{
 };
 use super::{
     MarkdownEditorMode,
+    display_row_builder::row_source_range,
     rendered_index::{RenderedDisplayIndex, RenderedDisplayItemKind},
     selection::{
         HorizontalDirection, clip_selection_in_text_snapshot, collapsed_selection,
@@ -404,7 +405,7 @@ fn previous_editable_point_before_row(snapshot: &BufferSnapshot, row: usize) -> 
 fn source_row_is_blank(snapshot: &BufferSnapshot, row: usize) -> bool {
     snapshot
         .as_text_snapshot()
-        .text_for_range(super::row_source_range(snapshot, row as u32))
+        .text_for_range(row_source_range(snapshot, row as u32))
         .all(|chunk| chunk.trim().is_empty())
 }
 

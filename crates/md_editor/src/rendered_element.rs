@@ -5,9 +5,9 @@ use md_buffer::BufferSnapshot;
 use md_text::{Point, Selection, SelectionGoal};
 
 use super::{
-    clip_cursor, clip_selection, markdown_image::MarkdownImageSource, range_contains,
-    ranges_overlap, row_source_range, row_text, selection::HorizontalDirection,
-    selection_byte_range,
+    clip_cursor, clip_selection, display_row_builder::row_source_range,
+    markdown_image::MarkdownImageSource, range_contains, ranges_overlap, row_text,
+    selection::HorizontalDirection, selection_byte_range,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

@@ -12,14 +12,15 @@ use md_theme::editor_palette;
 
 use super::rendered_element::{
     RenderedElementDescriptor, RenderedElementKind, RenderedElementPlacement,
+    rendered_element_descriptor_for_inline_span_in_row,
 };
 use super::{
     MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, VisualLineBoundary, clip_cursor,
     display_model::DisplayRow,
     formula_render::{FormulaRenderMode, FormulaRenderState, formula_render_key, render_formula},
     markdown_image::MarkdownImageSource,
-    range_contains, ranges_overlap, rendered_element_descriptor_for_inline_span_in_row,
-    rendered_element_source_range_is_active, selection_byte_range, visual_horizontal_goal,
+    range_contains, ranges_overlap, rendered_element_source_range_is_active, selection_byte_range,
+    visual_horizontal_goal,
 };
 
 pub(super) const RENDERED_IMAGE_BLOCK_PLACEHOLDER_HEIGHT: gpui::Pixels = px(120.);
