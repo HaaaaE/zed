@@ -17,14 +17,15 @@ use crate::{
     MarkdownEditorMode,
     display_model::{DisplayInsertion, DisplayRow},
     inline_atom::INLINE_IMAGE_PLACEHOLDER,
-    layout::DisplayRowProjectionState,
     range_contains, ranges_overlap,
     rendered_element::{
         RenderedElementDescriptor, RenderedElementPlacement,
         rendered_element_descriptor_for_inline_span_in_row,
     },
-    rendered_index::{self, DisplayItemId, RenderedDisplayItem},
+    rendered_index::{self, DisplayItemId},
 };
+#[cfg(test)]
+use crate::{layout::DisplayRowProjectionState, rendered_topology::RenderedTopology};
 
 pub fn display_rows(snapshot: &BufferSnapshot, range: Range<usize>) -> Vec<DisplayRow> {
     display_rows_in_text_snapshot(snapshot.as_text_snapshot(), range)
@@ -87,52 +88,6 @@ pub(crate) fn rendered_display_index_for_tests(
     RenderedDisplayIndex::build(snapshot)
 }
 
-pub(crate) fn rendered_item_display_source_range(
-    snapshot: &BufferSnapshot,
-    item: &RenderedDisplayItem,
-    display_row_state: &DisplayRowProjectionState,
-    active_cursor_maps_to_item: bool,
-) -> (u32, Range<usize>, Range<usize>) {
-    let mut source_range = item.source_range.clone();
-    let mut source_row_range = item.row_range.clone();
-    if active_cursor_maps_to_item
-        && matches!(
-            item.kind,
-            rendered_index::RenderedDisplayItemKind::Paragraph
-                | rendered_index::RenderedDisplayItemKind::Heading
-        )
-        && let Some(cursor) = display_row_state.active_cursor
-        && cursor.row as usize >= item.row_range.end
-    {
-        let text_snapshot = snapshot.as_text_snapshot();
-        let cursor_offset = text_snapshot.point_to_offset(cursor);
-        let cursor_at_trailing_blank_tail = text_snapshot
-            .text_for_range(cursor_offset..text_snapshot.len())
-            .all(|chunk| chunk.chars().all(is_line_break_char));
-        let active_trailing_break =
-            display_row_state
-                .active_source_range
-                .as_ref()
-                .is_some_and(|range| {
-                    range.start == item.source_range.end && range.end == cursor_offset
-                })
-                || cursor.row as usize == item.row_range.end
-                    && cursor_starts_multi_blank_run(text_snapshot, cursor.row as usize)
-                || cursor_at_trailing_blank_tail;
-        if cursor_offset > item.source_range.end
-            && active_trailing_break
-            && text_snapshot
-                .text_for_range(item.source_range.end..cursor_offset)
-                .all(|chunk| chunk.chars().all(is_line_break_char))
-        {
-            source_range.end = cursor_offset;
-            source_row_range.end = cursor.row as usize + 1;
-        }
-    }
-
-    (item.row_range.start as u32, source_range, source_row_range)
-}
-
 #[cfg(test)]
 pub(crate) fn rendered_display_row_for_item_for_tests(
     snapshot: &BufferSnapshot,
@@ -146,12 +101,9 @@ pub(crate) fn rendered_display_row_for_item_for_tests(
     let active_cursor_maps_to_item = display_row_state.active_cursor.is_some_and(|cursor| {
         index.item_index_for_source_row(cursor.row as usize) == Some(item_index)
     });
-    let (row, source_range, source_row_range) = rendered_item_display_source_range(
-        snapshot,
-        item,
-        &display_row_state,
-        active_cursor_maps_to_item,
-    );
+    let topology = RenderedTopology::new(snapshot, index.clone());
+    let (row, source_range, source_row_range) =
+        topology.item_display_source_range(item, &display_row_state, active_cursor_maps_to_item);
     let range_semantics = snapshot.syntax_tree().range_semantics_for_source_range(
         source_range.clone(),
         display_row_state.active_source_range.clone(),
@@ -333,19 +285,6 @@ pub(crate) fn row_source_range_in_text_snapshot(
     start..end
 }
 
-fn cursor_starts_multi_blank_run(snapshot: &TextBufferSnapshot, row: usize) -> bool {
-    let row_count = snapshot.row_count() as usize;
-    row.saturating_add(1) < row_count
-        && source_row_is_blank_in_text_snapshot(snapshot, row)
-        && source_row_is_blank_in_text_snapshot(snapshot, row.saturating_add(1))
-}
-
-fn source_row_is_blank_in_text_snapshot(snapshot: &TextBufferSnapshot, row: usize) -> bool {
-    snapshot
-        .text_for_range(row_source_range_in_text_snapshot(snapshot, row as u32))
-        .all(|chunk| chunk.trim().is_empty())
-}
-
 fn project_display_row_text(
     source_text: &str,
     row_source_range: &Range<usize>,
@@ -442,10 +381,6 @@ fn trailing_line_break_count(text: &str) -> usize {
         }
     }
     count
-}
-
-fn is_line_break_char(ch: char) -> bool {
-    matches!(ch, '\n' | '\r')
 }
 
 fn restore_rendered_soft_breaks(

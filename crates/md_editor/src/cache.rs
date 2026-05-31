@@ -16,14 +16,13 @@ use super::{
     MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, RowLayoutCacheKey, RowLayoutInputCacheKey,
     clip_selection, layout::DisplayRowCacheKey, ranges_overlap,
 };
-use crate::display_row_builder::{
-    rendered_display_row, rendered_item_display_source_range, source_display_row_in_text_snapshot,
-};
+use crate::display_row_builder::{rendered_display_row, source_display_row_in_text_snapshot};
 use crate::layout::{
     display_row_layout_inputs, effective_text_wrap_width, source_display_row_layout_inputs,
     text_layout_for_display_row_inputs,
 };
 use crate::rendered_index::source_display_item_id;
+use crate::rendered_topology::RenderedTopology;
 
 fn row_source_range_in_text_snapshot_for_cache(
     snapshot: &TextBufferSnapshot,
@@ -172,8 +171,8 @@ impl MarkdownEditor {
         let active_cursor_maps_to_item = display_row_state.active_cursor.is_some_and(|cursor| {
             index.item_index_for_source_row(cursor.row as usize) == Some(item_index)
         });
-        let (row, source_range, source_row_range) = rendered_item_display_source_range(
-            snapshot,
+        let topology = RenderedTopology::new(snapshot, index.clone());
+        let (row, source_range, source_row_range) = topology.item_display_source_range(
             &item,
             display_row_state,
             active_cursor_maps_to_item,

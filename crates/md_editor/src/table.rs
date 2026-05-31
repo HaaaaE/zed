@@ -10,12 +10,12 @@ use md_buffer::BufferSnapshot;
 use md_text::{Point, Selection, SelectionGoal};
 use md_theme::editor_palette;
 
+use super::visual_row::{VisualLineBoundary, visual_horizontal_goal};
 use super::{
-    MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, VisualLineBoundary, clip_cursor,
+    MarkdownEditor, MarkdownEditorMode, RowDisplayStyle, clip_cursor,
     display_model::{DisplayRow, DisplayTextStyle, StyledDisplaySegment},
     layout::{inline_style, text_runs_for_segments, text_runs_on_char_boundaries},
     range_contains, render_text_piece, rendered_element_source_range_is_active,
-    visual_horizontal_goal,
 };
 
 const TABLE_CELL_HORIZONTAL_PADDING: gpui::Pixels = px(8.);
