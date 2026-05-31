@@ -1,6 +1,10 @@
+use std::sync::Arc;
+
 use super::rendered_edit::{
-    RenderedEditPlan, plan_rendered_delete_backward, plan_rendered_delete_forward,
-    plan_rendered_insert_paragraph_break, plan_rendered_insert_soft_break,
+    RenderedEditPlan, plan_rendered_delete_backward, plan_rendered_delete_backward_with_index,
+    plan_rendered_delete_forward, plan_rendered_delete_forward_with_index,
+    plan_rendered_insert_paragraph_break, plan_rendered_insert_paragraph_break_with_index,
+    plan_rendered_insert_soft_break, plan_rendered_insert_soft_break_with_index,
     rendered_blank_run_normalization_after_delete,
 };
 use super::{
@@ -10,6 +14,7 @@ use super::{
     },
 };
 use md_buffer::{Buffer, BufferEditSummary, BufferSnapshot};
+use md_projection::RenderedDisplayIndex;
 use md_text::{Point, Selection, SelectionGoal};
 
 pub fn replace_selection(
@@ -40,14 +45,24 @@ pub fn replace_selection(
     (collapsed_selection(cursor), summary)
 }
 
+#[cfg(test)]
 pub(crate) fn insert_newline_in_mode(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
 ) -> (Selection<Point>, Option<BufferEditSummary>) {
+    insert_newline_in_mode_with_rendered_index(buffer, selection, mode, None)
+}
+
+pub(crate) fn insert_newline_in_mode_with_rendered_index(
+    buffer: &mut Buffer,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+    rendered_index: Option<Arc<RenderedDisplayIndex>>,
+) -> (Selection<Point>, Option<BufferEditSummary>) {
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Rendered {
-        return insert_rendered_newline(buffer, &selection);
+        return insert_rendered_newline(buffer, &selection, rendered_index);
     }
 
     let current_line_indent =
@@ -59,9 +74,15 @@ pub(crate) fn insert_newline_in_mode(
 fn insert_rendered_newline(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
+    rendered_index: Option<Arc<RenderedDisplayIndex>>,
 ) -> (Selection<Point>, Option<BufferEditSummary>) {
     let snapshot = buffer.snapshot();
-    if let Some(plan) = plan_rendered_insert_paragraph_break(&snapshot, selection) {
+    let plan = if let Some(index) = rendered_index {
+        plan_rendered_insert_paragraph_break_with_index(&snapshot, index, selection)
+    } else {
+        plan_rendered_insert_paragraph_break(&snapshot, selection)
+    };
+    if let Some(plan) = plan {
         return apply_rendered_edit_plan(buffer, plan);
     }
 
@@ -103,40 +124,63 @@ fn apply_rendered_edit_plan(
     (selection_after, summary)
 }
 
+#[cfg(test)]
 pub(crate) fn insert_soft_break_in_mode(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
 ) -> (Selection<Point>, Option<BufferEditSummary>) {
+    insert_soft_break_in_mode_with_rendered_index(buffer, selection, mode, None)
+}
+
+pub(crate) fn insert_soft_break_in_mode_with_rendered_index(
+    buffer: &mut Buffer,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+    rendered_index: Option<Arc<RenderedDisplayIndex>>,
+) -> (Selection<Point>, Option<BufferEditSummary>) {
     let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
     if mode == MarkdownEditorMode::Source {
-        return insert_newline_in_mode(buffer, &selection, mode);
+        return insert_newline_in_mode_with_rendered_index(buffer, &selection, mode, None);
     }
 
     let snapshot = buffer.snapshot();
-    if let Some(plan) = plan_rendered_insert_soft_break(&snapshot, &selection) {
+    let plan = if let Some(index) = rendered_index {
+        plan_rendered_insert_soft_break_with_index(&snapshot, index, &selection)
+    } else {
+        plan_rendered_insert_soft_break(&snapshot, &selection)
+    };
+    if let Some(plan) = plan {
         return apply_rendered_edit_plan(buffer, plan);
     }
 
     replace_selection(buffer, &selection, "\n")
 }
 
+#[cfg(test)]
 pub(crate) fn backspace_selection_in_mode(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
 ) -> (Selection<Point>, Option<BufferEditSummary>) {
-    let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
-    if mode == MarkdownEditorMode::Rendered && !selection.is_empty() {
-        let snapshot = buffer.snapshot();
-        if let Some(plan) = plan_rendered_delete_backward(&snapshot, &selection) {
-            return apply_rendered_edit_plan(buffer, plan);
-        }
-    }
+    backspace_selection_in_mode_with_rendered_index(buffer, selection, mode, None)
+}
 
-    if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
+pub(crate) fn backspace_selection_in_mode_with_rendered_index(
+    buffer: &mut Buffer,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+    rendered_index: Option<Arc<RenderedDisplayIndex>>,
+) -> (Selection<Point>, Option<BufferEditSummary>) {
+    let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
+    if mode == MarkdownEditorMode::Rendered {
         let snapshot = buffer.snapshot();
-        if let Some(plan) = plan_rendered_delete_backward(&snapshot, &selection) {
+        let plan = if let Some(index) = rendered_index {
+            plan_rendered_delete_backward_with_index(&snapshot, index, &selection)
+        } else {
+            plan_rendered_delete_backward(&snapshot, &selection)
+        };
+        if let Some(plan) = plan {
             return apply_rendered_edit_plan(buffer, plan);
         }
     }
@@ -175,22 +219,30 @@ pub fn backspace_selection(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn delete_selection_in_mode(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
     mode: MarkdownEditorMode,
 ) -> (Selection<Point>, Option<BufferEditSummary>) {
-    let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
-    if mode == MarkdownEditorMode::Rendered && !selection.is_empty() {
-        let snapshot = buffer.snapshot();
-        if let Some(plan) = plan_rendered_delete_forward(&snapshot, &selection) {
-            return apply_rendered_edit_plan(buffer, plan);
-        }
-    }
+    delete_selection_in_mode_with_rendered_index(buffer, selection, mode, None)
+}
 
-    if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
+pub(crate) fn delete_selection_in_mode_with_rendered_index(
+    buffer: &mut Buffer,
+    selection: &Selection<Point>,
+    mode: MarkdownEditorMode,
+    rendered_index: Option<Arc<RenderedDisplayIndex>>,
+) -> (Selection<Point>, Option<BufferEditSummary>) {
+    let selection = clip_selection_in_text_snapshot(buffer.as_text_snapshot(), selection);
+    if mode == MarkdownEditorMode::Rendered {
         let snapshot = buffer.snapshot();
-        if let Some(plan) = plan_rendered_delete_forward(&snapshot, &selection) {
+        let plan = if let Some(index) = rendered_index {
+            plan_rendered_delete_forward_with_index(&snapshot, index, &selection)
+        } else {
+            plan_rendered_delete_forward(&snapshot, &selection)
+        };
+        if let Some(plan) = plan {
             return apply_rendered_edit_plan(buffer, plan);
         }
     }

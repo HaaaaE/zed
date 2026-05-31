@@ -207,6 +207,7 @@ fn replace_middle_row_word_in_rendered_without_full_index_build(
 }
 
 fn rendered_enter_delete(editor: &gpui::Entity<MarkdownEditor>, cx: &mut gpui::VisualTestContext) {
+    RenderedDisplayIndex::reset_stats_for_tests();
     editor.update_in(cx, |editor, window, cx| {
         assert_eq!(editor.mode(), MarkdownEditorMode::Rendered);
 
@@ -214,6 +215,9 @@ fn rendered_enter_delete(editor: &gpui::Entity<MarkdownEditor>, cx: &mut gpui::V
         editor.delete(&Delete, window, cx);
         assert!(!editor.serialized_text().is_empty());
     });
+    let index_stats = RenderedDisplayIndex::stats_for_tests();
+    assert_eq!(index_stats.full_builds, 0);
+    assert!(index_stats.incremental_updates >= 1);
 }
 
 const SMALL_SESSION_ITERATIONS: usize = 16;

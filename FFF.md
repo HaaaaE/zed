@@ -82,3 +82,6 @@
   - `RenderedDisplayIndexStats` 增加 full build row/block 扫描数和 incremental item 扫描数，普通 Render 编辑测试/perf 断言现在确认走了 incremental scan。
   - `RenderedDisplayIndex::update_after_edit` 增加 row-count dirty window splice：对插入换行、paragraph break、删除 blank boundary 等行数变化编辑，与 full build 的 items、row mappings、blank roles 保持一致，避免直接 fallback 到 full rendered index build。
   - 已验证：`cargo test -p md_projection`、`cargo test -p md_editor rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build`、`cargo check -p updraft_editor`。
+  - rendered edit planning 增加带 `RenderedDisplayIndex` 的路径；编辑器动作在 Render 模式下把当前 cached index 传入 newline/backspace/delete planning，避免 planning 阶段额外 `RenderedDisplayIndex::build`。
+  - `rendered_enter_delete` perf helper 现在断言 apply 阶段 `full_builds = 0` 且发生 incremental update。
+  - 已验证：`cargo fmt --check`、`cargo test -p md_editor rendered_enter_continues_unordered_task_ordered_and_blockquote_lines`、`cargo test -p md_editor --profile release-fast --lib --no-run --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]'`。

@@ -39,8 +39,13 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
-        let (selection, summary) =
-            backspace_selection_in_mode(&mut self.buffer, &self.selection, self.mode);
+        let rendered_index = self.rendered_edit_index_for_current_buffer();
+        let (selection, summary) = backspace_selection_in_mode_with_rendered_index(
+            &mut self.buffer,
+            &self.selection,
+            self.mode,
+            rendered_index,
+        );
         let changed = summary.is_some();
         let transaction_id = summary.as_ref().and_then(|summary| summary.transaction_id);
         self.selection = selection;
@@ -60,8 +65,13 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
-        let (selection, summary) =
-            delete_selection_in_mode(&mut self.buffer, &self.selection, self.mode);
+        let rendered_index = self.rendered_edit_index_for_current_buffer();
+        let (selection, summary) = delete_selection_in_mode_with_rendered_index(
+            &mut self.buffer,
+            &self.selection,
+            self.mode,
+            rendered_index,
+        );
         let changed = summary.is_some();
         let transaction_id = summary.as_ref().and_then(|summary| summary.transaction_id);
         self.selection = selection;
@@ -409,10 +419,21 @@ impl MarkdownEditor {
         let selection_before = self.selection.clone();
         let previous_selection = self.selection.clone();
         let row_count_before = self.display_list_state.item_count();
+        let rendered_index = self.rendered_edit_index_for_current_buffer();
         let (selection, summary) = if soft_break {
-            insert_soft_break_in_mode(&mut self.buffer, &self.selection, self.mode)
+            insert_soft_break_in_mode_with_rendered_index(
+                &mut self.buffer,
+                &self.selection,
+                self.mode,
+                rendered_index,
+            )
         } else {
-            insert_newline_in_mode(&mut self.buffer, &self.selection, self.mode)
+            insert_newline_in_mode_with_rendered_index(
+                &mut self.buffer,
+                &self.selection,
+                self.mode,
+                rendered_index,
+            )
         };
         let changed = summary.is_some();
         let transaction_id = summary.as_ref().and_then(|summary| summary.transaction_id);
@@ -470,6 +491,15 @@ impl MarkdownEditor {
             cx,
         );
         changed
+    }
+
+    fn rendered_edit_index_for_current_buffer(&mut self) -> Option<Arc<RenderedDisplayIndex>> {
+        if self.mode != MarkdownEditorMode::Rendered {
+            return None;
+        }
+
+        let snapshot = self.buffer.snapshot();
+        Some(self.rendered_display_index(&snapshot))
     }
 
     pub(crate) fn record_selection_history(

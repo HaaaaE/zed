@@ -69,9 +69,14 @@ use display_row_builder::{
 };
 use display_row_builder::{display_rows_in_text_snapshot, row_text_in_text_snapshot};
 pub use edit::{backspace_selection, current_line_indent, delete_selection, replace_selection};
+#[cfg(test)]
 use edit::{
     backspace_selection_in_mode, delete_selection_in_mode, insert_newline_in_mode,
     insert_soft_break_in_mode,
+};
+use edit::{
+    backspace_selection_in_mode_with_rendered_index, delete_selection_in_mode_with_rendered_index,
+    insert_newline_in_mode_with_rendered_index, insert_soft_break_in_mode_with_rendered_index,
 };
 use inline_atom::{
     DisplayInlineAtom, DisplayInlineAtomKind, DisplayInlineFragment, DisplayInlineRowInputs,

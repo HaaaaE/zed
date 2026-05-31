@@ -78,8 +78,7 @@ struct RenderedEditContext<'a> {
 }
 
 impl<'a> RenderedEditContext<'a> {
-    fn new(snapshot: &'a BufferSnapshot) -> Self {
-        let index = RenderedDisplayIndex::build(snapshot);
+    fn new_with_index(snapshot: &'a BufferSnapshot, index: Arc<RenderedDisplayIndex>) -> Self {
         let topology = RenderedTopology::new(snapshot, index.clone());
         Self {
             snapshot,
@@ -93,7 +92,19 @@ pub(crate) fn plan_rendered_insert_paragraph_break(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Option<RenderedEditPlan> {
-    let context = RenderedEditContext::new(snapshot);
+    plan_rendered_insert_paragraph_break_with_index(
+        snapshot,
+        RenderedDisplayIndex::build(snapshot),
+        selection,
+    )
+}
+
+pub(crate) fn plan_rendered_insert_paragraph_break_with_index(
+    snapshot: &BufferSnapshot,
+    index: Arc<RenderedDisplayIndex>,
+    selection: &Selection<Point>,
+) -> Option<RenderedEditPlan> {
+    let context = RenderedEditContext::new_with_index(snapshot, index);
     if !selection.is_empty() {
         return Some(replace_selection_plan(
             snapshot,
@@ -186,7 +197,19 @@ pub(crate) fn plan_rendered_insert_soft_break(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Option<RenderedEditPlan> {
-    let context = RenderedEditContext::new(snapshot);
+    plan_rendered_insert_soft_break_with_index(
+        snapshot,
+        RenderedDisplayIndex::build(snapshot),
+        selection,
+    )
+}
+
+pub(crate) fn plan_rendered_insert_soft_break_with_index(
+    snapshot: &BufferSnapshot,
+    index: Arc<RenderedDisplayIndex>,
+    selection: &Selection<Point>,
+) -> Option<RenderedEditPlan> {
+    let context = RenderedEditContext::new_with_index(snapshot, index);
     if !selection.is_empty() {
         return Some(replace_selection_plan(
             snapshot,
@@ -255,7 +278,19 @@ pub(crate) fn plan_rendered_delete_backward(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Option<RenderedEditPlan> {
-    let context = RenderedEditContext::new(snapshot);
+    plan_rendered_delete_backward_with_index(
+        snapshot,
+        RenderedDisplayIndex::build(snapshot),
+        selection,
+    )
+}
+
+pub(crate) fn plan_rendered_delete_backward_with_index(
+    snapshot: &BufferSnapshot,
+    index: Arc<RenderedDisplayIndex>,
+    selection: &Selection<Point>,
+) -> Option<RenderedEditPlan> {
+    let context = RenderedEditContext::new_with_index(snapshot, index);
     if !selection.is_empty() {
         return Some(delete_rendered_selection_plan(snapshot, selection));
     }
@@ -301,7 +336,19 @@ pub(crate) fn plan_rendered_delete_forward(
     snapshot: &BufferSnapshot,
     selection: &Selection<Point>,
 ) -> Option<RenderedEditPlan> {
-    let context = RenderedEditContext::new(snapshot);
+    plan_rendered_delete_forward_with_index(
+        snapshot,
+        RenderedDisplayIndex::build(snapshot),
+        selection,
+    )
+}
+
+pub(crate) fn plan_rendered_delete_forward_with_index(
+    snapshot: &BufferSnapshot,
+    index: Arc<RenderedDisplayIndex>,
+    selection: &Selection<Point>,
+) -> Option<RenderedEditPlan> {
+    let context = RenderedEditContext::new_with_index(snapshot, index);
     if !selection.is_empty() {
         return Some(delete_rendered_selection_plan(snapshot, selection));
     }
