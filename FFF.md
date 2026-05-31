@@ -88,3 +88,6 @@
   - `Buffer` 现在维护与 cached syntax 同步的 source string；普通单编辑会增量更新这份 source，`refresh_syntax_tree` 的 incremental reparse 不再调用 `self.text.snapshot().text()` 做全文 source copy。
   - `BufferSyntaxStats` 回归更新为 incremental syntax refresh 时 `full_source_copies = 0`。
   - 已验证：`cargo test -p md_buffer`、`cargo test -p md_editor rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build`、`cargo check -p updraft_editor`、`cargo test -p md_editor --profile release-fast --lib --no-run --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]'`。
+  - `cargo perf-test -p md_editor -- --important` 已跑通并输出 apply/draw 分段：大文档 `rendered_edit_equal_length_apply` 约 9.77ms、`rendered_edit_length_change_apply` 约 8.86ms，普通编辑同步 apply 已不再是多秒级。
+  - 当前 perf 仍显示剩余热点：大文档 `rendered_edit_equal_length_draw_after_edit` 约 2.68s、`rendered_edit_length_change_draw_after_edit` 约 2.27s、`rendered_enter_delete_apply` 约 4.78s；下一步继续收紧 draw-after-edit syntax/derived semantics 和 enter/delete dirty-window fallback。
+  - 已验证：`cargo perf-test -p md_editor -- --important`。
