@@ -150,7 +150,6 @@ fn replace_middle_row_word(
         let (selection, summary) = replace_selection(&mut editor.buffer, &editor.selection, to);
         let changed = summary.is_some();
         let transaction_id = summary.as_ref().and_then(|summary| summary.transaction_id);
-        let byte_delta = summary.as_ref().map(|summary| summary.byte_delta);
 
         editor.selection = selection;
         editor.record_selection_history(
@@ -162,7 +161,9 @@ fn replace_middle_row_word(
             changed,
             row_count_before,
             &previous_selection,
-            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+            EditLayoutInvalidation::LocalSourceSelection {
+                edit_summary: summary,
+            },
             cx,
         );
 

@@ -29,8 +29,13 @@
     - `PendingIncrementalReparse` 不再保存旧全文 `String`。
     - `MarkdownSyntaxTree::reparse_after_edit_range` 使用现有 tree 的旧 `line_starts` 和 edit summary 的 old/new range 计算 tree-sitter `InputEdit`。
     - 已通过 `cargo test -p markdown_wysiwyg` 和 `cargo test -p md_buffer`。
+  - [x] `RenderedDisplayIndex::update_after_edit` 普通输入增量子集：
+    - 覆盖 row count 不变、同一 rendered item 内的单行编辑。
+    - 更新 affected item，并按 byte delta 平移后续 item source offsets；复杂结构编辑返回 fallback。
+    - editor rendered edit 通知路径先尝试 cached index 增量更新，再 fallback full build。
+    - 已通过 `cargo test -p md_projection`、`cargo test -p md_editor` 和 `cargo check -p updraft_editor`。
   - [ ] 待完成：Markdown syntax tree 基于 edit summary 的增量 reparse，移除 old/new 全文复制热路径。
-  - [ ] 待完成：`RenderedDisplayIndex::update_after_edit` 真增量更新及等价性测试。
+  - [ ] 待完成：`RenderedDisplayIndex::update_after_edit` 扩展到 dirty row window、blank-run/list/table/code-fence 等结构边界编辑。
   - [ ] 待完成：md_editor perf suite 的 rendered edit 回归场景与 important perf gate。
 
   ## Key Changes

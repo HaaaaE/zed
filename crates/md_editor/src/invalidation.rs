@@ -1,9 +1,13 @@
 use std::ops::Range;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+use md_buffer::BufferEditSummary;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum EditLayoutInvalidation {
     Conservative,
-    LocalSourceSelection { byte_delta: Option<isize> },
+    LocalSourceSelection {
+        edit_summary: Option<BufferEditSummary>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]

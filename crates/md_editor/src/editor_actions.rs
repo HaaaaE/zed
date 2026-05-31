@@ -42,15 +42,16 @@ impl MarkdownEditor {
         let (selection, summary) =
             backspace_selection_in_mode(&mut self.buffer, &self.selection, self.mode);
         let changed = summary.is_some();
-        let byte_delta = summary.as_ref().map(|summary| summary.byte_delta);
-        let transaction_id = summary.and_then(|summary| summary.transaction_id);
+        let transaction_id = summary.as_ref().and_then(|summary| summary.transaction_id);
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(
             changed,
             row_count_before,
             &previous_selection,
-            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+            EditLayoutInvalidation::LocalSourceSelection {
+                edit_summary: summary,
+            },
             cx,
         );
     }
@@ -62,15 +63,16 @@ impl MarkdownEditor {
         let (selection, summary) =
             delete_selection_in_mode(&mut self.buffer, &self.selection, self.mode);
         let changed = summary.is_some();
-        let byte_delta = summary.as_ref().map(|summary| summary.byte_delta);
-        let transaction_id = summary.and_then(|summary| summary.transaction_id);
+        let transaction_id = summary.as_ref().and_then(|summary| summary.transaction_id);
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(
             changed,
             row_count_before,
             &previous_selection,
-            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+            EditLayoutInvalidation::LocalSourceSelection {
+                edit_summary: summary,
+            },
             cx,
         );
     }
@@ -181,7 +183,7 @@ impl MarkdownEditor {
                 .map(|state| state.before.clone());
             if previous.is_some() {
                 invalidation = EditLayoutInvalidation::LocalSourceSelection {
-                    byte_delta: Some(summary.byte_delta),
+                    edit_summary: Some(summary.clone()),
                 };
             }
             self.selection = previous.unwrap_or(fallback);
@@ -212,7 +214,7 @@ impl MarkdownEditor {
                 .map(|state| state.after.clone());
             if next.is_some() {
                 invalidation = EditLayoutInvalidation::LocalSourceSelection {
-                    byte_delta: Some(summary.byte_delta),
+                    edit_summary: Some(summary.clone()),
                 };
             }
             self.selection = next.unwrap_or(fallback);
@@ -269,15 +271,16 @@ impl MarkdownEditor {
         let row_count_before = self.display_list_state.item_count();
         let (selection, summary) = replace_selection(&mut self.buffer, &self.selection, text);
         let changed = summary.is_some();
-        let byte_delta = summary.as_ref().map(|summary| summary.byte_delta);
-        let transaction_id = summary.and_then(|summary| summary.transaction_id);
+        let transaction_id = summary.as_ref().and_then(|summary| summary.transaction_id);
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(
             changed,
             row_count_before,
             &previous_selection,
-            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+            EditLayoutInvalidation::LocalSourceSelection {
+                edit_summary: summary,
+            },
             cx,
         );
     }
@@ -370,8 +373,7 @@ impl MarkdownEditor {
             summary.transaction_id = transaction_id;
         }
         let changed = summary.is_some();
-        let byte_delta = summary.as_ref().map(|summary| summary.byte_delta);
-        let transaction_id = summary.and_then(|summary| summary.transaction_id);
+        let transaction_id = summary.as_ref().and_then(|summary| summary.transaction_id);
         self.selection =
             clip_selection_in_text_snapshot(self.buffer.as_text_snapshot(), &after_selection);
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
@@ -379,7 +381,9 @@ impl MarkdownEditor {
             changed,
             row_count_before,
             &previous_selection,
-            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+            EditLayoutInvalidation::LocalSourceSelection {
+                edit_summary: summary,
+            },
             cx,
         );
     }
@@ -411,15 +415,16 @@ impl MarkdownEditor {
             insert_newline_in_mode(&mut self.buffer, &self.selection, self.mode)
         };
         let changed = summary.is_some();
-        let byte_delta = summary.as_ref().map(|summary| summary.byte_delta);
-        let transaction_id = summary.and_then(|summary| summary.transaction_id);
+        let transaction_id = summary.as_ref().and_then(|summary| summary.transaction_id);
         self.selection = selection;
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(
             changed,
             row_count_before,
             &previous_selection,
-            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+            EditLayoutInvalidation::LocalSourceSelection {
+                edit_summary: summary,
+            },
             cx,
         );
     }
@@ -452,15 +457,16 @@ impl MarkdownEditor {
         let (_selection, summary) =
             replace_selection(&mut self.buffer, &marker_selection, replacement);
         let changed = summary.is_some();
-        let byte_delta = summary.as_ref().map(|summary| summary.byte_delta);
-        let transaction_id = summary.and_then(|summary| summary.transaction_id);
+        let transaction_id = summary.as_ref().and_then(|summary| summary.transaction_id);
         self.selection = selection_before.clone();
         self.record_selection_history(transaction_id, selection_before, self.selection.clone());
         self.notify_after_edit(
             changed,
             row_count_before,
             &previous_selection,
-            EditLayoutInvalidation::LocalSourceSelection { byte_delta },
+            EditLayoutInvalidation::LocalSourceSelection {
+                edit_summary: summary,
+            },
             cx,
         );
         changed
@@ -491,14 +497,28 @@ impl MarkdownEditor {
     ) {
         let local_edit_invalidation = if changed {
             match invalidation {
-                EditLayoutInvalidation::LocalSourceSelection { byte_delta } => {
-                    let row_count_after = self.display_item_count_for_mode(self.mode);
-                    let rendered_index = if self.mode == MarkdownEditorMode::Rendered {
-                        let snapshot = self.buffer.snapshot();
-                        Some(self.rendered_display_index(&snapshot))
-                    } else {
-                        None
+                EditLayoutInvalidation::LocalSourceSelection { edit_summary } => {
+                    let (row_count_after, rendered_index) = match self.mode {
+                        MarkdownEditorMode::Source => {
+                            (self.display_item_count_for_mode(self.mode), None)
+                        }
+                        MarkdownEditorMode::Rendered => {
+                            let snapshot = self.buffer.snapshot();
+                            let existing_index = self.display_cache.rendered_display_index.clone();
+                            let index = if let (Some(existing_index), Some(edit_summary)) =
+                                (existing_index, edit_summary.as_ref())
+                            {
+                                existing_index
+                                    .update_after_edit(&snapshot, edit_summary)
+                                    .unwrap_or_else(|| self.rendered_display_index(&snapshot))
+                            } else {
+                                self.rendered_display_index(&snapshot)
+                            };
+                            self.display_cache.rendered_display_index = Some(index.clone());
+                            (index.item_count(), Some(index))
+                        }
                     };
+                    let byte_delta = edit_summary.as_ref().map(|summary| summary.byte_delta);
                     local_edit_invalidation_rows(
                         self.mode,
                         row_count_before,

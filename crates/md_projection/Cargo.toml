@@ -12,6 +12,9 @@ workspace = true
 path = "src/lib.rs"
 doctest = false
 
+[features]
+test-support = []
+
 [dependencies]
 markdown_wysiwyg.workspace = true
 md_buffer.workspace = true
