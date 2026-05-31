@@ -3266,6 +3266,27 @@ fn rendered_enter_continues_unordered_task_ordered_and_blockquote_lines() {
 }
 
 #[test]
+fn rendered_enter_exits_empty_list_task_ordered_and_blockquote_lines() {
+    for (source, row, column, expected, cursor) in [
+        ("- \n", 0, 2, "\n", Point::new(0, 0)),
+        ("- [ ] \n", 0, 6, "\n", Point::new(0, 0)),
+        ("2. \n", 0, 3, "\n", Point::new(0, 0)),
+        ("> \n", 0, 2, "\n", Point::new(0, 0)),
+        ("> - \n", 0, 4, "> \n", Point::new(0, 2)),
+    ] {
+        let mut buffer = Buffer::local(source);
+        let selection = collapsed_selection(Point::new(row, column));
+
+        let (selection, transaction_id) =
+            insert_newline_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+        assert_eq!(buffer.text(), expected);
+        assert_eq!(selection, collapsed_selection(cursor));
+        assert!(transaction_id.is_some());
+    }
+}
+
+#[test]
 fn source_enter_preserves_auto_indent() {
     let mut buffer = Buffer::local("    ab");
     let selection = collapsed_selection(Point::new(0, "    a".len() as u32));

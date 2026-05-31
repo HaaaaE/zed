@@ -59,6 +59,23 @@ fn insert_rendered_newline(
     buffer: &mut Buffer,
     selection: &Selection<Point>,
 ) -> (Selection<Point>, Option<md_text::TransactionId>) {
+    if selection.is_empty() {
+        let snapshot = buffer.snapshot();
+        if let Some(exit) = rendered_line_exit_at_cursor(&snapshot, selection.head()) {
+            let (_selection, transaction_id) = replace_selection(
+                buffer,
+                &selection_for_source_range(&snapshot, selection.id, exit.range),
+                &exit.replacement,
+            );
+            let selection = collapsed_selection(
+                buffer
+                    .as_text_snapshot()
+                    .offset_to_point(exit.cursor_offset_after_edit),
+            );
+            return (selection, transaction_id);
+        }
+    }
+
     let insertion = rendered_newline_insertion(buffer, selection);
     let range_start =
         selection_byte_range_in_text_snapshot(buffer.as_text_snapshot(), selection).start;
@@ -70,6 +87,78 @@ fn insert_rendered_newline(
         selection = collapsed_selection(cursor);
     }
     (selection, transaction_id)
+}
+
+struct RenderedLineExit {
+    range: std::ops::Range<usize>,
+    replacement: String,
+    cursor_offset_after_edit: usize,
+}
+
+fn rendered_line_exit_at_cursor(
+    snapshot: &BufferSnapshot,
+    cursor: Point,
+) -> Option<RenderedLineExit> {
+    let text_snapshot = snapshot.as_text_snapshot();
+    if cursor.column != text_snapshot.line_len(cursor.row) {
+        return None;
+    }
+
+    let line_start = text_snapshot.point_to_offset(Point::new(cursor.row, 0));
+    let line_end = line_start + text_snapshot.line_len(cursor.row) as usize;
+    let line = text_snapshot
+        .text_for_range(line_start..line_end)
+        .collect::<String>();
+    let exit = rendered_line_exit_replacement(&line)?;
+    let range = line_start..line_start + exit.delete_len;
+    Some(RenderedLineExit {
+        range,
+        replacement: exit.replacement,
+        cursor_offset_after_edit: line_start + exit.cursor_column,
+    })
+}
+
+struct RenderedLineExitReplacement {
+    delete_len: usize,
+    replacement: String,
+    cursor_column: usize,
+}
+
+fn rendered_line_exit_replacement(line: &str) -> Option<RenderedLineExitReplacement> {
+    let (quote_prefix, after_quote) = split_blockquote_prefix(line);
+    let (indent, rest) = split_ascii_indent(after_quote);
+    if let Some((marker, content)) = unordered_list_marker(rest) {
+        let task_marker = task_marker_for_content(content);
+        if !content_after_optional_task_marker(content)
+            .trim()
+            .is_empty()
+        {
+            return None;
+        }
+        return Some(RenderedLineExitReplacement {
+            delete_len: quote_prefix.len() + indent.len() + marker.len() + task_marker.len(),
+            replacement: quote_prefix.to_string(),
+            cursor_column: quote_prefix.len(),
+        });
+    }
+    if let Some((_number, _delimiter, content)) = ordered_list_marker(rest) {
+        if !content.trim().is_empty() {
+            return None;
+        }
+        return Some(RenderedLineExitReplacement {
+            delete_len: quote_prefix.len() + indent.len() + (rest.len() - content.len()),
+            replacement: quote_prefix.to_string(),
+            cursor_column: quote_prefix.len(),
+        });
+    }
+    if !quote_prefix.is_empty() && after_quote.trim().is_empty() {
+        return Some(RenderedLineExitReplacement {
+            delete_len: quote_prefix.len(),
+            replacement: String::new(),
+            cursor_column: 0,
+        });
+    }
+    None
 }
 
 struct RenderedNewlineInsertion {

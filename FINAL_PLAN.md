@@ -545,3 +545,6 @@ Acceptance:
 - Phase 5 部分推进：Rendered Enter 在行尾支持 unordered list、task list、ordered list、blockquote 的同级续行；task continuation 生成 unchecked marker，ordered continuation 递增编号。
 - 更新 regression test 覆盖 unordered/task/ordered/blockquote rendered Enter continuation。
 - 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。
+- Phase 5 Enter 继续推进：空 unordered/task/ordered list item 在 Rendered Enter 时删除当前 marker 并退出 list；空 blockquote 删除 `>` marker 并退出 quote；blockquote 内空 list item 保留外层 quote marker。
+- 更新 regression test 覆盖空 list/task/ordered/blockquote Enter exit。
+- 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。
