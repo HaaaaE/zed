@@ -3439,6 +3439,84 @@ fn rendered_delete_selection_across_paragraph_text_merges_remaining_text() {
 }
 
 #[test]
+fn rendered_backspace_at_paragraph_start_merges_canonical_boundary() {
+    for (source, expected, cursor) in [
+        ("a\n\nb", "ab", Point::new(0, 1)),
+        ("甲\n\n乙", "甲乙", Point::new(0, "甲".len() as u32)),
+        ("a🙂\n\nb🚀", "a🙂b🚀", Point::new(0, "a🙂".len() as u32)),
+    ] {
+        let mut buffer = Buffer::local(source);
+        let selection = collapsed_selection(Point::new(2, 0));
+
+        let (selection, transaction_id) =
+            backspace_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+        assert_eq!(buffer.text(), expected, "{source:?}");
+        assert_eq!(selection, collapsed_selection(cursor), "{source:?}");
+        assert!(transaction_id.is_some(), "{source:?}");
+    }
+}
+
+#[test]
+fn rendered_delete_at_paragraph_end_merges_canonical_boundary() {
+    for (source, cursor_column, expected) in [
+        ("a\n\nb", "a".len() as u32, "ab"),
+        ("甲\n\n乙", "甲".len() as u32, "甲乙"),
+        ("a🙂\n\nb🚀", "a🙂".len() as u32, "a🙂b🚀"),
+    ] {
+        let mut buffer = Buffer::local(source);
+        let selection = collapsed_selection(Point::new(0, cursor_column));
+
+        let (selection, transaction_id) =
+            delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+        assert_eq!(buffer.text(), expected, "{source:?}");
+        assert_eq!(
+            selection,
+            collapsed_selection(Point::new(0, cursor_column)),
+            "{source:?}"
+        );
+        assert!(transaction_id.is_some(), "{source:?}");
+    }
+}
+
+#[test]
+fn rendered_boundary_delete_canonicalizes_long_blank_runs() {
+    let mut buffer = Buffer::local("a\n\n\nb");
+    let selection = collapsed_selection(Point::new(3, 0));
+
+    let (selection, transaction_id) =
+        backspace_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "a\n\nb");
+    assert_eq!(selection, collapsed_selection(Point::new(0, 1)));
+    assert!(transaction_id.is_some());
+
+    let mut buffer = Buffer::local("a\n\n\n\nb");
+    let selection = collapsed_selection(Point::new(0, 1));
+
+    let (selection, transaction_id) =
+        delete_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Rendered);
+
+    assert_eq!(buffer.text(), "a\n\nb");
+    assert_eq!(selection, collapsed_selection(Point::new(2, 0)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
+fn source_backspace_at_paragraph_start_keeps_character_deletion() {
+    let mut buffer = Buffer::local("a\n\nb");
+    let selection = collapsed_selection(Point::new(2, 0));
+
+    let (selection, transaction_id) =
+        backspace_selection_in_mode(&mut buffer, &selection, MarkdownEditorMode::Source);
+
+    assert_eq!(buffer.text(), "a\nb");
+    assert_eq!(selection, collapsed_selection(Point::new(1, 0)));
+    assert!(transaction_id.is_some());
+}
+
+#[test]
 fn rendered_backspace_deletes_previous_inactive_inline_atom() {
     let mut buffer = Buffer::local("Before $x + y$ after\n");
     let atom_start = "Before ".len();

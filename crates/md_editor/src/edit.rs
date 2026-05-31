@@ -373,6 +373,23 @@ pub(crate) fn backspace_selection_in_mode(
             );
             return (selection, transaction_id);
         }
+        if let Some(deletion) = rendered_paragraph_boundary_deletion_at_cursor(
+            &snapshot,
+            selection.head(),
+            HorizontalDirection::Left,
+        ) {
+            let (_selection, transaction_id) = replace_selection(
+                buffer,
+                &selection_for_source_range(&snapshot, selection.id, deletion.range),
+                &deletion.replacement,
+            );
+            let selection = collapsed_selection(
+                buffer
+                    .as_text_snapshot()
+                    .offset_to_point(deletion.cursor_offset_after_edit),
+            );
+            return (selection, transaction_id);
+        }
         if let Some(deletion) = rendered_blank_paragraph_deletion_at_cursor(
             &snapshot,
             selection.head(),
@@ -531,6 +548,23 @@ pub(crate) fn delete_selection_in_mode(
 
     if mode == MarkdownEditorMode::Rendered && selection.is_empty() {
         let snapshot = buffer.snapshot();
+        if let Some(deletion) = rendered_paragraph_boundary_deletion_at_cursor(
+            &snapshot,
+            selection.head(),
+            HorizontalDirection::Right,
+        ) {
+            let (_selection, transaction_id) = replace_selection(
+                buffer,
+                &selection_for_source_range(&snapshot, selection.id, deletion.range),
+                &deletion.replacement,
+            );
+            let selection = collapsed_selection(
+                buffer
+                    .as_text_snapshot()
+                    .offset_to_point(deletion.cursor_offset_after_edit),
+            );
+            return (selection, transaction_id);
+        }
         if let Some(deletion) = rendered_blank_paragraph_deletion_at_cursor(
             &snapshot,
             selection.head(),
@@ -651,6 +685,133 @@ fn blank_run_containing_row(snapshot: &BufferSnapshot, row: usize) -> std::ops::
 struct RenderedBlankParagraphDeletion {
     range: std::ops::Range<usize>,
     cursor_after_delete: Option<Point>,
+}
+
+struct RenderedParagraphBoundaryDeletion {
+    range: std::ops::Range<usize>,
+    replacement: String,
+    cursor_offset_after_edit: usize,
+}
+
+fn rendered_paragraph_boundary_deletion_at_cursor(
+    snapshot: &BufferSnapshot,
+    cursor: Point,
+    direction: HorizontalDirection,
+) -> Option<RenderedParagraphBoundaryDeletion> {
+    let text_snapshot = snapshot.as_text_snapshot();
+    let index = RenderedDisplayIndex::build(snapshot);
+    let cursor = text_snapshot.clip_point(cursor, md_text::Bias::Left);
+    let cursor_row = cursor.row as usize;
+    let row_count = text_snapshot.row_count() as usize;
+    if cursor_row >= row_count || source_row_is_blank(snapshot, cursor_row) {
+        return None;
+    }
+
+    let item = index
+        .item_index_for_source_row(cursor_row)
+        .and_then(|item_index| index.item(item_index))?;
+    if !matches!(
+        item.kind,
+        RenderedDisplayItemKind::Paragraph | RenderedDisplayItemKind::Heading
+    ) {
+        return None;
+    }
+
+    match direction {
+        HorizontalDirection::Left => {
+            if cursor.column != 0 || cursor_row == 0 {
+                return None;
+            }
+
+            let blank_run_end = cursor_row;
+            let mut blank_run_start = cursor_row;
+            while blank_run_start > 0 && source_row_is_blank(snapshot, blank_run_start - 1) {
+                blank_run_start -= 1;
+            }
+            if blank_run_start == blank_run_end || blank_run_start == 0 {
+                return None;
+            }
+
+            let previous_row = blank_run_start - 1;
+            if source_row_is_blank(snapshot, previous_row) {
+                return None;
+            }
+            let previous_item = index
+                .item_index_for_source_row(previous_row)
+                .and_then(|item_index| index.item(item_index))?;
+            if !matches!(
+                previous_item.kind,
+                RenderedDisplayItemKind::Paragraph | RenderedDisplayItemKind::Heading
+            ) {
+                return None;
+            }
+
+            let previous_end = text_snapshot.point_to_offset(Point::new(
+                previous_row as u32,
+                text_snapshot.line_len(previous_row as u32),
+            ));
+            let cursor_offset = text_snapshot.point_to_offset(cursor);
+            let blank_row_count = blank_run_end - blank_run_start;
+            let (range, replacement) = if blank_row_count == 1 {
+                (previous_end..cursor_offset, String::new())
+            } else {
+                (
+                    text_snapshot.point_to_offset(Point::new(blank_run_start as u32, 0))
+                        ..cursor_offset,
+                    "\n".to_string(),
+                )
+            };
+            Some(RenderedParagraphBoundaryDeletion {
+                range,
+                replacement,
+                cursor_offset_after_edit: previous_end,
+            })
+        }
+        HorizontalDirection::Right => {
+            if cursor.column != text_snapshot.line_len(cursor.row) {
+                return None;
+            }
+
+            let blank_run_start = cursor_row.saturating_add(1);
+            if blank_run_start >= row_count || !source_row_is_blank(snapshot, blank_run_start) {
+                return None;
+            }
+
+            let mut blank_run_end = blank_run_start;
+            while blank_run_end < row_count && source_row_is_blank(snapshot, blank_run_end) {
+                blank_run_end += 1;
+            }
+            if blank_run_end >= row_count || source_row_is_blank(snapshot, blank_run_end) {
+                return None;
+            }
+
+            let next_item = index
+                .item_index_for_source_row(blank_run_end)
+                .and_then(|item_index| index.item(item_index))?;
+            if !matches!(
+                next_item.kind,
+                RenderedDisplayItemKind::Paragraph | RenderedDisplayItemKind::Heading
+            ) {
+                return None;
+            }
+
+            let cursor_offset = text_snapshot.point_to_offset(cursor);
+            let next_start = text_snapshot.point_to_offset(Point::new(blank_run_end as u32, 0));
+            let blank_row_count = blank_run_end - blank_run_start;
+            let (range, replacement, cursor_offset_after_edit) = if blank_row_count == 1 {
+                (cursor_offset..next_start, String::new(), cursor_offset)
+            } else {
+                let blank_start =
+                    text_snapshot.point_to_offset(Point::new(blank_run_start as u32, 0));
+                (blank_start..next_start, "\n".to_string(), blank_start + 1)
+            };
+            Some(RenderedParagraphBoundaryDeletion {
+                range,
+                replacement,
+                cursor_offset_after_edit,
+            })
+        }
+    }
 }
 
 fn rendered_blank_paragraph_deletion_at_cursor(
