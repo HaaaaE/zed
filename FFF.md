@@ -76,3 +76,6 @@
   - 给 `MdListState` 增加 remeasure stats，开始计数 full remeasure、局部 remeasure 调用次数和 item 数。
   - 普通 Render 文本编辑回归现在同时断言 `full_remeasures = 0`，且只局部 remeasure 当前 item。
   - 已验证：`cargo fmt --check`、`cargo test -p md_editor rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build`、`cargo check -p updraft_editor`。
+  - `md_editor` perf helper 不再只断言 rendered index full build；Render 普通等长/变长编辑 perf 路径现在同时断言 syntax stats 全 0、list full remeasure 为 0、仅局部 remeasure 当前 item。
+  - Render 编辑 perf 输出拆出 `rendered_edit_equal_length_apply` / `rendered_edit_equal_length_draw_after_edit`、`rendered_edit_length_change_apply` / `rendered_edit_length_change_draw_after_edit`、`rendered_enter_delete_apply` / `rendered_enter_delete_draw_after_edit`。
+  - 已验证：`cargo test -p md_editor --profile release-fast --lib --no-run --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]'`。

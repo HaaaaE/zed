@@ -1,5 +1,6 @@
 use super::test_support::*;
 use gpui::{px, size};
+use md_buffer::BufferSyntaxStats;
 use md_projection::{RenderedDisplayIndex, RenderedDisplayIndexStats};
 use std::time::{Duration, Instant};
 use util_macros::perf;
@@ -184,12 +185,26 @@ fn replace_middle_row_word_in_rendered_without_full_index_build(
     });
 
     RenderedDisplayIndex::reset_stats_for_tests();
+    md_buffer::Buffer::reset_syntax_stats_for_tests();
+    MdListState::reset_stats_for_tests();
     replace_middle_row_word(editor, cx, target_row, from, to);
     assert_eq!(
         RenderedDisplayIndex::stats_for_tests(),
         RenderedDisplayIndexStats {
             full_builds: 0,
             incremental_updates: 1,
+        }
+    );
+    assert_eq!(
+        md_buffer::Buffer::syntax_stats_for_tests(),
+        BufferSyntaxStats::default()
+    );
+    assert_eq!(
+        MdListState::stats_for_tests(),
+        MdListStateStats {
+            full_remeasures: 0,
+            item_remeasure_calls: 1,
+            remeasured_items: 1,
         }
     );
 }
@@ -373,13 +388,19 @@ fn run_editor_session(target_bytes: usize) {
             reset_layout_computation_counts(&editor, cx);
             warm_draw(&editor, cx);
         });
-        record_segment(&mut segments, "rendered_edit_equal_length", || {
+        record_segment(&mut segments, "rendered_edit_equal_length_apply", || {
             replace_middle_row_word_in_rendered_without_full_index_build(
                 &editor, cx, target_row, "row", "raw",
             );
-            warm_draw(&editor, cx);
         });
-        record_segment(&mut segments, "rendered_edit_length_change", || {
+        record_segment(
+            &mut segments,
+            "rendered_edit_equal_length_draw_after_edit",
+            || {
+                warm_draw(&editor, cx);
+            },
+        );
+        record_segment(&mut segments, "rendered_edit_length_change_apply", || {
             replace_middle_row_word_in_rendered_without_full_index_build(
                 &editor,
                 cx,
@@ -387,12 +408,24 @@ fn run_editor_session(target_bytes: usize) {
                 "raw",
                 "source-row",
             );
-            warm_draw(&editor, cx);
         });
-        record_segment(&mut segments, "rendered_enter_delete", || {
+        record_segment(
+            &mut segments,
+            "rendered_edit_length_change_draw_after_edit",
+            || {
+                warm_draw(&editor, cx);
+            },
+        );
+        record_segment(&mut segments, "rendered_enter_delete_apply", || {
             rendered_enter_delete(&editor, cx);
-            warm_draw(&editor, cx);
         });
+        record_segment(
+            &mut segments,
+            "rendered_enter_delete_draw_after_edit",
+            || {
+                warm_draw(&editor, cx);
+            },
+        );
 
         for _ in 0..2 {
             record_segment(&mut segments, "rendered_cached_redraw", || {
