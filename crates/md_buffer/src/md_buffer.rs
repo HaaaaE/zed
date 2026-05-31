@@ -19,6 +19,29 @@ use md_text::{
 
 static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1);
 
+#[cfg(any(test, feature = "test-support", perf_enabled))]
+use std::cell::Cell;
+
+#[cfg(any(test, feature = "test-support", perf_enabled))]
+thread_local! {
+    static BUFFER_SYNTAX_STATS: Cell<BufferSyntaxStats> =
+        const { Cell::new(BufferSyntaxStats {
+            full_parses: 0,
+            full_refreshes: 0,
+            incremental_refreshes: 0,
+            full_source_copies: 0,
+        }) };
+}
+
+#[cfg(any(test, feature = "test-support", perf_enabled))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct BufferSyntaxStats {
+    pub full_parses: usize,
+    pub full_refreshes: usize,
+    pub incremental_refreshes: usize,
+    pub full_source_copies: usize,
+}
+
 pub struct Buffer {
     text: TextBuffer,
     saved_version: Global,
@@ -113,6 +136,16 @@ impl Buffer {
     #[cfg(any(test, feature = "test-support"))]
     pub fn cached_syntax_version_for_tests(&self) -> Global {
         self.cached_syntax_version.clone()
+    }
+
+    #[cfg(any(test, feature = "test-support", perf_enabled))]
+    pub fn reset_syntax_stats_for_tests() {
+        BUFFER_SYNTAX_STATS.with(|stats| stats.set(BufferSyntaxStats::default()));
+    }
+
+    #[cfg(any(test, feature = "test-support", perf_enabled))]
+    pub fn syntax_stats_for_tests() -> BufferSyntaxStats {
+        BUFFER_SYNTAX_STATS.with(Cell::get)
     }
 
     pub fn syntax_tree(&mut self) -> &MarkdownSyntaxTree {
@@ -422,6 +455,8 @@ impl Buffer {
         }
         self.cached_syntax_tree =
             if let Some(pending_incremental_reparse) = self.pending_incremental_reparse.take() {
+                record_incremental_syntax_refresh();
+                record_full_source_copy();
                 let new_source = self.text.snapshot().text();
                 Arc::new(
                     pending_incremental_reparse
@@ -433,6 +468,7 @@ impl Buffer {
                         ),
                 )
             } else {
+                record_full_syntax_refresh();
                 Arc::new(parse_markdown(self.text.snapshot()))
             };
         self.cached_syntax_version = current_version;
@@ -487,8 +523,51 @@ fn next_buffer_id() -> BufferId {
 }
 
 fn parse_markdown(snapshot: &TextBufferSnapshot) -> MarkdownSyntaxTree {
+    record_full_syntax_parse();
+    record_full_source_copy();
     MarkdownSyntaxTree::parse(&snapshot.text())
 }
+
+#[cfg(any(test, feature = "test-support", perf_enabled))]
+fn update_syntax_stats(update: impl FnOnce(&mut BufferSyntaxStats)) {
+    BUFFER_SYNTAX_STATS.with(|stats| {
+        let mut value = stats.get();
+        update(&mut value);
+        stats.set(value);
+    });
+}
+
+#[cfg(any(test, feature = "test-support", perf_enabled))]
+fn record_full_syntax_parse() {
+    update_syntax_stats(|stats| stats.full_parses += 1);
+}
+
+#[cfg(not(any(test, feature = "test-support", perf_enabled)))]
+fn record_full_syntax_parse() {}
+
+#[cfg(any(test, feature = "test-support", perf_enabled))]
+fn record_full_syntax_refresh() {
+    update_syntax_stats(|stats| stats.full_refreshes += 1);
+}
+
+#[cfg(not(any(test, feature = "test-support", perf_enabled)))]
+fn record_full_syntax_refresh() {}
+
+#[cfg(any(test, feature = "test-support", perf_enabled))]
+fn record_incremental_syntax_refresh() {
+    update_syntax_stats(|stats| stats.incremental_refreshes += 1);
+}
+
+#[cfg(not(any(test, feature = "test-support", perf_enabled)))]
+fn record_incremental_syntax_refresh() {}
+
+#[cfg(any(test, feature = "test-support", perf_enabled))]
+fn record_full_source_copy() {
+    update_syntax_stats(|stats| stats.full_source_copies += 1);
+}
+
+#[cfg(not(any(test, feature = "test-support", perf_enabled)))]
+fn record_full_source_copy() {}
 
 fn summarize_patch(
     old_snapshot: &TextBufferSnapshot,
@@ -619,6 +698,7 @@ mod tests {
     fn single_edit_defers_incremental_reparse_until_syntax_is_requested() {
         let mut buffer = Buffer::local("# One\n");
         let initial_syntax_version = buffer.cached_syntax_version_for_tests();
+        Buffer::reset_syntax_stats_for_tests();
 
         assert!(buffer.append("\n## Two\n").is_some());
         let edited_version = buffer.version();
@@ -627,10 +707,23 @@ mod tests {
             buffer.cached_syntax_version_for_tests(),
             initial_syntax_version
         );
+        assert_eq!(
+            Buffer::syntax_stats_for_tests(),
+            BufferSyntaxStats::default()
+        );
 
         let snapshot = buffer.snapshot();
 
         assert_eq!(buffer.cached_syntax_version_for_tests(), edited_version);
+        assert_eq!(
+            Buffer::syntax_stats_for_tests(),
+            BufferSyntaxStats {
+                full_parses: 0,
+                full_refreshes: 0,
+                incremental_refreshes: 1,
+                full_source_copies: 1,
+            }
+        );
         assert_eq!(
             snapshot
                 .syntax_tree()

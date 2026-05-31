@@ -69,3 +69,5 @@
   - 新增等价测试：common rendered rows 的 plain-text 增量 index 与 full build 完全一致；marker/table delimiter 编辑拒绝 fast path。
   - 新增编辑层回归：Render 模式 heading/list/blockquote/table 普通文本编辑 `full_builds = 0`、`incremental_updates = 1`，且 `cached_syntax_version` 不变。
   - 已验证：`cargo test -p md_projection`、`cargo test -p md_editor rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build`、`cargo test -p md_editor rendered_length_preserving_single_item_edit_keeps_other_display_rows`。
+  - 给 `md_buffer` 增加 `BufferSyntaxStats`，开始计数 full parse、full syntax refresh、incremental syntax refresh、full source copy；普通 rendered text edit 回归现在同时断言 syntax stats 全为 0。
+  - 已验证：`cargo test -p md_buffer single_edit_defers_incremental_reparse_until_syntax_is_requested`、`cargo test -p md_editor rendered_plain_text_edits_in_common_rows_skip_syntax_and_full_index_build`、`cargo check -p updraft_editor`。
