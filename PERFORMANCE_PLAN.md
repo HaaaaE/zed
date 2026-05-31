@@ -29,6 +29,10 @@
     - `PendingIncrementalReparse` 不再保存旧全文 `String`。
     - `MarkdownSyntaxTree::reparse_after_edit_range` 使用现有 tree 的旧 `line_starts` 和 edit summary 的 old/new range 计算 tree-sitter `InputEdit`。
     - 已通过 `cargo test -p markdown_wysiwyg` 和 `cargo test -p md_buffer`。
+  - [x] Syntax incremental reparse 的 `line_starts` 增量维护：
+    - `reparse_after_edit_range` 不再为计算 `InputEdit` 全量扫描新文本 line starts。
+    - 使用 old/new edit range splice 维护 line starts，并用 full scan 等价测试覆盖普通替换、插入换行、跨行删除。
+    - 已通过 `cargo test -p markdown_wysiwyg` 和 `cargo test -p md_buffer`。
   - [x] `RenderedDisplayIndex::update_after_edit` 普通输入增量子集：
     - 覆盖 row count 不变、同一 rendered item 内的单行编辑。
     - 更新 affected item，并按 byte delta 平移后续 item source offsets；复杂结构编辑返回 fallback。

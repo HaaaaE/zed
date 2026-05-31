@@ -249,7 +249,12 @@ impl MarkdownSyntaxTree {
         new_range: Range<usize>,
         new_source: &str,
     ) -> Self {
-        let new_line_starts = line_starts(new_source);
+        let new_line_starts = line_starts_after_edit_range(
+            &self.line_starts,
+            old_range.clone(),
+            new_range.clone(),
+            new_source,
+        );
         let old_len = self.source_len - old_range.len();
         let new_len = new_source.len() - new_range.len();
         assert_eq!(
@@ -685,6 +690,53 @@ fn line_starts(source: &str) -> Vec<usize> {
         }
     }
     starts
+}
+
+fn line_starts_after_edit_range(
+    old_line_starts: &[usize],
+    old_range: Range<usize>,
+    new_range: Range<usize>,
+    new_source: &str,
+) -> Vec<usize> {
+    let byte_delta = new_range.len() as isize - old_range.len() as isize;
+    let mut starts = Vec::with_capacity(
+        old_line_starts.len().saturating_add(
+            new_source[new_range.clone()]
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count(),
+        ),
+    );
+
+    starts.extend(
+        old_line_starts
+            .iter()
+            .copied()
+            .take_while(|line_start| *line_start <= old_range.start),
+    );
+    starts.extend(
+        new_source[new_range.clone()]
+            .bytes()
+            .enumerate()
+            .filter_map(|(index, byte)| (byte == b'\n').then_some(new_range.start + index + 1)),
+    );
+    starts.extend(
+        old_line_starts
+            .iter()
+            .copied()
+            .filter(|line_start| *line_start > old_range.end)
+            .map(|line_start| shift_offset(line_start, byte_delta)),
+    );
+    starts.dedup();
+    starts
+}
+
+fn shift_offset(offset: usize, byte_delta: isize) -> usize {
+    if byte_delta >= 0 {
+        offset + byte_delta as usize
+    } else {
+        offset - byte_delta.unsigned_abs()
+    }
 }
 
 fn line_range(source: &str, line_starts: &[usize], row: usize) -> Range<usize> {
@@ -1144,6 +1196,32 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert_eq!(tree.inline_spans(), full_tree.inline_spans());
+    }
+
+    #[test]
+    fn line_starts_splice_matches_full_scan_after_local_edits() {
+        let cases = [
+            ("one\ntwo\nthree\n", 5..6, "XX"),
+            ("one\ntwo\nthree\n", 3..3, "\ninserted"),
+            ("one\ntwo\nthree\n", 3..9, ""),
+            ("one\n\nthree\n", 4..5, "two\n"),
+        ];
+
+        for (old_source, old_range, replacement) in cases {
+            let mut new_source = old_source.to_string();
+            new_source.replace_range(old_range.clone(), replacement);
+            let new_range = old_range.start..old_range.start + replacement.len();
+
+            assert_eq!(
+                line_starts_after_edit_range(
+                    &line_starts(old_source),
+                    old_range,
+                    new_range,
+                    &new_source,
+                ),
+                line_starts(&new_source),
+            );
+        }
     }
 
     #[test]
