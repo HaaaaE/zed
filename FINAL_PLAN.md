@@ -560,3 +560,6 @@ Acceptance:
 - Phase 7 spacing 完成：heading、paragraph、list item、blockquote spacing 通过 `RenderedItemPresentation` 表达，并由 rendered row height/render padding 消费，不生成额外 source row。
 - 更新 regression test 覆盖 heading/paragraph/list/blockquote spacing metadata。
 - 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。
+- Spacing bugfix：空段落不再因 blank block 路径遗漏 paragraph spacing；`RenderedDisplayItemKind::Paragraph` 与 `EmptyParagraph` 统一获得 paragraph after spacing，不为空段落单独设置另一套间距。
+- 更新 regression test 覆盖 empty paragraph 与普通 paragraph 使用相同 paragraph spacing。
+- 验证：`cargo test -p md_editor --lib` 通过；`cargo check -p updraft_editor` 通过；`cargo fmt --check` 通过；`git diff --check` 通过。

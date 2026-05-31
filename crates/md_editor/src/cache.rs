@@ -411,6 +411,7 @@ impl MarkdownEditor {
             display_source_range.source_range,
             display_source_range.source_row_range,
             range_semantics,
+            item.kind,
             self.document_path(),
         ));
         self.display_cache

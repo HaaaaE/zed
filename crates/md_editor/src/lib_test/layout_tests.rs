@@ -772,6 +772,33 @@ fn rendered_display_rows_derive_spacing_presentation() {
 }
 
 #[test]
+fn rendered_empty_paragraph_uses_paragraph_spacing() {
+    let source = "paragraph\n\n\n\nnext\n";
+    let mut buffer = Buffer::local(source);
+    let snapshot = buffer.snapshot();
+    let index = rendered_display_index_for_tests(&snapshot);
+    let paragraph_item = index
+        .item_index_for_source_row(0)
+        .expect("paragraph item should exist");
+    let empty_paragraph_item = (0..index.item_count())
+        .find(|item_index| {
+            index.item(*item_index).is_some_and(|item| {
+                item.kind == md_projection::RenderedDisplayItemKind::EmptyParagraph
+            })
+        })
+        .expect("empty paragraph item should exist");
+
+    let paragraph_row = rendered_display_row_for_item_for_tests(&snapshot, paragraph_item, None);
+    let empty_paragraph_row =
+        rendered_display_row_for_item_for_tests(&snapshot, empty_paragraph_item, None);
+
+    assert_eq!(paragraph_row.presentation.after_spacing.px, 6);
+    assert_eq!(empty_paragraph_row.text, "");
+    assert_eq!(empty_paragraph_row.presentation.before_spacing.px, 0);
+    assert_eq!(empty_paragraph_row.presentation.after_spacing.px, 6);
+}
+
+#[test]
 fn rendered_display_rows_keep_inline_atom_boundaries_inactive() {
     let mut buffer = Buffer::local("Before $x + y$ after\n");
     let snapshot = buffer.snapshot();

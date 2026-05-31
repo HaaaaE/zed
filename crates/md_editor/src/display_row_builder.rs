@@ -27,7 +27,7 @@ use crate::{
         rendered_element_descriptor_for_inline_span_in_row,
     },
 };
-use md_projection::{self, DisplayItemId};
+use md_projection::{self, DisplayItemId, RenderedDisplayItemKind};
 #[cfg(test)]
 use md_projection::{RenderedDisplayIndex, RenderedTopology};
 
@@ -79,6 +79,7 @@ pub(crate) fn display_rows_in_mode(
                 source_range,
                 row as usize..row as usize + 1,
                 range_semantics,
+                RenderedDisplayItemKind::SourceFallback,
                 None,
             )
         })
@@ -118,6 +119,7 @@ pub(crate) fn rendered_display_row_for_item_for_tests(
         display_source_range.source_range,
         display_source_range.source_row_range,
         range_semantics,
+        item.kind,
         None,
     )
 }
@@ -130,6 +132,7 @@ pub(crate) fn rendered_display_row(
     source_range: Range<usize>,
     source_row_range: Range<usize>,
     range_semantics: MarkdownRangeSemantics,
+    item_kind: RenderedDisplayItemKind,
     document_path: Option<&Path>,
 ) -> DisplayRow {
     let source_text: String = snapshot
@@ -163,6 +166,7 @@ pub(crate) fn rendered_display_row(
     let presentation = rendered_item_presentation_for_display_row(
         &markdown_blocks,
         rendered_indent_level,
+        item_kind,
         &source_range,
         row,
     );
@@ -236,10 +240,11 @@ pub(crate) fn source_display_row_in_text_snapshot(
 fn rendered_item_presentation_for_display_row(
     markdown_blocks: &[MarkdownBlock],
     blockquote_depth: u16,
+    item_kind: RenderedDisplayItemKind,
     source_range: &Range<usize>,
     row: u32,
 ) -> RenderedItemPresentation {
-    let spacing = rendered_spacing_for_display_row(markdown_blocks, row);
+    let spacing = rendered_spacing_for_display_row(markdown_blocks, item_kind, row);
     let code_block = markdown_blocks.iter().find(|block| {
         matches!(
             block.kind,
@@ -294,6 +299,7 @@ fn rendered_item_presentation_for_display_row(
 
 fn rendered_spacing_for_display_row(
     markdown_blocks: &[MarkdownBlock],
+    item_kind: RenderedDisplayItemKind,
     row: u32,
 ) -> (RenderedSpacing, RenderedSpacing) {
     let row = row as usize;
@@ -345,7 +351,10 @@ fn rendered_spacing_for_display_row(
         );
     }
 
-    if markdown_blocks.iter().any(|block| {
+    if matches!(
+        item_kind,
+        RenderedDisplayItemKind::Paragraph | RenderedDisplayItemKind::EmptyParagraph
+    ) || markdown_blocks.iter().any(|block| {
         matches!(block.kind, MarkdownBlockKind::Paragraph)
             && block.row_range.end.saturating_sub(1) == row
     }) {
