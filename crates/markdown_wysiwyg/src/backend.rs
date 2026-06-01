@@ -16,6 +16,7 @@ use super::{
     },
     source::{line_starts, ranges_overlap},
     structure::MarkdownStructureBlock,
+    tables::table_cell_content_ranges_for_blocks,
 };
 use super::{
     MarkdownParseTree, MarkdownSyntaxData, MarkdownSyntaxTree,
@@ -125,10 +126,11 @@ impl MarkdownBackend for TreeSitterMarkdownBackend {
 #[cfg(any(test, perf_enabled))]
 impl PulldownMarkdownBackend {
     pub(super) fn parse_syntax_data(source: &str) -> MarkdownSyntaxData {
-        let blocks = collect_pulldown_structure_blocks(source);
+        let source_line_starts = line_starts(source);
+        let blocks = collect_pulldown_structure_blocks(source, &source_line_starts);
         let inline_trees = parse_inline_trees_for_ranges(
             source,
-            pulldown_inline_parent_ranges(&blocks),
+            pulldown_inline_parent_ranges(source, &source_line_starts, &blocks),
         );
         let structure = MarkdownStructure::from_parts(blocks, inline_trees);
         record_timed_collect_syntax_data(|| {
@@ -138,15 +140,17 @@ impl PulldownMarkdownBackend {
 }
 
 #[cfg(any(test, perf_enabled))]
-fn collect_pulldown_structure_blocks(source: &str) -> Vec<MarkdownStructureBlock> {
-    let line_starts = line_starts(source);
+fn collect_pulldown_structure_blocks(
+    source: &str,
+    line_starts: &[usize],
+) -> Vec<MarkdownStructureBlock> {
     let mut blocks = Vec::new();
     for (event, range) in Parser::new_ext(source, Options::all()).into_offset_iter() {
         match event {
             Event::Start(tag) => {
                 if let Some(block) = pulldown_structure_block_from_start_tag(
                     source,
-                    &line_starts,
+                    line_starts,
                     tag,
                     range,
                     blocks.len(),
@@ -156,7 +160,7 @@ fn collect_pulldown_structure_blocks(source: &str) -> Vec<MarkdownStructureBlock
             }
             Event::Rule => {
                 blocks.push(structure_thematic_break_block_from_range(
-                    &line_starts,
+                    line_starts,
                     pulldown_node_id(blocks.len()),
                     range,
                 ));
@@ -165,16 +169,18 @@ fn collect_pulldown_structure_blocks(source: &str) -> Vec<MarkdownStructureBlock
         }
     }
     blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
-    synthesize_pulldown_paragraph_blocks(source, &line_starts, &mut blocks);
+    synthesize_pulldown_paragraph_blocks(source, line_starts, &mut blocks);
     blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
     blocks
 }
 
 #[cfg(any(test, perf_enabled))]
 fn pulldown_inline_parent_ranges(
+    source: &str,
+    line_starts: &[usize],
     blocks: &[MarkdownStructureBlock],
-) -> impl Iterator<Item = Range<usize>> + '_ {
-    blocks
+) -> Vec<Range<usize>> {
+    let mut ranges = blocks
         .iter()
         .filter_map(|block| match block.kind {
             MarkdownBlockKind::Paragraph
@@ -182,6 +188,15 @@ fn pulldown_inline_parent_ranges(
             | MarkdownBlockKind::SetextHeading { .. } => Some(block.content_range.clone()),
             _ => None,
         })
+        .collect::<Vec<_>>();
+    ranges.extend(table_cell_content_ranges_for_blocks(
+        source,
+        line_starts,
+        blocks,
+    ));
+    ranges.sort_by_key(|range| (range.start, range.end));
+    ranges.dedup();
+    ranges
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -219,7 +234,12 @@ fn pulldown_structure_block_from_start_tag(
             id,
             pulldown_fenced_code_block_range(source, range),
         )),
-        Tag::HtmlBlock => Some(structure_html_block_from_range(source, line_starts, id, range)),
+        Tag::HtmlBlock => Some(structure_html_block_from_range(
+            source,
+            line_starts,
+            id,
+            range,
+        )),
         Tag::List(_) => Some(structure_list_block_from_range(
             source,
             line_starts,
@@ -282,8 +302,7 @@ fn synthesize_pulldown_paragraph_blocks(
         }
 
         let paragraph_start = item.content_range.start;
-        let paragraph_end =
-            pulldown_list_item_paragraph_end(source, blocks, item, paragraph_start);
+        let paragraph_end = pulldown_list_item_paragraph_end(source, blocks, item, paragraph_start);
         if paragraph_start >= paragraph_end
             || source[paragraph_start..paragraph_end].trim().is_empty()
             || blocks.iter().any(|block| {

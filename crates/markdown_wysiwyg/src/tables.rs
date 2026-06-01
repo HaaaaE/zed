@@ -7,6 +7,9 @@ use super::{
     structure::MarkdownStructure,
 };
 
+#[cfg(any(test, perf_enabled))]
+use super::structure::MarkdownStructureBlock;
+
 impl MarkdownSyntaxTree {
     pub fn tables(&self) -> &[MarkdownTable] {
         &self.data.tables
@@ -50,6 +53,36 @@ pub(super) fn collect_structure_tables(
         .map(MarkdownBlock::from_structure)
         .filter_map(|block| table_from_block(source, line_starts, &block))
         .collect()
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(super) fn table_cell_content_ranges_for_blocks(
+    source: &str,
+    line_starts: &[usize],
+    blocks: &[MarkdownStructureBlock],
+) -> Vec<Range<usize>> {
+    let mut ranges = Vec::new();
+    for block in blocks
+        .iter()
+        .filter(|block| block.kind == MarkdownBlockKind::PipeTable)
+    {
+        for (index, row) in block.row_range.clone().enumerate() {
+            if index == 1 {
+                continue;
+            }
+
+            let Some(row) = table_row_from_source_row(source, line_starts, row, false) else {
+                continue;
+            };
+            ranges.extend(
+                row.cells
+                    .into_iter()
+                    .map(|cell| cell.content_range)
+                    .filter(|range| !range.is_empty()),
+            );
+        }
+    }
+    ranges
 }
 
 fn table_from_block(
