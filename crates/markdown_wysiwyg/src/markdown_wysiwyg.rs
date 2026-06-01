@@ -1586,6 +1586,97 @@ mod tests {
     }
 
     #[test]
+    fn pulldown_incremental_matches_full_after_crlf_local_edits() {
+        let source = concat!(
+            "Paragraph **bold** &amp; [link](https://example.com)\n",
+            "hard break  \n",
+            "continued\n",
+            "\n",
+            "> quote\n",
+            "> continuation\n",
+            "\n",
+            "| head | value |\n",
+            "| --- | --- |\n",
+            "| **a** | `b` |\n",
+            "\n",
+            "| broken a | broken b |\n",
+            "| not a delimiter |\n",
+            "\n",
+            "- [ ] task\n",
+        )
+        .replace('\n', "\r\n");
+        let cases = [
+            (
+                source.find("bold").unwrap()..source.find("bold").unwrap() + "bold".len(),
+                "strong",
+            ),
+            (
+                source.find("hard break").unwrap()..source.find("\r\n\r\n> quote").unwrap(),
+                "",
+            ),
+            (
+                source.find("> continuation").unwrap() + "> continuation".len()
+                    ..source.find("> continuation").unwrap() + "> continuation".len(),
+                "\r\n> inserted continuation",
+            ),
+            (
+                source.find("| **a** | `b` |").unwrap() + "| **a** | `b` |".len()
+                    ..source.find("| **a** | `b` |").unwrap() + "| **a** | `b` |".len(),
+                "\r\n| extra | **c** |",
+            ),
+            (
+                source.find("not a delimiter").unwrap()
+                    ..source.find("not a delimiter").unwrap() + "not a delimiter".len(),
+                "--- | ---",
+            ),
+            (
+                source.find("[ ]").unwrap() + 1..source.find("[ ]").unwrap() + 2,
+                "x",
+            ),
+        ];
+
+        for (old_range, replacement) in cases {
+            let tree = PulldownMarkdownBackend::parse_syntax_tree(&source);
+            let mut new_source = source.to_string();
+            new_source.replace_range(old_range.clone(), replacement);
+            let new_range = old_range.start..old_range.start + replacement.len();
+            let incremental = PulldownMarkdownBackend::parse_syntax_tree_after_edit(
+                &new_source,
+                &tree,
+                old_range,
+                new_range,
+            );
+            let full = PulldownMarkdownBackend::parse_syntax_tree(&new_source);
+
+            assert_eq!(
+                incremental.syntax_data().line_starts(),
+                full.syntax_data().line_starts()
+            );
+            assert_eq!(
+                incremental
+                    .blocks()
+                    .iter()
+                    .map(block_semantics_without_id)
+                    .collect::<Vec<_>>(),
+                full.blocks()
+                    .iter()
+                    .map(block_semantics_without_id)
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(incremental.tables(), full.tables());
+            assert_eq!(incremental.inline_spans(), full.inline_spans());
+            assert_eq!(
+                incremental.syntax_data().projection_replacements(),
+                full.syntax_data().projection_replacements()
+            );
+            assert_eq!(
+                incremental.syntax_data().projection_marker_dependencies(),
+                full.syntax_data().projection_marker_dependencies()
+            );
+        }
+    }
+
+    #[test]
     fn pulldown_incremental_matches_pulldown_full_after_local_edits() {
         let source = concat!(
             "# Title\n",
