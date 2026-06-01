@@ -649,6 +649,7 @@ fn record_timed_projection_collect<T>(run: impl FnOnce() -> T) -> T {
 
 #[cfg(test)]
 mod tests {
+    use super::backend::PulldownMarkdownBackend;
     use super::source::{line_starts, trim_line_end};
     use super::*;
 
@@ -759,6 +760,35 @@ mod tests {
         assert_eq!(
             &source[trim_line_end(source, link_reference.content_range.clone())],
             "[ref]: https://example.com"
+        );
+    }
+
+    #[test]
+    fn pulldown_backend_enters_structure_assembler_boundary() {
+        let source = "# Title\n\nParagraph\n\n- item\n\n---\n";
+        let data = PulldownMarkdownBackend::parse_syntax_data(source);
+
+        assert_eq!(data.source_len(), source.len());
+        assert_eq!(data.line_starts(), line_starts(source));
+        assert!(
+            data.blocks()
+                .iter()
+                .any(|block| block.kind == MarkdownBlockKind::AtxHeading { level: 1 })
+        );
+        assert!(
+            data.blocks()
+                .iter()
+                .any(|block| block.kind == MarkdownBlockKind::Paragraph)
+        );
+        assert!(
+            data.blocks()
+                .iter()
+                .any(|block| block.kind == MarkdownBlockKind::UnorderedList)
+        );
+        assert!(
+            data.blocks()
+                .iter()
+                .any(|block| block.kind == MarkdownBlockKind::ThematicBreak)
         );
     }
 

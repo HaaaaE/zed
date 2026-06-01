@@ -50,6 +50,7 @@ log = { version = "0.4.16", features = ["kv_unstable_serde", "serde"] }
 parking_lot = "0.12.1"
 postage = { version = "0.5", features = ["futures-traits"] }
 proptest = { git = "https://github.com/proptest-rs/proptest", rev = "3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b", features = ["attr-macro"] }
+pulldown-cmark = "0.13.4"
 quote = "1.0.9"
 rand = "0.9"
 ratex-layout = "0.1.9"
