@@ -332,9 +332,10 @@ fn pulldown_inline_parent_ranges(
         .filter_map(|block| match block.kind {
             MarkdownBlockKind::Paragraph
             | MarkdownBlockKind::AtxHeading { .. }
-            | MarkdownBlockKind::SetextHeading { .. } => {
-                Some(pulldown_inline_parent_range(source, block.content_range.clone()))
-            }
+            | MarkdownBlockKind::SetextHeading { .. } => Some(pulldown_inline_parent_range(
+                source,
+                block.content_range.clone(),
+            )),
             _ => None,
         })
         .filter(|range| !range.is_empty())
@@ -352,7 +353,8 @@ fn pulldown_inline_parent_ranges(
 #[cfg(any(test, perf_enabled))]
 fn pulldown_inline_parent_range(source: &str, mut range: Range<usize>) -> Range<usize> {
     loop {
-        let trimmed = trim_line_end(source, range.clone());
+        let trimmed =
+            trim_trailing_continuation_whitespace(source, trim_line_end(source, range.clone()));
         let Some(last_line) = last_line_before_range_end(source, range.start..trimmed.end) else {
             return trimmed;
         };
@@ -363,6 +365,28 @@ fn pulldown_inline_parent_range(source: &str, mut range: Range<usize>) -> Range<
         }
 
         range.end = last_line.start;
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn trim_trailing_continuation_whitespace(source: &str, mut range: Range<usize>) -> Range<usize> {
+    loop {
+        let Some(line_start) = source[range.start..range.end]
+            .rfind('\n')
+            .map(|offset| range.start + offset + 1)
+        else {
+            return range;
+        };
+
+        if !source[line_start..range.end]
+            .bytes()
+            .all(|byte| matches!(byte, b' ' | b'\t'))
+        {
+            return range;
+        }
+
+        range.end = line_start.saturating_sub(1);
+        range = trim_line_end(source, range);
     }
 }
 
@@ -600,6 +624,7 @@ fn synthesize_pulldown_paragraph_blocks(
     }
 
     blocks.extend(synthesized);
+    extend_blockquote_paragraphs_to_next_child_marker(source, line_starts, blocks);
     extend_blockquote_child_blocks_to_quoted_gaps(source, line_starts, blocks);
 }
 
@@ -620,7 +645,17 @@ fn extend_blockquote_child_blocks_to_quoted_gaps(
         }
 
         let Some(extended_end) =
-            quoted_gap_extension_end(source, line_starts, &block.source_range, block.kind)
+            quoted_gap_extension_end(source, line_starts, &block.source_range, block.kind).or_else(
+                || {
+                    block_extends_quoted_child_marker(block.kind).then(|| {
+                        next_blockquote_child_marker_start_after_range(
+                            source,
+                            &original_blocks,
+                            &block.source_range,
+                        )
+                    })?
+                },
+            )
         else {
             continue;
         };
@@ -629,9 +664,21 @@ fn extend_blockquote_child_blocks_to_quoted_gaps(
         }
 
         block.source_range.end = extended_end;
-        block.content_range.end = trim_line_end(source, block.content_range.start..extended_end).end;
+        block.content_range.end =
+            trim_line_end(source, block.content_range.start..extended_end).end;
         block.row_range = row_range_for_byte_range(line_starts, block.source_range.clone());
     }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn block_extends_quoted_child_marker(kind: MarkdownBlockKind) -> bool {
+    matches!(
+        kind,
+        MarkdownBlockKind::OrderedList
+            | MarkdownBlockKind::UnorderedList
+            | MarkdownBlockKind::ListItem
+            | MarkdownBlockKind::TaskListItem { .. }
+    )
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -762,9 +809,11 @@ fn extend_blockquote_paragraphs_to_next_child_marker(
             continue;
         }
 
-        let Some(next_child_start) =
-            next_blockquote_child_start_after_paragraph(&original_blocks, &block.source_range)
-        else {
+        let Some(next_child_start) = next_blockquote_child_marker_start_after_range(
+            source,
+            &original_blocks,
+            &block.source_range,
+        ) else {
             continue;
         };
         if next_child_start <= block.source_range.end
@@ -782,25 +831,63 @@ fn extend_blockquote_paragraphs_to_next_child_marker(
 }
 
 #[cfg(any(test, perf_enabled))]
-fn next_blockquote_child_start_after_paragraph(
+fn next_blockquote_child_marker_start_after_range(
+    source: &str,
     blocks: &[MarkdownStructureBlock],
-    paragraph_range: &Range<usize>,
+    range: &Range<usize>,
 ) -> Option<usize> {
     let blockquote = blocks.iter().find(|block| {
         block.kind == MarkdownBlockKind::BlockQuote
-            && block.source_range.start <= paragraph_range.start
-            && block.source_range.end >= paragraph_range.end
+            && block.source_range.start <= range.start
+            && block.source_range.end >= range.end
     })?;
 
     blocks
         .iter()
         .filter(|block| {
-            block.source_range.start > paragraph_range.end
+            block.source_range.start >= range.end
                 && block.source_range.start <= blockquote.source_range.end
                 && block.kind != MarkdownBlockKind::Paragraph
         })
-        .map(|block| block.source_range.start)
-        .min()
+        .min_by_key(|block| block.source_range.start)
+        .map(|block| blockquote_child_marker_start(source, block))
+}
+
+#[cfg(any(test, perf_enabled))]
+fn blockquote_child_marker_start(source: &str, block: &MarkdownStructureBlock) -> usize {
+    if matches!(
+        block.kind,
+        MarkdownBlockKind::OrderedList
+            | MarkdownBlockKind::UnorderedList
+            | MarkdownBlockKind::ListItem
+            | MarkdownBlockKind::TaskListItem { .. }
+    ) {
+        list_marker_start(source, block.source_range.clone()).unwrap_or(block.source_range.start)
+    } else {
+        block.source_range.start
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn list_marker_start(source: &str, range: Range<usize>) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut cursor = range.start;
+
+    while cursor < range.end && matches!(bytes[cursor], b' ' | b'\t') {
+        cursor += 1;
+    }
+
+    if cursor < range.end && matches!(bytes[cursor], b'-' | b'+' | b'*') {
+        return Some(cursor);
+    }
+
+    let digit_start = cursor;
+    while cursor < range.end && bytes[cursor].is_ascii_digit() {
+        cursor += 1;
+    }
+
+    (cursor > digit_start && cursor < range.end && matches!(bytes[cursor], b'.' | b')'))
+        .then_some(digit_start)
 }
 
 #[cfg(any(test, perf_enabled))]

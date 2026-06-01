@@ -750,8 +750,8 @@ mod tests {
         let inactive_start = source.find("task").unwrap();
         let inactive_source_ranges = [inactive_start..inactive_start + "task".len()];
         let table_row = row_for_source_substring(source, "| **a**");
-        let visible_row_range =
-            row_for_source_substring(source, "Paragraph")..row_for_source_substring(source, "- item");
+        let visible_row_range = row_for_source_substring(source, "Paragraph")
+            ..row_for_source_substring(source, "- item");
 
         assert_eq!(
             candidate
@@ -1353,6 +1353,16 @@ mod tests {
             "> let x = 1;\n",
             "> ```\n",
             "\n",
+            "> 1. quoted ordered\n",
+            ">    - [ ] nested task\n",
+            "> \n",
+            "- parent item\n",
+            "  > nested quote\n",
+            "  > continuation\n",
+            "\n",
+            "1. numbered parent\n",
+            "   - child item\n",
+            "\n",
             "| head | value |\n",
             "| --- | --- |\n",
             "| **a** | `b` |\n",
@@ -1423,8 +1433,7 @@ mod tests {
                 "still ",
             ),
             (
-                source.find("hard break").unwrap()
-                    ..source.find("\n\n> # Quote").unwrap(),
+                source.find("hard break").unwrap()..source.find("\n\n> # Quote").unwrap(),
                 "",
             ),
             (
@@ -1457,8 +1466,43 @@ mod tests {
             ),
             (
                 source.find("> ```rust").unwrap()
-                    ..source.find("> ```\n\n| head").unwrap() + "> ```\n".len(),
+                    ..source.find("> ```\n\n> 1. quoted ordered").unwrap() + "> ```\n".len(),
                 concat!("> replacement paragraph\n", "> with **inline** content\n"),
+            ),
+            (
+                source.find("quoted ordered").unwrap()
+                    ..source.find("quoted ordered").unwrap() + "quoted ordered".len(),
+                "quoted numbered",
+            ),
+            (
+                source.find(">    - [ ] nested task").unwrap() + 5
+                    ..source.find(">    - [ ] nested task").unwrap() + 6,
+                "1.",
+            ),
+            (
+                source.find("[ ] nested task").unwrap() + 1
+                    ..source.find("[ ] nested task").unwrap() + 2,
+                "x",
+            ),
+            (
+                source.find("nested quote").unwrap()
+                    ..source.find("nested quote").unwrap() + "nested quote".len(),
+                "nested quote text",
+            ),
+            (
+                source.find("  > continuation").unwrap() + "  > continuation".len()
+                    ..source.find("  > continuation").unwrap() + "  > continuation".len(),
+                "\n  > inserted continuation",
+            ),
+            (
+                source.find("1. numbered parent").unwrap()
+                    ..source.find("1. numbered parent").unwrap() + 2,
+                "2.",
+            ),
+            (
+                source.find("   - child item").unwrap() + 3
+                    ..source.find("   - child item").unwrap() + 4,
+                "*",
             ),
             (
                 source.find("| --- | --- |").unwrap() + 2
@@ -1563,6 +1607,15 @@ mod tests {
             "\n",
             "> quoted\n",
             "> - [ ] task\n",
+            ">   1. nested ordered\n",
+            ">      - [ ] nested task\n",
+            "\n",
+            "- parent\n",
+            "  > nested quote\n",
+            "  > continuation\n",
+            "\n",
+            "1. ordered parent\n",
+            "   - ordered child\n",
             "\n",
             "| head | value |\n",
             "| --- | --- |\n",
@@ -1592,6 +1645,15 @@ mod tests {
             "\n",
             "> quoted\n",
             "> - [ ] task\n",
+            ">   1. nested ordered\n",
+            ">      - [ ] nested task\n",
+            "\n",
+            "- parent\n",
+            "  > nested quote\n",
+            "  > continuation\n",
+            "\n",
+            "1. ordered parent\n",
+            "   - ordered child\n",
             "\n",
             "| head | value |\n",
             "| --- | --- |\n",
@@ -1652,14 +1714,47 @@ mod tests {
                 "quoted text",
             ),
             (
-                source.find("> quoted").unwrap()
-                    ..source.find("> - [ ] task").unwrap(),
+                source.find("> quoted").unwrap()..source.find("> - [ ] task").unwrap(),
                 concat!("> replacement quote\n", "> with **inline** text\n"),
             ),
             (
-                source.find("> - [ ] task").unwrap() + 2
-                    ..source.find("> - [ ] task").unwrap() + 3,
+                source.find("> - [ ] task").unwrap() + 2..source.find("> - [ ] task").unwrap() + 3,
                 "1.",
+            ),
+            (
+                source.find("nested ordered").unwrap()
+                    ..source.find("nested ordered").unwrap() + "nested ordered".len(),
+                "nested numbered",
+            ),
+            (
+                source.find(">      - [ ] nested task").unwrap() + 7
+                    ..source.find(">      - [ ] nested task").unwrap() + 8,
+                "1.",
+            ),
+            (
+                source.find("[ ] nested task").unwrap() + 1
+                    ..source.find("[ ] nested task").unwrap() + 2,
+                "x",
+            ),
+            (
+                source.find("nested quote").unwrap()
+                    ..source.find("nested quote").unwrap() + "nested quote".len(),
+                "nested quote text",
+            ),
+            (
+                source.find("  > continuation").unwrap() + "  > continuation".len()
+                    ..source.find("  > continuation").unwrap() + "  > continuation".len(),
+                "\n  > inserted continuation",
+            ),
+            (
+                source.find("1. ordered parent").unwrap()
+                    ..source.find("1. ordered parent").unwrap() + 2,
+                "2.",
+            ),
+            (
+                source.find("   - ordered child").unwrap() + 3
+                    ..source.find("   - ordered child").unwrap() + 4,
+                "*",
             ),
             (
                 source.find("| --- | --- |").unwrap() + 2
