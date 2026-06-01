@@ -3,7 +3,7 @@ use std::{collections::HashMap, ops::Range, sync::OnceLock};
 use tree_sitter::Node;
 
 use super::{
-    MarkdownBlock, MarkdownInlineKind, MarkdownInlineSpan, MarkdownParseTree,
+    MarkdownBlock, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineTree, MarkdownParseTree,
     MarkdownProjectionReplacement, ProjectionMarkerDependency, ranges_overlap,
 };
 pub(super) fn collect_inline_spans(
@@ -12,10 +12,19 @@ pub(super) fn collect_inline_spans(
 ) -> Vec<MarkdownInlineSpan> {
     let mut spans = Vec::new();
     for inline_tree in parse_tree.inline_trees() {
-        collect_inline_span_nodes(source, inline_tree.tree().root_node(), &mut spans);
-        collect_soft_break_spans(source, inline_tree.parent_range.clone(), &mut spans);
+        spans.extend(collect_inline_spans_for_inline_tree(source, inline_tree));
     }
     spans.sort_by_key(|span| (span.source_range.start, span.source_range.end));
+    spans
+}
+
+pub(super) fn collect_inline_spans_for_inline_tree(
+    source: &str,
+    inline_tree: &MarkdownInlineTree,
+) -> Vec<MarkdownInlineSpan> {
+    let mut spans = Vec::new();
+    collect_inline_span_nodes(source, inline_tree.tree().root_node(), &mut spans);
+    collect_soft_break_spans(source, inline_tree.parent_range.clone(), &mut spans);
     spans
 }
 
@@ -77,18 +86,12 @@ pub(super) fn collect_projection_replacements(
     source: &str,
     parse_tree: &MarkdownParseTree,
 ) -> Vec<MarkdownProjectionReplacement> {
-    let mut replacements = Vec::new();
-    collect_projection_replacement_nodes(
-        source,
-        parse_tree.block_tree().root_node(),
-        &mut replacements,
-    );
+    let mut replacements = collect_projection_replacements_for_block_tree(source, parse_tree);
     for inline_tree in parse_tree.inline_trees() {
-        collect_projection_replacement_nodes(
+        replacements.extend(collect_projection_replacements_for_inline_tree(
             source,
-            inline_tree.tree().root_node(),
-            &mut replacements,
-        );
+            inline_tree,
+        ));
     }
     replacements.sort_by_key(|replacement| {
         (
@@ -98,6 +101,28 @@ pub(super) fn collect_projection_replacements(
             replacement.owner_source_range.end,
         )
     });
+    replacements
+}
+
+pub(super) fn collect_projection_replacements_for_block_tree(
+    source: &str,
+    parse_tree: &MarkdownParseTree,
+) -> Vec<MarkdownProjectionReplacement> {
+    let mut replacements = Vec::new();
+    collect_projection_replacement_nodes(
+        source,
+        parse_tree.block_tree().root_node(),
+        &mut replacements,
+    );
+    replacements
+}
+
+pub(super) fn collect_projection_replacements_for_inline_tree(
+    source: &str,
+    inline_tree: &MarkdownInlineTree,
+) -> Vec<MarkdownProjectionReplacement> {
+    let mut replacements = Vec::new();
+    collect_projection_replacement_nodes(source, inline_tree.tree().root_node(), &mut replacements);
     replacements
 }
 

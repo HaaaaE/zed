@@ -108,3 +108,8 @@
   - 新 perf 显示大文档 session 继续从约 27.20s 降到约 21.21s；`rendered_edit_equal_length_draw_syntax_parse` 从约 1.73s 降到约 0.66s，`rendered_edit_length_change_draw_syntax_parse` 从约 0.85s 降到约 0.33s，`rendered_enter_apply_syntax_parse` 从约 0.86s 降到约 0.33s，`rendered_delete_apply_syntax_parse` 从约 0.53s 降到约 0.25s。
   - 剩余热点进一步集中到 derived syntax collection：projection 收集约 0.25-0.29s，blocks/inlines 各约 0.08-0.10s；需要继续做 dirty-window collection/splice，才能把普通编辑 draw/apply 拉到几十毫秒级。
   - 已验证：`cargo fmt --check`、`cargo test -p markdown_wysiwyg`、`cargo check -p updraft_editor`、`cargo test -p md_editor --profile release-fast --lib --no-run --config 'target."cfg(true)".rustflags=["--cfg","perf_enabled"]'`、`cargo perf-test -p md_editor -- --important`。
+  - derived inline syntax 现在按 inline parent byte range 复用未触碰的 `MarkdownInlineSpan` 和 inline projection replacements；dirty/unknown parent 才重新收集，并用 sorted slice 避免对每个 parent 全量扫描旧 spans/replacements。
+  - 新增等价测试覆盖局部编辑后的 inline spans、projection replacements、projection marker dependencies 与 full parse 完全一致。
+  - 最新 perf artifact：`.perf-runs\20260601-035528-ea7d9ee98a.md_editor.json`。大文档 session 从约 21.21s 降到约 19.54s；`rendered_edit_equal_length_draw_syntax_inlines` 约 9.30ms，`rendered_edit_length_change_draw_syntax_inlines` 约 8.27ms，`rendered_enter_apply_syntax_inlines` 约 8.55ms，`rendered_delete_apply_syntax_inlines` 约 8.56ms。
+  - 当前剩余热点：parse 仍约 0.24-0.64s，block 收集约 81-87ms，projection 收集约 177-182ms；projection 目前仍重新扫描 block tree，并且 projection marker dependencies 仍按 blocks/inlines/replacements 全量重算。
+  - 已验证：`cargo fmt --check`、`cargo test -p markdown_wysiwyg`、`cargo check -p updraft_editor`、`cargo perf-test -p md_editor -- --important`。
