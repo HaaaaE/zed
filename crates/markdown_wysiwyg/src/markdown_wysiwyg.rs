@@ -328,17 +328,10 @@ impl MarkdownStructure {
 
 impl MarkdownSemanticsAssembler {
     fn assemble(source: &str, structure: &MarkdownStructure) -> MarkdownSyntaxData {
-        validate_structure_blocks(structure.blocks());
+        blocks::validate_structure_blocks(structure.blocks());
         let line_starts = record_timed_line_start_collect(|| line_starts(source));
         let blocks = record_timed_block_collect(|| {
-            let mut blocks = structure
-                .blocks()
-                .iter()
-                .map(MarkdownBlock::from_structure)
-                .collect::<Vec<_>>();
-            add_blank_structure_blocks(source, &line_starts, &mut blocks);
-            blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
-            blocks
+            blocks::collect_markdown_blocks(source, &line_starts, structure)
         });
         let tables = record_timed_table_collect(|| {
             collect_structure_tables(source, &line_starts, structure)
@@ -389,10 +382,10 @@ impl MarkdownSemanticsAssembler {
         old_range: &Range<usize>,
         new_range: &Range<usize>,
     ) -> MarkdownSyntaxData {
-        validate_structure_blocks(structure.blocks());
+        blocks::validate_structure_blocks(structure.blocks());
         let line_starts = record_timed_line_start_collect(|| line_starts(source));
         let blocks = record_timed_block_collect(|| {
-            collect_incremental_blocks(source, structure, &line_starts)
+            blocks::collect_incremental_blocks(source, structure, &line_starts)
         });
         let tables = record_timed_table_collect(|| {
             collect_structure_tables(source, &line_starts, structure)
@@ -445,20 +438,6 @@ impl MarkdownSemanticsAssembler {
     }
 }
 
-fn validate_structure_blocks(blocks: &[MarkdownStructureBlock]) {
-    debug_assert!(blocks.windows(2).all(|pair| {
-        let left = &pair[0];
-        let right = &pair[1];
-        (left.source_range.start, left.source_range.end)
-            <= (right.source_range.start, right.source_range.end)
-    }));
-    debug_assert!(blocks.iter().all(|block| {
-        let _kind = block.kind;
-        block.source_range.start <= block.source_range.end
-            && block.row_range.start < block.row_range.end
-    }));
-}
-
 impl MarkdownBlock {
     fn from_structure(block: &MarkdownStructureBlock) -> Self {
         Self {
@@ -470,42 +449,6 @@ impl MarkdownBlock {
             row_range: block.row_range.clone(),
             tagfilter_disallowed: block.tagfilter_disallowed,
         }
-    }
-}
-
-fn add_blank_structure_blocks(
-    source: &str,
-    line_starts: &[usize],
-    blocks: &mut Vec<MarkdownBlock>,
-) {
-    let mut covered_rows = vec![false; line_starts.len()];
-    for block in blocks.iter() {
-        for row in block.row_range.clone() {
-            if let Some(covered) = covered_rows.get_mut(row) {
-                *covered = true;
-            }
-        }
-    }
-
-    for row in 0..line_starts.len() {
-        if covered_rows[row] {
-            continue;
-        }
-
-        let range = line_range(source, line_starts, row);
-        if range.is_empty() || !source[range.clone()].trim().is_empty() {
-            continue;
-        }
-
-        blocks.push(MarkdownBlock {
-            id: MarkdownNodeId(1 << 63 | row as u64),
-            kind: MarkdownBlockKind::Blank,
-            source_range: range.clone(),
-            content_range: range.start..range.start,
-            marker_ranges: Vec::new(),
-            row_range: row..row + 1,
-            tagfilter_disallowed: false,
-        });
     }
 }
 
@@ -1511,38 +1454,6 @@ fn shift_clean_old_range_to_new(
 
     debug_assert!(range.start >= old_range.end);
     shift_byte_range(range, old_range.end, new_range.end)
-}
-
-fn block_semantics_match(left: &MarkdownBlock, right: &MarkdownBlock) -> bool {
-    left.kind == right.kind
-        && left.source_range == right.source_range
-        && left.content_range == right.content_range
-        && left.marker_ranges == right.marker_ranges
-        && left.row_range == right.row_range
-        && left.tagfilter_disallowed == right.tagfilter_disallowed
-}
-
-fn collect_incremental_blocks(
-    source: &str,
-    structure: &MarkdownStructure,
-    line_starts: &[usize],
-) -> Vec<MarkdownBlock> {
-    let mut blocks = structure
-        .blocks()
-        .iter()
-        .map(MarkdownBlock::from_structure)
-        .collect::<Vec<_>>();
-    add_blank_structure_blocks(source, line_starts, &mut blocks);
-    blocks.sort_by_key(|block| {
-        (
-            block.source_range.start,
-            block.source_range.end,
-            block.row_range.start,
-            block.row_range.end,
-        )
-    });
-    blocks.dedup_by(|right, left| block_semantics_match(left, right));
-    blocks
 }
 
 fn shift_inline_span_after_edit(

@@ -3,8 +3,9 @@ use std::ops::Range;
 use tree_sitter::Node;
 
 use super::{
-    MarkdownBlockKind, MarkdownStructureBlock, inline::raw_html_tagfilter_disallowed,
-    last_line_range, node_id, trim_ascii_whitespace, trim_line_end,
+    MarkdownBlock, MarkdownBlockKind, MarkdownNodeId, MarkdownStructure, MarkdownStructureBlock,
+    inline::raw_html_tagfilter_disallowed, last_line_range, line_range, node_id,
+    trim_ascii_whitespace, trim_line_end,
 };
 
 pub(super) fn collect_structure_blocks(
@@ -15,6 +16,103 @@ pub(super) fn collect_structure_blocks(
     collect_structure_block_nodes(source, root, &mut blocks);
     blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
     blocks
+}
+
+pub(super) fn validate_structure_blocks(blocks: &[MarkdownStructureBlock]) {
+    debug_assert!(blocks.windows(2).all(|pair| {
+        let left = &pair[0];
+        let right = &pair[1];
+        (left.source_range.start, left.source_range.end)
+            <= (right.source_range.start, right.source_range.end)
+    }));
+    debug_assert!(blocks.iter().all(|block| {
+        let _kind = block.kind;
+        block.source_range.start <= block.source_range.end
+            && block.row_range.start < block.row_range.end
+    }));
+}
+
+pub(super) fn collect_markdown_blocks(
+    source: &str,
+    line_starts: &[usize],
+    structure: &MarkdownStructure,
+) -> Vec<MarkdownBlock> {
+    let mut blocks = structure
+        .blocks()
+        .iter()
+        .map(MarkdownBlock::from_structure)
+        .collect::<Vec<_>>();
+    add_blank_structure_blocks(source, line_starts, &mut blocks);
+    blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
+    blocks
+}
+
+pub(super) fn collect_incremental_blocks(
+    source: &str,
+    structure: &MarkdownStructure,
+    line_starts: &[usize],
+) -> Vec<MarkdownBlock> {
+    let mut blocks = structure
+        .blocks()
+        .iter()
+        .map(MarkdownBlock::from_structure)
+        .collect::<Vec<_>>();
+    add_blank_structure_blocks(source, line_starts, &mut blocks);
+    blocks.sort_by_key(|block| {
+        (
+            block.source_range.start,
+            block.source_range.end,
+            block.row_range.start,
+            block.row_range.end,
+        )
+    });
+    blocks.dedup_by(|right, left| block_semantics_match(left, right));
+    blocks
+}
+
+fn add_blank_structure_blocks(
+    source: &str,
+    line_starts: &[usize],
+    blocks: &mut Vec<MarkdownBlock>,
+) {
+    let mut covered_rows = vec![false; line_starts.len()];
+    for block in blocks.iter() {
+        for row in block.row_range.clone() {
+            if let Some(covered) = covered_rows.get_mut(row) {
+                *covered = true;
+            }
+        }
+    }
+
+    for row in 0..line_starts.len() {
+        if covered_rows[row] {
+            continue;
+        }
+
+        let range = line_range(source, line_starts, row);
+        if range.is_empty() || !source[range.clone()].trim().is_empty() {
+            continue;
+        }
+
+        blocks.push(MarkdownBlock {
+            id: MarkdownNodeId(1 << 63 | row as u64),
+            kind: MarkdownBlockKind::Blank,
+            source_range: range.clone(),
+            content_range: range.start..range.start,
+            marker_ranges: Vec::new(),
+            row_range: row..row + 1,
+            tagfilter_disallowed: false,
+        });
+    }
+}
+
+fn block_semantics_match(left: &MarkdownBlock, right: &MarkdownBlock) -> bool {
+    left.kind == right.kind
+        && left.source_range == right.source_range
+        && left.content_range == right.content_range
+        && left.marker_ranges == right.marker_ranges
+        && left.row_range == right.row_range
+        && left.tagfilter_disallowed == right.tagfilter_disallowed
 }
 
 fn collect_structure_block_nodes(
