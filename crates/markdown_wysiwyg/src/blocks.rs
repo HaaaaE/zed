@@ -1,40 +1,29 @@
 use std::ops::Range;
 
-use tree_sitter::{Node, Tree};
+use tree_sitter::Node;
 
 use super::{
-    MarkdownBlock, MarkdownBlockKind, MarkdownNodeId, inline::raw_html_tagfilter_disallowed,
-    last_line_range, line_range, node_id, ranges_overlap, trim_ascii_whitespace, trim_line_end,
+    MarkdownBlockKind, MarkdownStructureBlock, inline::raw_html_tagfilter_disallowed,
+    last_line_range, node_id, trim_ascii_whitespace, trim_line_end,
 };
-pub(super) fn collect_blocks(
+
+pub(super) fn collect_structure_blocks(
     source: &str,
-    line_starts: &[usize],
-    tree: &Tree,
-) -> Vec<MarkdownBlock> {
+    root: Node<'_>,
+) -> Vec<MarkdownStructureBlock> {
     let mut blocks = Vec::new();
-    collect_block_nodes(source, tree.root_node(), &mut blocks);
-    add_blank_blocks(source, line_starts, &mut blocks);
+    collect_structure_block_nodes(source, root, &mut blocks);
     blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
     blocks
 }
 
-pub(super) fn collect_blocks_in_source_range(
+fn collect_structure_block_nodes(
     source: &str,
-    line_starts: &[usize],
-    tree: &Tree,
-    source_range: Range<usize>,
-    row_range: Range<usize>,
-) -> Vec<MarkdownBlock> {
-    let mut blocks = Vec::new();
-    collect_block_nodes_in_source_range(source, tree.root_node(), &source_range, &mut blocks);
-    add_blank_blocks_in_row_range(source, line_starts, row_range, &mut blocks);
-    blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
-    blocks
-}
-
-fn collect_block_nodes(source: &str, node: Node<'_>, blocks: &mut Vec<MarkdownBlock>) {
-    if let Some(block) = block_from_node(source, node) {
-        let recurse = block_node_has_children(node.kind());
+    node: Node<'_>,
+    blocks: &mut Vec<MarkdownStructureBlock>,
+) {
+    if let Some(block) = structure_block_from_node(source, node) {
+        let recurse = structure_block_node_has_children(node.kind());
         blocks.push(block);
         if !recurse {
             return;
@@ -43,157 +32,124 @@ fn collect_block_nodes(source: &str, node: Node<'_>, blocks: &mut Vec<MarkdownBl
 
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        collect_block_nodes(source, child, blocks);
+        collect_structure_block_nodes(source, child, blocks);
     }
 }
 
-fn collect_block_nodes_in_source_range(
-    source: &str,
-    node: Node<'_>,
-    source_range: &Range<usize>,
-    blocks: &mut Vec<MarkdownBlock>,
-) {
-    if !ranges_overlap(&node.byte_range(), source_range) {
-        return;
-    }
-
-    if let Some(block) = block_from_node(source, node) {
-        let recurse = block_node_has_children(node.kind());
-        if ranges_overlap(&block.source_range, source_range) {
-            blocks.push(block);
-        }
-        if !recurse {
-            return;
-        }
-    }
-
-    let mut cursor = node.walk();
-    for child in node.named_children(&mut cursor) {
-        collect_block_nodes_in_source_range(source, child, source_range, blocks);
-    }
-}
-
-fn block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
+fn structure_block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownStructureBlock> {
     match node.kind() {
-        "atx_heading" => atx_heading_block(source, node),
-        "setext_heading" => setext_heading_block(source, node),
-        "block_quote" => Some(block_quote_block(source, node)),
-        "list" => Some(list_block(source, node)),
-        "list_item" => Some(list_item_block(source, node)),
-        "paragraph" => Some(MarkdownBlock {
+        "atx_heading" => structure_atx_heading_block(source, node),
+        "setext_heading" => structure_setext_heading_block(source, node),
+        "block_quote" => Some(structure_block_quote_block(source, node)),
+        "list" => Some(structure_list_block(source, node)),
+        "list_item" => Some(structure_list_item_block(source, node)),
+        "paragraph" => Some(MarkdownStructureBlock {
             id: node_id(node),
             kind: MarkdownBlockKind::Paragraph,
             source_range: node.byte_range(),
             content_range: trim_line_end(source, node.byte_range()),
             marker_ranges: Vec::new(),
-            row_range: row_range_for_node(node),
+            row_range: row_range_for_structure_node(node),
             tagfilter_disallowed: false,
         }),
-        "thematic_break" => Some(MarkdownBlock {
+        "thematic_break" => Some(MarkdownStructureBlock {
             id: node_id(node),
             kind: MarkdownBlockKind::ThematicBreak,
             source_range: node.byte_range(),
             content_range: node.start_byte()..node.start_byte(),
             marker_ranges: Vec::new(),
-            row_range: row_range_for_node(node),
+            row_range: row_range_for_structure_node(node),
             tagfilter_disallowed: false,
         }),
-        "indented_code_block" => Some(MarkdownBlock {
+        "indented_code_block" => Some(MarkdownStructureBlock {
             id: node_id(node),
             kind: MarkdownBlockKind::IndentedCodeBlock,
             source_range: node.byte_range(),
             content_range: trim_line_end(source, node.byte_range()),
             marker_ranges: Vec::new(),
-            row_range: row_range_for_node(node),
+            row_range: row_range_for_structure_node(node),
             tagfilter_disallowed: false,
         }),
-        "fenced_code_block" => Some(MarkdownBlock {
+        "fenced_code_block" => Some(MarkdownStructureBlock {
             id: node_id(node),
             kind: MarkdownBlockKind::FencedCodeBlock,
             source_range: node.byte_range(),
-            content_range: fenced_code_content_range(source, node),
-            marker_ranges: fenced_code_marker_ranges(node),
-            row_range: row_range_for_node(node),
+            content_range: structure_fenced_code_content_range(source, node),
+            marker_ranges: structure_fenced_code_marker_ranges(node),
+            row_range: row_range_for_structure_node(node),
             tagfilter_disallowed: false,
         }),
-        "html_block" => Some(MarkdownBlock {
+        "html_block" => Some(MarkdownStructureBlock {
             id: node_id(node),
             kind: MarkdownBlockKind::HtmlBlock,
             source_range: node.byte_range(),
             content_range: trim_line_end(source, node.byte_range()),
             marker_ranges: Vec::new(),
-            row_range: row_range_for_node(node),
+            row_range: row_range_for_structure_node(node),
             tagfilter_disallowed: raw_html_tagfilter_disallowed(source, node.byte_range()),
         }),
-        "link_reference_definition" => Some(MarkdownBlock {
+        "link_reference_definition" => Some(MarkdownStructureBlock {
             id: node_id(node),
             kind: MarkdownBlockKind::LinkReferenceDefinition,
             source_range: node.byte_range(),
             content_range: trim_line_end(source, node.byte_range()),
             marker_ranges: Vec::new(),
-            row_range: row_range_for_node(node),
+            row_range: row_range_for_structure_node(node),
             tagfilter_disallowed: false,
         }),
-        "pipe_table" => {
-            let marker_ranges = pipe_table_marker_ranges(node);
-            let content_range = trim_line_end(source, node.byte_range());
-            Some(MarkdownBlock {
-                id: node_id(node),
-                kind: MarkdownBlockKind::PipeTable,
-                source_range: node.byte_range(),
-                content_range,
-                marker_ranges,
-                row_range: row_range_for_node(node),
-                tagfilter_disallowed: false,
-            })
-        }
+        "pipe_table" => Some(MarkdownStructureBlock {
+            id: node_id(node),
+            kind: MarkdownBlockKind::PipeTable,
+            source_range: node.byte_range(),
+            content_range: trim_line_end(source, node.byte_range()),
+            marker_ranges: structure_pipe_table_marker_ranges(node),
+            row_range: row_range_for_structure_node(node),
+            tagfilter_disallowed: false,
+        }),
         _ => None,
     }
 }
 
-fn block_node_has_children(kind: &str) -> bool {
+fn structure_block_node_has_children(kind: &str) -> bool {
     matches!(kind, "block_quote" | "list" | "list_item")
 }
 
-fn block_quote_block(source: &str, node: Node<'_>) -> MarkdownBlock {
+fn structure_block_quote_block(source: &str, node: Node<'_>) -> MarkdownStructureBlock {
     let source_range = node.byte_range();
-    let content_range = trim_line_end(source, source_range.clone());
-    let marker_ranges = block_quote_marker_ranges(source, source_range.clone());
-
-    MarkdownBlock {
+    MarkdownStructureBlock {
         id: node_id(node),
         kind: MarkdownBlockKind::BlockQuote,
-        source_range,
-        content_range,
-        marker_ranges,
-        row_range: row_range_for_node(node),
+        source_range: source_range.clone(),
+        content_range: trim_line_end(source, source_range.clone()),
+        marker_ranges: structure_block_quote_marker_ranges(source, source_range),
+        row_range: row_range_for_structure_node(node),
         tagfilter_disallowed: false,
     }
 }
 
-fn list_block(source: &str, node: Node<'_>) -> MarkdownBlock {
+fn structure_list_block(source: &str, node: Node<'_>) -> MarkdownStructureBlock {
     let source_range = node.byte_range();
     let content_range = trim_line_end(source, source_range.clone());
-    let kind = if list_source_starts_ordered_marker(source, content_range.clone()) {
+    let kind = if structure_list_source_starts_ordered_marker(source, content_range.clone()) {
         MarkdownBlockKind::OrderedList
     } else {
         MarkdownBlockKind::UnorderedList
     };
 
-    MarkdownBlock {
+    MarkdownStructureBlock {
         id: node_id(node),
         kind,
         source_range,
         content_range,
         marker_ranges: Vec::new(),
-        row_range: row_range_for_node(node),
+        row_range: row_range_for_structure_node(node),
         tagfilter_disallowed: false,
     }
 }
 
-fn list_item_block(source: &str, node: Node<'_>) -> MarkdownBlock {
+fn structure_list_item_block(source: &str, node: Node<'_>) -> MarkdownStructureBlock {
     let node_range = node.byte_range();
-    let marker_range = list_item_marker_range(source, node_range.clone());
+    let marker_range = structure_list_item_marker_range(source, node_range.clone());
     let source_start = marker_range
         .as_ref()
         .map_or(node_range.start, |range| range.start);
@@ -201,7 +157,8 @@ fn list_item_block(source: &str, node: Node<'_>) -> MarkdownBlock {
     let content_start = marker_range
         .as_ref()
         .map_or(source_range.start, |range| range.end);
-    let task_marker = task_list_marker_after_list_marker(source, content_start, source_range.end);
+    let task_marker =
+        structure_task_list_marker_after_list_marker(source, content_start, source_range.end);
     let (kind, content_start) = if let Some((checked, task_content_start)) = task_marker {
         (
             MarkdownBlockKind::TaskListItem { checked },
@@ -210,21 +167,85 @@ fn list_item_block(source: &str, node: Node<'_>) -> MarkdownBlock {
     } else {
         (MarkdownBlockKind::ListItem, content_start)
     };
-    let content_range = trim_line_end(source, content_start..source_range.end);
-    let marker_ranges = marker_range.into_iter().collect();
 
-    MarkdownBlock {
+    MarkdownStructureBlock {
         id: node_id(node),
         kind,
-        source_range,
-        content_range,
-        marker_ranges,
-        row_range: row_range_for_node(node),
+        source_range: source_range.clone(),
+        content_range: trim_line_end(source, content_start..source_range.end),
+        marker_ranges: marker_range.into_iter().collect(),
+        row_range: row_range_for_structure_node(node),
         tagfilter_disallowed: false,
     }
 }
 
-fn task_list_marker_after_list_marker(
+fn structure_setext_heading_block(source: &str, node: Node<'_>) -> Option<MarkdownStructureBlock> {
+    let source_range = node.byte_range();
+    let marker_range = last_line_range(source, source_range.clone())?;
+    let marker_text = &source[trim_ascii_whitespace(source, marker_range.clone())];
+    let level = match marker_text.as_bytes().first().copied()? {
+        b'=' => 1,
+        b'-' => 2,
+        _ => return None,
+    };
+
+    Some(MarkdownStructureBlock {
+        id: node_id(node),
+        kind: MarkdownBlockKind::SetextHeading { level },
+        source_range: source_range.clone(),
+        content_range: trim_line_end(source, source_range.start..marker_range.start),
+        marker_ranges: vec![marker_range],
+        row_range: row_range_for_structure_node(node),
+        tagfilter_disallowed: false,
+    })
+}
+
+fn structure_atx_heading_block(source: &str, node: Node<'_>) -> Option<MarkdownStructureBlock> {
+    let source_range = node.byte_range();
+    let (level, marker_range, content_start) =
+        structure_atx_heading_marker_range(source, source_range.clone())?;
+    let content_end = trim_line_end(source, content_start..source_range.end).end;
+
+    Some(MarkdownStructureBlock {
+        id: node_id(node),
+        kind: MarkdownBlockKind::AtxHeading { level },
+        source_range,
+        content_range: content_start..content_end,
+        marker_ranges: vec![marker_range],
+        row_range: row_range_for_structure_node(node),
+        tagfilter_disallowed: false,
+    })
+}
+
+fn structure_atx_heading_marker_range(
+    source: &str,
+    source_range: Range<usize>,
+) -> Option<(u8, Range<usize>, usize)> {
+    let bytes = source.as_bytes();
+    let mut marker_start = source_range.start;
+    while marker_start < source_range.end && matches!(bytes[marker_start], b' ' | b'\t') {
+        marker_start += 1;
+    }
+
+    let mut marker_end = marker_start;
+    while marker_end < source_range.end && bytes[marker_end] == b'#' {
+        marker_end += 1;
+    }
+
+    let level = marker_end - marker_start;
+    if !(1..=6).contains(&level) {
+        return None;
+    }
+
+    let mut content_start = marker_end;
+    while content_start < source_range.end && matches!(bytes[content_start], b' ' | b'\t') {
+        content_start += 1;
+    }
+
+    Some((level as u8, marker_start..content_start, content_start))
+}
+
+fn structure_task_list_marker_after_list_marker(
     source: &str,
     content_start: usize,
     source_end: usize,
@@ -260,7 +281,7 @@ fn task_list_marker_after_list_marker(
     Some((checked, task_content_start))
 }
 
-fn list_source_starts_ordered_marker(source: &str, range: Range<usize>) -> bool {
+fn structure_list_source_starts_ordered_marker(source: &str, range: Range<usize>) -> bool {
     let bytes = source.as_bytes();
     let mut cursor = range.start;
 
@@ -276,7 +297,10 @@ fn list_source_starts_ordered_marker(source: &str, range: Range<usize>) -> bool 
     cursor > digit_start && cursor < range.end && matches!(bytes[cursor], b'.' | b')')
 }
 
-fn block_quote_marker_ranges(source: &str, source_range: Range<usize>) -> Vec<Range<usize>> {
+fn structure_block_quote_marker_ranges(
+    source: &str,
+    source_range: Range<usize>,
+) -> Vec<Range<usize>> {
     let bytes = source.as_bytes();
     let mut ranges = Vec::new();
     let mut line_start = source_range.start;
@@ -309,9 +333,12 @@ fn block_quote_marker_ranges(source: &str, source_range: Range<usize>) -> Vec<Ra
     ranges
 }
 
-fn list_item_marker_range(source: &str, source_range: Range<usize>) -> Option<Range<usize>> {
+fn structure_list_item_marker_range(
+    source: &str,
+    source_range: Range<usize>,
+) -> Option<Range<usize>> {
     let bytes = source.as_bytes();
-    let marker_start = list_item_marker_start(source, source_range.start);
+    let marker_start = structure_list_item_marker_start(source, source_range.start);
     let mut cursor = marker_start;
 
     while cursor < source_range.end && matches!(bytes[cursor], b' ' | b'\t') {
@@ -341,7 +368,7 @@ fn list_item_marker_range(source: &str, source_range: Range<usize>) -> Option<Ra
     (marker_start < cursor).then_some(marker_start..cursor)
 }
 
-fn list_item_marker_start(source: &str, node_start: usize) -> usize {
+fn structure_list_item_marker_start(source: &str, node_start: usize) -> usize {
     let bytes = source.as_bytes();
     let mut cursor = source[..node_start]
         .rfind('\n')
@@ -367,75 +394,7 @@ fn list_item_marker_start(source: &str, node_start: usize) -> usize {
     }
 }
 
-fn setext_heading_block(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
-    let source_range = node.byte_range();
-    let marker_range = last_line_range(source, source_range.clone())?;
-    let marker_text = &source[trim_ascii_whitespace(source, marker_range.clone())];
-    let level = match marker_text.as_bytes().first().copied()? {
-        b'=' => 1,
-        b'-' => 2,
-        _ => return None,
-    };
-    let content_range = trim_line_end(source, source_range.start..marker_range.start);
-
-    Some(MarkdownBlock {
-        id: node_id(node),
-        kind: MarkdownBlockKind::SetextHeading { level },
-        source_range,
-        content_range,
-        marker_ranges: vec![marker_range],
-        row_range: row_range_for_node(node),
-        tagfilter_disallowed: false,
-    })
-}
-
-fn atx_heading_block(source: &str, node: Node<'_>) -> Option<MarkdownBlock> {
-    let source_range = node.byte_range();
-    let (level, marker_range, content_start) =
-        atx_heading_marker_range(source, source_range.clone())?;
-
-    let content_end = trim_line_end(source, content_start..source_range.end).end;
-
-    Some(MarkdownBlock {
-        id: node_id(node),
-        kind: MarkdownBlockKind::AtxHeading { level },
-        source_range: source_range.clone(),
-        content_range: content_start..content_end,
-        marker_ranges: vec![marker_range],
-        row_range: row_range_for_node(node),
-        tagfilter_disallowed: false,
-    })
-}
-
-fn atx_heading_marker_range(
-    source: &str,
-    source_range: Range<usize>,
-) -> Option<(u8, Range<usize>, usize)> {
-    let bytes = source.as_bytes();
-    let mut marker_start = source_range.start;
-    while marker_start < source_range.end && matches!(bytes[marker_start], b' ' | b'\t') {
-        marker_start += 1;
-    }
-
-    let mut marker_end = marker_start;
-    while marker_end < source_range.end && bytes[marker_end] == b'#' {
-        marker_end += 1;
-    }
-
-    let level = marker_end - marker_start;
-    if !(1..=6).contains(&level) {
-        return None;
-    }
-
-    let mut content_start = marker_end;
-    while content_start < source_range.end && matches!(bytes[content_start], b' ' | b'\t') {
-        content_start += 1;
-    }
-
-    Some((level as u8, marker_start..content_start, content_start))
-}
-
-fn fenced_code_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
+fn structure_fenced_code_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
     let mut marker_ranges = Vec::new();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -447,7 +406,7 @@ fn fenced_code_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
     marker_ranges
 }
 
-fn pipe_table_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
+fn structure_pipe_table_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
     let mut marker_ranges = Vec::new();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -466,7 +425,7 @@ fn pipe_table_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
     marker_ranges
 }
 
-fn fenced_code_content_range(source: &str, node: Node<'_>) -> Range<usize> {
+fn structure_fenced_code_content_range(source: &str, node: Node<'_>) -> Range<usize> {
     let mut content_range = trim_line_end(source, node.byte_range());
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -491,71 +450,7 @@ fn fenced_code_content_range(source: &str, node: Node<'_>) -> Range<usize> {
     content_range
 }
 
-fn add_blank_blocks(source: &str, line_starts: &[usize], blocks: &mut Vec<MarkdownBlock>) {
-    let mut covered_rows = vec![false; line_starts.len()];
-    for block in blocks.iter() {
-        for row in block.row_range.clone() {
-            if let Some(covered) = covered_rows.get_mut(row) {
-                *covered = true;
-            }
-        }
-    }
-
-    for row in 0..line_starts.len() {
-        if covered_rows[row] {
-            continue;
-        }
-
-        let range = line_range(source, line_starts, row);
-        if range.is_empty() || !source[range.clone()].trim().is_empty() {
-            continue;
-        }
-
-        blocks.push(MarkdownBlock {
-            id: MarkdownNodeId(1 << 63 | row as u64),
-            kind: MarkdownBlockKind::Blank,
-            source_range: range.clone(),
-            content_range: range.start..range.start,
-            marker_ranges: Vec::new(),
-            row_range: row..row + 1,
-            tagfilter_disallowed: false,
-        });
-    }
-}
-
-fn add_blank_blocks_in_row_range(
-    source: &str,
-    line_starts: &[usize],
-    row_range: Range<usize>,
-    blocks: &mut Vec<MarkdownBlock>,
-) {
-    if line_starts.is_empty() {
-        return;
-    }
-
-    for row in row_range.start..row_range.end.min(line_starts.len()) {
-        if blocks.iter().any(|block| block.row_range.contains(&row)) {
-            continue;
-        }
-
-        let range = line_range(source, line_starts, row);
-        if range.is_empty() || !source[range.clone()].trim().is_empty() {
-            continue;
-        }
-
-        blocks.push(MarkdownBlock {
-            id: MarkdownNodeId(1 << 63 | row as u64),
-            kind: MarkdownBlockKind::Blank,
-            source_range: range.clone(),
-            content_range: range.start..range.start,
-            marker_ranges: Vec::new(),
-            row_range: row..row + 1,
-            tagfilter_disallowed: false,
-        });
-    }
-}
-
-fn row_range_for_node(node: Node<'_>) -> Range<usize> {
+fn row_range_for_structure_node(node: Node<'_>) -> Range<usize> {
     let start = node.start_position().row;
     let end_position = node.end_position();
     let mut end = if end_position.column == 0 {
