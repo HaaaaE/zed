@@ -289,6 +289,16 @@ Hard break source-row"#,
 "#,
         "> \n",
         r#"
+> 1. quoted ordered source-row
+>    - [ ] quoted nested task source-row
+"#,
+        "> \n",
+        r#"
+- parent item source-row
+  paragraph continuation with **inline** content
+  > nested quote source-row
+  > continuation
+
 > ```rust
 > let source_row = true;
 > ```
