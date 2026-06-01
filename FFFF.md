@@ -6,6 +6,13 @@
 - 当前 `MarkdownSyntaxData` 先保留为兼容输出，不再作为新架构的目标 IR；`MarkdownSyntaxTree` 继续做对外门面。
 - 热路径优先验证 pulldown；comrak 作为结构校验/参考后端；tree-sitter 继续作为现有生产 baseline。
 
+## Progress
+
+- 2026-06-01：已确认仓库当前实现仍以 tree-sitter 为生产 baseline，`MarkdownSyntaxData` 仍是对外兼容输出。
+- 2026-06-01：`tooling/markdown_syntax_bench` 已加入 pulldown 适配器雏形和 `BenchmarkSyntaxData` 兼容快照，用于和生产输出做精确对比。
+- 2026-06-01：`markdown_wysiwyg` 侧仍是 `parser.rs` 直接产出解析树，`blocks.rs`、`inline.rs`、`tables.rs` 仍依赖 tree-sitter 节点；共享 `MarkdownStructure` / `MarkdownSemanticsAssembler` 还未落地。
+- 2026-06-01：下一步应先补齐 backend trait 和粗结构层，再把 benchmark 从“兼容对比”推进到“结构/语义 diff 报告”。
+
 ## Implementation
 
 - 在 `markdown_wysiwyg` 里拆成三层：
@@ -17,6 +24,7 @@
   - tree-sitter backend：保持现有行为，作为 baseline。
   - pulldown backend：用 `Parser::into_offset_iter()` 组粗结构，不做细 marker 逻辑。
   - comrak backend：用 AST + `sourcepos` 组粗结构；先把行列位置转成 byte range，再交给 assembler。
+- benchmark 只负责测量和 diff，不再承担 parser 兼容层的主逻辑。
 - 细边界统一由源码扫描得出，不靠各 parser 复刻：
   - heading/list/blockquote/table 的 marker range
   - inline emphasis/strong/code/link/image/math 的 marker/content ranges
@@ -35,12 +43,14 @@
 - fixture 覆盖：标题、段落、嵌套列表、引用、表格、fenced/indented code、HTML、link reference、link/image、emphasis/strong/strike、escape/entity、inline/block math、task list、CJK/UTF-8。
 - 性能门槛：以 `source -> semantics` 端到端时间为准，不以裸 parser 速度单独决策。
 - 增量验证：dirty window 外语义不变，局部编辑只重算受影响范围。
+- 当前已存在的 benchmark 快照只能作为兼容回归检查，不能替代语义等价测试。
 
 ## Rollout
 
 - 第一步只改 `markdown_wysiwyg` 和 benchmark，不改 `md_editor` 消费接口。
 - 第二步让 pulldown 适配器和 tree-sitter baseline 在同一批 fixture 上完全对齐，再决定是否切默认 backend。
 - 第三步只有在 pulldown 端到端更快且语义全等时，才把它设成默认；comrak 保留为参考/正确性后端，不进入热路径。
+- 当前状态只完成了第一步中的 benchmark 雏形，`markdown_wysiwyg` 主体仍未进入结构层重构。
 
 ## Assumptions
 
