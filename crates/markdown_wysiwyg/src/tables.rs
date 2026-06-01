@@ -5,6 +5,7 @@ use super::{
     MarkdownTableRow, line_range_checked, trim_ascii_whitespace, trim_line_end,
 };
 
+#[allow(dead_code)]
 pub(super) fn collect_tables(
     source: &str,
     line_starts: &[usize],
@@ -17,7 +18,7 @@ pub(super) fn collect_tables(
         .collect()
 }
 
-fn table_from_block(
+pub(super) fn table_from_block(
     source: &str,
     line_starts: &[usize],
     block: &MarkdownBlock,

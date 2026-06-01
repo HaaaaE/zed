@@ -18,7 +18,7 @@ use inline::{
     projection_marker_prefix_maximum_ends, projection_replacement_prefix_maximum_ends,
 };
 use parser::parse_markdown;
-use tables::collect_tables;
+use tables::table_from_block;
 
 #[cfg(any(test, perf_enabled))]
 thread_local! {
@@ -805,7 +805,9 @@ impl MarkdownSemanticsAssembler {
             blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
             blocks
         });
-        let tables = record_timed_table_collect(|| collect_tables(source, &line_starts, &blocks));
+        let tables = record_timed_table_collect(|| {
+            collect_structure_tables(source, &line_starts, structure)
+        });
         let inline_spans =
             record_timed_inline_collect(|| collect_inline_spans(source, parser_state));
         let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
@@ -858,7 +860,9 @@ impl MarkdownSemanticsAssembler {
         let blocks = record_timed_block_collect(|| {
             collect_incremental_blocks(source, structure, &line_starts)
         });
-        let tables = record_timed_table_collect(|| collect_tables(source, &line_starts, &blocks));
+        let tables = record_timed_table_collect(|| {
+            collect_structure_tables(source, &line_starts, structure)
+        });
         let inline_spans = record_timed_inline_collect(|| {
             collect_incremental_inline_spans(source, previous, parser_state, old_range, new_range)
         });
@@ -938,6 +942,20 @@ impl MarkdownBlock {
             tagfilter_disallowed: block.tagfilter_disallowed,
         }
     }
+}
+
+fn collect_structure_tables(
+    source: &str,
+    line_starts: &[usize],
+    structure: &MarkdownStructure,
+) -> Vec<MarkdownTable> {
+    structure
+        .blocks()
+        .iter()
+        .filter(|block| block.kind == MarkdownBlockKind::PipeTable)
+        .map(MarkdownBlock::from_structure)
+        .filter_map(|block| table_from_block(source, line_starts, &block))
+        .collect()
 }
 
 fn add_blank_structure_blocks(
