@@ -738,6 +738,11 @@ mod tests {
             .count()
     }
 
+    fn maybe_row_for_source_substring(source: &str, substring: &str) -> Option<usize> {
+        let offset = source.find(substring)?;
+        Some(source[..offset].bytes().filter(|byte| *byte == b'\n').count())
+    }
+
     fn table_rows(table: &MarkdownTable) -> Vec<usize> {
         std::iter::once(table.header.row)
             .chain(std::iter::once(table.delimiter.row))
@@ -763,6 +768,42 @@ mod tests {
             .collect()
     }
 
+    fn visible_row_query_ranges(
+        source: &str,
+        visible_row_range: Range<usize>,
+        tables: &[MarkdownTable],
+    ) -> Vec<Range<usize>> {
+        let mut ranges = vec![visible_row_range];
+        for (start, end) in [
+            ("Paragraph", "Setext title"),
+            ("Setext title", "[ref]"),
+            ("[ref]", "- parent"),
+            ("- parent", "| head"),
+            ("| head", "- item"),
+            ("edge left", "- item"),
+            ("| empty a", "- item"),
+        ] {
+            let Some(start) = maybe_row_for_source_substring(source, start) else {
+                continue;
+            };
+            let Some(end) = maybe_row_for_source_substring(source, end) else {
+                continue;
+            };
+            if start < end {
+                ranges.push(start..end);
+            }
+        }
+        ranges.extend(
+            tables
+                .iter()
+                .flat_map(table_rows)
+                .map(|row| row..row + 1),
+        );
+        ranges.sort_by_key(|range| (range.start, range.end));
+        ranges.dedup();
+        ranges
+    }
+
     fn assert_query_semantics_match_tree_sitter(source: &str, candidate: &MarkdownSyntaxTree) {
         let tree_sitter = MarkdownSyntaxTree::parse(source);
         let visible_source_range =
@@ -776,6 +817,8 @@ mod tests {
         let inactive_source_ranges = [inactive_start..inactive_start + "task".len()];
         let visible_row_range = row_for_source_substring(source, "Paragraph")
             ..row_for_source_substring(source, "- item");
+        let visible_row_query_ranges =
+            visible_row_query_ranges(source, visible_row_range, tree_sitter.tables());
 
         assert_eq!(
             candidate
@@ -844,26 +887,12 @@ mod tests {
             );
         }
         assert_eq!(
-            candidate.source_range_for_rows(visible_row_range.clone()),
-            tree_sitter.source_range_for_rows(visible_row_range.clone())
-        );
-        assert_eq!(
             candidate.projection_for_source_range(
                 visible_source_range.clone(),
                 Some(active_source_range.clone()),
             ),
             tree_sitter.projection_for_source_range(
                 visible_source_range.clone(),
-                Some(active_source_range.clone()),
-            )
-        );
-        assert_eq!(
-            candidate.projection_for_visible_rows(
-                visible_row_range.clone(),
-                Some(active_source_range.clone()),
-            ),
-            tree_sitter.projection_for_visible_rows(
-                visible_row_range.clone(),
                 Some(active_source_range.clone()),
             )
         );
@@ -903,18 +932,34 @@ mod tests {
                 &inactive_source_ranges,
             ))
         );
-        assert_eq!(
-            range_semantics_without_block_ids(candidate.range_semantics_for_visible_rows(
-                visible_row_range.clone(),
-                Some(active_source_range.clone()),
-                &inactive_source_ranges,
-            )),
-            range_semantics_without_block_ids(tree_sitter.range_semantics_for_visible_rows(
-                visible_row_range,
-                Some(active_source_range),
-                &inactive_source_ranges,
-            ))
-        );
+        for visible_row_range in visible_row_query_ranges {
+            assert_eq!(
+                candidate.source_range_for_rows(visible_row_range.clone()),
+                tree_sitter.source_range_for_rows(visible_row_range.clone())
+            );
+            assert_eq!(
+                candidate.projection_for_visible_rows(
+                    visible_row_range.clone(),
+                    Some(active_source_range.clone()),
+                ),
+                tree_sitter.projection_for_visible_rows(
+                    visible_row_range.clone(),
+                    Some(active_source_range.clone()),
+                )
+            );
+            assert_eq!(
+                range_semantics_without_block_ids(candidate.range_semantics_for_visible_rows(
+                    visible_row_range.clone(),
+                    Some(active_source_range.clone()),
+                    &inactive_source_ranges,
+                )),
+                range_semantics_without_block_ids(tree_sitter.range_semantics_for_visible_rows(
+                    visible_row_range,
+                    Some(active_source_range.clone()),
+                    &inactive_source_ranges,
+                ))
+            );
+        }
     }
 
     #[test]
