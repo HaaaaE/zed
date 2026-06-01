@@ -175,6 +175,34 @@ impl MarkdownInlineTree {
 }
 
 impl MarkdownSyntaxData {
+    pub fn source_len(&self) -> usize {
+        self.source_len
+    }
+
+    pub fn line_starts(&self) -> &[usize] {
+        &self.line_starts
+    }
+
+    pub fn blocks(&self) -> &[MarkdownBlock] {
+        &self.blocks
+    }
+
+    pub fn tables(&self) -> &[MarkdownTable] {
+        &self.tables
+    }
+
+    pub fn inline_spans(&self) -> &[MarkdownInlineSpan] {
+        &self.inline_spans
+    }
+
+    pub fn projection_replacements(&self) -> &[MarkdownProjectionReplacement] {
+        &self.projection_replacements
+    }
+
+    pub fn projection_marker_dependencies(&self) -> &[ProjectionMarkerDependency] {
+        &self.projection_marker_dependencies
+    }
+
     pub fn checksum_for_benchmarks(&self) -> usize {
         let mut checksum = self.source_len.wrapping_add(self.line_starts.len());
         for line_start in &self.line_starts {
@@ -323,16 +351,16 @@ pub struct MarkdownInlineSpan {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct ProjectionMarkerDependency {
-    marker_range: Range<usize>,
-    owner_source_range: Range<usize>,
+pub struct ProjectionMarkerDependency {
+    pub marker_range: Range<usize>,
+    pub owner_source_range: Range<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct MarkdownProjectionReplacement {
-    source_range: Range<usize>,
-    owner_source_range: Range<usize>,
-    display_text: String,
+pub struct MarkdownProjectionReplacement {
+    pub source_range: Range<usize>,
+    pub owner_source_range: Range<usize>,
+    pub display_text: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

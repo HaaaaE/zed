@@ -8,4 +8,8 @@ license = "Apache-2.0"
 [workspace]
 
 [dependencies]
+comrak = { version = "0.52.0", default-features = false }
 markdown_wysiwyg = { path = "../../crates/markdown_wysiwyg" }
+markdown = "1.0.0"
+pulldown-cmark = "0.13.4"
+rushdown = "0.18.0"
