@@ -15,6 +15,10 @@
 - 2026-06-01：已在 `markdown_wysiwyg` 里补入 `MarkdownBackend` 边界和 `MarkdownStructure` 载体，现有 tree-sitter 路径已通过新边界返回原有 `MarkdownSyntaxData`。
 - 2026-06-01：已验证 `cargo check -p markdown_wysiwyg`、`cargo test -p md_sum_tree`、`cargo test -p md_rope`、`cargo test -p md_text` 全部通过。
 - 2026-06-01：`tooling/markdown_syntax_bench` 仍受 `entities` 版本冲突影响，当前无法直接 `cargo check`，这是现有依赖状态问题，不是本轮实现引入的回归。
+- 2026-06-01：已加入 `MarkdownSemanticsAssembler`，把现有 full/incremental 语义拼装入口收束到 `MarkdownStructure -> MarkdownSyntaxData` 边界下；当前 assembler 内部仍复用 tree-sitter 解析树和原有 helper。
+- 2026-06-01：再次验证 `cargo check -p markdown_wysiwyg`、`cargo test -p md_sum_tree`、`cargo test -p md_rope`、`cargo test -p md_text` 全部通过。
+- 2026-06-01：`MarkdownStructure` 已开始承载粗结构块列表，包含 block kind、source range、row range，并在 assembler 入口做 debug 一致性检查；语义输出仍保持原有 tree-sitter helper 生成。
+- 2026-06-01：第三轮验证 `cargo check -p markdown_wysiwyg`、`cargo test -p md_sum_tree`、`cargo test -p md_rope`、`cargo test -p md_text` 全部通过。
 
 ## Implementation
 
@@ -53,7 +57,7 @@
 - 第一步只改 `markdown_wysiwyg` 和 benchmark，不改 `md_editor` 消费接口。
 - 第二步让 pulldown 适配器和 tree-sitter baseline 在同一批 fixture 上完全对齐，再决定是否切默认 backend。
 - 第三步只有在 pulldown 端到端更快且语义全等时，才把它设成默认；comrak 保留为参考/正确性后端，不进入热路径。
-- 当前状态只完成了第一步中的 benchmark 雏形，`markdown_wysiwyg` 主体仍未进入结构层重构。
+- 当前状态已完成第一步中的 benchmark 雏形，并在 `markdown_wysiwyg` 主体里建立 backend / structure / assembler 的最小边界；`MarkdownStructure` 已开始承载真实粗结构块，下一步是把 block/table/inline helper 的输入逐步迁到该结构层。
 
 ## Assumptions
 

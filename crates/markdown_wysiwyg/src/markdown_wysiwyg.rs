@@ -103,6 +103,16 @@ struct TreeSitterMarkdownBackend;
 #[derive(Clone, Debug)]
 struct MarkdownStructure {
     parser_state: MarkdownParseTree,
+    blocks: Vec<MarkdownStructureBlock>,
+}
+
+struct MarkdownSemanticsAssembler;
+
+#[derive(Clone, Debug)]
+struct MarkdownStructureBlock {
+    kind: MarkdownBlockKind,
+    source_range: Range<usize>,
+    row_range: Range<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -290,14 +300,199 @@ impl MarkdownSyntaxData {
 
 impl MarkdownStructure {
     fn from_parse_tree(parser_state: &MarkdownParseTree) -> Self {
+        let blocks = parser_state
+            .block_tree()
+            .root_node()
+            .named_children(&mut parser_state.block_tree().root_node().walk())
+            .filter_map(|node| structure_block_from_node(node))
+            .collect();
         Self {
             parser_state: parser_state.clone(),
+            blocks,
         }
     }
 
     fn parse_tree(&self) -> &MarkdownParseTree {
         &self.parser_state
     }
+
+    fn blocks(&self) -> &[MarkdownStructureBlock] {
+        &self.blocks
+    }
+}
+
+fn structure_block_from_node(node: tree_sitter::Node<'_>) -> Option<MarkdownStructureBlock> {
+    let kind = match node.kind() {
+        "atx_heading" => MarkdownBlockKind::Paragraph,
+        "setext_heading" => MarkdownBlockKind::Paragraph,
+        "block_quote" => MarkdownBlockKind::BlockQuote,
+        "list" => MarkdownBlockKind::UnorderedList,
+        "list_item" => MarkdownBlockKind::ListItem,
+        "paragraph" => MarkdownBlockKind::Paragraph,
+        "thematic_break" => MarkdownBlockKind::ThematicBreak,
+        "indented_code_block" => MarkdownBlockKind::IndentedCodeBlock,
+        "fenced_code_block" => MarkdownBlockKind::FencedCodeBlock,
+        "html_block" => MarkdownBlockKind::HtmlBlock,
+        "link_reference_definition" => MarkdownBlockKind::LinkReferenceDefinition,
+        "pipe_table" => MarkdownBlockKind::PipeTable,
+        _ => return None,
+    };
+
+    Some(MarkdownStructureBlock {
+        kind,
+        source_range: node.byte_range(),
+        row_range: row_range_for_structure_node(node),
+    })
+}
+
+fn row_range_for_structure_node(node: tree_sitter::Node<'_>) -> Range<usize> {
+    let start = node.start_position().row;
+    let end_position = node.end_position();
+    let mut end = if end_position.column == 0 {
+        end_position.row
+    } else {
+        end_position.row + 1
+    };
+    if end <= start {
+        end = start + 1;
+    }
+    start..end
+}
+
+impl MarkdownSemanticsAssembler {
+    fn assemble(source: &str, structure: &MarkdownStructure) -> MarkdownSyntaxData {
+        let parser_state = structure.parse_tree();
+        validate_structure_blocks(structure.blocks());
+        let line_starts = record_timed_line_start_collect(|| line_starts(source));
+        let blocks = record_timed_block_collect(|| {
+            collect_blocks(source, &line_starts, parser_state.block_tree())
+        });
+        let tables = record_timed_table_collect(|| collect_tables(source, &line_starts, &blocks));
+        let inline_spans =
+            record_timed_inline_collect(|| collect_inline_spans(source, parser_state));
+        let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
+        let (
+            projection_replacements,
+            projection_replacement_prefix_maximum_ends,
+            projection_marker_dependencies,
+            projection_marker_prefix_maximum_ends,
+        ) = record_timed_projection_collect(|| {
+            let projection_replacements =
+                collect_projection_replacements(source, parser_state, &blocks);
+            let projection_replacement_prefix_maximum_ends =
+                projection_replacement_prefix_maximum_ends(&projection_replacements);
+            let projection_marker_dependencies =
+                projection_marker_dependencies(&blocks, &inline_spans, &projection_replacements);
+            let projection_marker_prefix_maximum_ends =
+                projection_marker_prefix_maximum_ends(&projection_marker_dependencies);
+            (
+                projection_replacements,
+                projection_replacement_prefix_maximum_ends,
+                projection_marker_dependencies,
+                projection_marker_prefix_maximum_ends,
+            )
+        });
+
+        MarkdownSyntaxData {
+            source_len: source.len(),
+            line_starts,
+            blocks,
+            tables,
+            inline_spans,
+            inline_span_prefix_maximum_ends,
+            projection_replacements,
+            projection_replacement_prefix_maximum_ends,
+            projection_marker_dependencies,
+            projection_marker_prefix_maximum_ends,
+        }
+    }
+
+    fn assemble_incremental(
+        source: &str,
+        previous: &MarkdownSyntaxTree,
+        structure: &MarkdownStructure,
+        old_range: &Range<usize>,
+        new_range: &Range<usize>,
+    ) -> MarkdownSyntaxData {
+        let parser_state = structure.parse_tree();
+        validate_structure_blocks(structure.blocks());
+        let line_starts = record_timed_line_start_collect(|| line_starts(source));
+        let blocks = record_timed_block_collect(|| {
+            collect_incremental_blocks(
+                source,
+                previous,
+                &line_starts,
+                parser_state.block_tree(),
+                old_range,
+                new_range,
+            )
+        });
+        let tables = record_timed_table_collect(|| collect_tables(source, &line_starts, &blocks));
+        let inline_spans = record_timed_inline_collect(|| {
+            collect_incremental_inline_spans(source, previous, parser_state, old_range, new_range)
+        });
+        let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
+        let (
+            projection_replacements,
+            projection_replacement_prefix_maximum_ends,
+            projection_marker_dependencies,
+            projection_marker_prefix_maximum_ends,
+        ) = record_timed_projection_collect(|| {
+            let projection_replacements = collect_incremental_projection_replacements(
+                source,
+                previous,
+                parser_state,
+                &blocks,
+                old_range,
+                new_range,
+            );
+            let projection_replacement_prefix_maximum_ends =
+                projection_replacement_prefix_maximum_ends(&projection_replacements);
+            let projection_marker_dependencies = collect_incremental_projection_marker_dependencies(
+                previous,
+                &blocks,
+                &inline_spans,
+                &projection_replacements,
+                old_range,
+                new_range,
+            );
+            let projection_marker_prefix_maximum_ends =
+                projection_marker_prefix_maximum_ends(&projection_marker_dependencies);
+            (
+                projection_replacements,
+                projection_replacement_prefix_maximum_ends,
+                projection_marker_dependencies,
+                projection_marker_prefix_maximum_ends,
+            )
+        });
+
+        MarkdownSyntaxData {
+            source_len: source.len(),
+            line_starts,
+            blocks,
+            tables,
+            inline_spans,
+            inline_span_prefix_maximum_ends,
+            projection_replacements,
+            projection_replacement_prefix_maximum_ends,
+            projection_marker_dependencies,
+            projection_marker_prefix_maximum_ends,
+        }
+    }
+}
+
+fn validate_structure_blocks(blocks: &[MarkdownStructureBlock]) {
+    debug_assert!(blocks.windows(2).all(|pair| {
+        let left = &pair[0];
+        let right = &pair[1];
+        (left.source_range.start, left.source_range.end)
+            <= (right.source_range.start, right.source_range.end)
+    }));
+    debug_assert!(blocks.iter().all(|block| {
+        let _kind = block.kind;
+        block.source_range.start <= block.source_range.end
+            && block.row_range.start < block.row_range.end
+    }));
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -962,7 +1157,9 @@ impl MarkdownBackend for TreeSitterMarkdownBackend {
     ) -> MarkdownBackendOutput {
         let parser_state = record_timed_parse(|| parse_markdown(source, old_tree, changed_range));
         let structure = MarkdownStructure::from_parse_tree(&parser_state);
-        let data = record_timed_collect_syntax_data(|| collect_syntax_data(source, &structure));
+        let data = record_timed_collect_syntax_data(|| {
+            MarkdownSemanticsAssembler::assemble(source, &structure)
+        });
 
         MarkdownBackendOutput {
             structure,
@@ -982,7 +1179,9 @@ impl MarkdownBackend for TreeSitterMarkdownBackend {
             record_timed_parse(|| parse_markdown(source, Some(edited_tree), Some(&new_range)));
         let structure = MarkdownStructure::from_parse_tree(&parser_state);
         let data = record_timed_collect_syntax_data(|| {
-            collect_incremental_syntax_data(source, previous, &structure, &old_range, &new_range)
+            MarkdownSemanticsAssembler::assemble_incremental(
+                source, previous, &structure, &old_range, &new_range,
+            )
         });
 
         MarkdownBackendOutput {
@@ -990,123 +1189,6 @@ impl MarkdownBackend for TreeSitterMarkdownBackend {
             parser_state,
             data,
         }
-    }
-}
-
-fn collect_syntax_data(source: &str, structure: &MarkdownStructure) -> MarkdownSyntaxData {
-    let parser_state = structure.parse_tree();
-    let line_starts = record_timed_line_start_collect(|| line_starts(source));
-    let blocks = record_timed_block_collect(|| {
-        collect_blocks(source, &line_starts, parser_state.block_tree())
-    });
-    let tables = record_timed_table_collect(|| collect_tables(source, &line_starts, &blocks));
-    let inline_spans = record_timed_inline_collect(|| collect_inline_spans(source, parser_state));
-    let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
-    let (
-        projection_replacements,
-        projection_replacement_prefix_maximum_ends,
-        projection_marker_dependencies,
-        projection_marker_prefix_maximum_ends,
-    ) = record_timed_projection_collect(|| {
-        let projection_replacements =
-            collect_projection_replacements(source, parser_state, &blocks);
-        let projection_replacement_prefix_maximum_ends =
-            projection_replacement_prefix_maximum_ends(&projection_replacements);
-        let projection_marker_dependencies =
-            projection_marker_dependencies(&blocks, &inline_spans, &projection_replacements);
-        let projection_marker_prefix_maximum_ends =
-            projection_marker_prefix_maximum_ends(&projection_marker_dependencies);
-        (
-            projection_replacements,
-            projection_replacement_prefix_maximum_ends,
-            projection_marker_dependencies,
-            projection_marker_prefix_maximum_ends,
-        )
-    });
-
-    MarkdownSyntaxData {
-        source_len: source.len(),
-        line_starts,
-        blocks,
-        tables,
-        inline_spans,
-        inline_span_prefix_maximum_ends,
-        projection_replacements,
-        projection_replacement_prefix_maximum_ends,
-        projection_marker_dependencies,
-        projection_marker_prefix_maximum_ends,
-    }
-}
-
-fn collect_incremental_syntax_data(
-    source: &str,
-    previous: &MarkdownSyntaxTree,
-    structure: &MarkdownStructure,
-    old_range: &Range<usize>,
-    new_range: &Range<usize>,
-) -> MarkdownSyntaxData {
-    let parser_state = structure.parse_tree();
-    let line_starts = record_timed_line_start_collect(|| line_starts(source));
-    let blocks = record_timed_block_collect(|| {
-        collect_incremental_blocks(
-            source,
-            previous,
-            &line_starts,
-            parser_state.block_tree(),
-            old_range,
-            new_range,
-        )
-    });
-    let tables = record_timed_table_collect(|| collect_tables(source, &line_starts, &blocks));
-    let inline_spans = record_timed_inline_collect(|| {
-        collect_incremental_inline_spans(source, previous, parser_state, old_range, new_range)
-    });
-    let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
-    let (
-        projection_replacements,
-        projection_replacement_prefix_maximum_ends,
-        projection_marker_dependencies,
-        projection_marker_prefix_maximum_ends,
-    ) = record_timed_projection_collect(|| {
-        let projection_replacements = collect_incremental_projection_replacements(
-            source,
-            previous,
-            parser_state,
-            &blocks,
-            old_range,
-            new_range,
-        );
-        let projection_replacement_prefix_maximum_ends =
-            projection_replacement_prefix_maximum_ends(&projection_replacements);
-        let projection_marker_dependencies = collect_incremental_projection_marker_dependencies(
-            previous,
-            &blocks,
-            &inline_spans,
-            &projection_replacements,
-            old_range,
-            new_range,
-        );
-        let projection_marker_prefix_maximum_ends =
-            projection_marker_prefix_maximum_ends(&projection_marker_dependencies);
-        (
-            projection_replacements,
-            projection_replacement_prefix_maximum_ends,
-            projection_marker_dependencies,
-            projection_marker_prefix_maximum_ends,
-        )
-    });
-
-    MarkdownSyntaxData {
-        source_len: source.len(),
-        line_starts,
-        blocks,
-        tables,
-        inline_spans,
-        inline_span_prefix_maximum_ends,
-        projection_replacements,
-        projection_replacement_prefix_maximum_ends,
-        projection_marker_dependencies,
-        projection_marker_prefix_maximum_ends,
     }
 }
 
