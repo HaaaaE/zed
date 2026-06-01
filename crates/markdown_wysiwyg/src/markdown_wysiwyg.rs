@@ -867,6 +867,41 @@ mod tests {
     }
 
     #[test]
+    fn pulldown_backend_matches_tree_sitter_nested_block_semantics() {
+        let source = concat!(
+            "> quoted\n",
+            "> - [ ] task\n",
+            ">   1. ordered\n",
+            "\n",
+            "- item\n",
+            "  > nested quote\n",
+            "  > continuation\n",
+            "\n",
+            "1. parent\n",
+            "   - child\n",
+            "\n",
+            "| head | value |\n",
+            "| --- | --- |\n",
+            "| **a** | `b` |\n",
+        );
+        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
+
+        assert_eq!(
+            pulldown
+                .blocks()
+                .iter()
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>(),
+            tree_sitter
+                .blocks()
+                .iter()
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn pulldown_backend_matches_tree_sitter_inline_and_projection_semantics() {
         let source = concat!(
             "# **Title** &amp;\n",
