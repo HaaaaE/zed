@@ -1552,6 +1552,15 @@ mod tests {
             "\n",
             "Paragraph **bold** &amp; ![alt](img.png)\n",
             "\n",
+            "Setext title\n",
+            "------------\n",
+            "\n",
+            "---\n",
+            "\n",
+            "    indented code\n",
+            "\n",
+            "[ref]: https://example.com/ref\n",
+            "\n",
             "> quoted\n",
             "> - [ ] task\n",
             "\n",
@@ -1571,6 +1580,15 @@ mod tests {
             "# Title\n",
             "\n",
             "Paragraph **bold** &amp; ![alt](img.png)\n",
+            "\n",
+            "Setext title\n",
+            "------------\n",
+            "\n",
+            "---\n",
+            "\n",
+            "    indented code\n",
+            "\n",
+            "[ref]: https://example.com/ref\n",
             "\n",
             "> quoted\n",
             "> - [ ] task\n",
@@ -1608,6 +1626,26 @@ mod tests {
             (
                 source.find("img.png").unwrap()..source.find("img.png").unwrap() + "img.png".len(),
                 "photo.png",
+            ),
+            (
+                source.find("------------").unwrap()
+                    ..source.find("------------").unwrap() + "------------".len(),
+                "============",
+            ),
+            (
+                source.find("---\n\n    indented").unwrap()
+                    ..source.find("---\n\n    indented").unwrap() + "---".len(),
+                "***",
+            ),
+            (
+                source.find("indented code").unwrap()
+                    ..source.find("indented code").unwrap() + "indented code".len(),
+                "indented edited code",
+            ),
+            (
+                source.find("example.com/ref").unwrap()
+                    ..source.find("example.com/ref").unwrap() + "example.com/ref".len(),
+                "example.com/query-ref",
             ),
             (
                 source.find("quoted").unwrap()..source.find("quoted").unwrap() + "quoted".len(),
