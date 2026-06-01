@@ -793,7 +793,7 @@ mod tests {
     }
 
     #[test]
-    fn pulldown_backend_matches_tree_sitter_non_paragraph_block_semantics() {
+    fn pulldown_backend_matches_tree_sitter_block_semantics() {
         let source = concat!(
             "# Title\n",
             "\n",
@@ -825,13 +825,11 @@ mod tests {
             pulldown
                 .blocks()
                 .iter()
-                .filter(|block| block.kind != MarkdownBlockKind::Paragraph)
                 .map(block_semantics_without_id)
                 .collect::<Vec<_>>(),
             tree_sitter
                 .blocks()
                 .iter()
-                .filter(|block| block.kind != MarkdownBlockKind::Paragraph)
                 .map(block_semantics_without_id)
                 .collect::<Vec<_>>()
         );
