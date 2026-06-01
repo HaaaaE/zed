@@ -1116,7 +1116,23 @@ mod tests {
         assert!(
             data.blocks()
                 .iter()
-                .any(|block| block.kind == MarkdownBlockKind::ThematicBreak)
+            .any(|block| block.kind == MarkdownBlockKind::ThematicBreak)
+        );
+    }
+
+    #[test]
+    fn production_parse_still_uses_tree_sitter_baseline() {
+        let source = "# Title\n\nParagraph **bold**\n\n| a | b |\n| - | - |\n| 1 | 2 |\n";
+
+        MarkdownSyntaxTree::reset_stats_for_tests();
+        let tree = MarkdownSyntaxTree::parse(source);
+        let stats = MarkdownSyntaxTree::stats_for_tests();
+
+        assert_eq!(tree.source_len(), source.len());
+        assert_eq!(stats.parse_calls, 1);
+        assert!(
+            stats.block_parse_ns > 0,
+            "production parse must keep using tree-sitter block parsing until pulldown is proven equivalent"
         );
     }
 
