@@ -10,11 +10,11 @@ use super::{
         row_range_for_byte_range, structure_block_quote_block_from_range,
         structure_fenced_code_block_from_range, structure_heading_block_from_range,
         structure_html_block_from_range, structure_indented_code_block_from_range,
-        structure_list_block_from_range, structure_list_item_block_from_range,
-        structure_paragraph_block_from_range, structure_pipe_table_block_from_range,
-        structure_thematic_break_block_from_range,
+        structure_link_reference_definition_block_from_range, structure_list_block_from_range,
+        structure_list_item_block_from_range, structure_paragraph_block_from_range,
+        structure_pipe_table_block_from_range, structure_thematic_break_block_from_range,
     },
-    source::{line_starts, ranges_overlap},
+    source::{line_range, line_starts, ranges_overlap, trim_line_end},
     structure::MarkdownStructureBlock,
     tables::table_cell_content_ranges_for_blocks,
 };
@@ -168,10 +168,100 @@ fn collect_pulldown_structure_blocks(
             _ => {}
         }
     }
+    add_pulldown_link_reference_definition_blocks(source, line_starts, &mut blocks);
     blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
     synthesize_pulldown_paragraph_blocks(source, line_starts, &mut blocks);
     blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
     blocks
+}
+
+#[cfg(any(test, perf_enabled))]
+fn add_pulldown_link_reference_definition_blocks(
+    source: &str,
+    line_starts: &[usize],
+    blocks: &mut Vec<MarkdownStructureBlock>,
+) {
+    let definition_ranges = pulldown_link_reference_definition_ranges(source, line_starts, blocks);
+    blocks.retain(|block| {
+        block.kind != MarkdownBlockKind::Paragraph
+            || !definition_ranges
+                .iter()
+                .any(|range| ranges_overlap(&block.source_range, range))
+    });
+
+    let first_id = blocks.len();
+    blocks.extend(
+        definition_ranges
+            .into_iter()
+            .enumerate()
+            .map(|(index, range)| {
+                structure_link_reference_definition_block_from_range(
+                    source,
+                    line_starts,
+                    pulldown_node_id(first_id + index),
+                    range,
+                )
+            }),
+    );
+}
+
+#[cfg(any(test, perf_enabled))]
+fn pulldown_link_reference_definition_ranges(
+    source: &str,
+    line_starts: &[usize],
+    blocks: &[MarkdownStructureBlock],
+) -> Vec<Range<usize>> {
+    (0..line_starts.len())
+        .filter_map(|row| {
+            let range = line_range(source, line_starts, row);
+            pulldown_link_reference_definition_range_for_line(source, range)
+        })
+        .filter(|range| {
+            !blocks.iter().any(|block| {
+                block_excludes_link_reference_scan(block)
+                    && ranges_overlap(&block.source_range, range)
+            })
+        })
+        .collect()
+}
+
+#[cfg(any(test, perf_enabled))]
+fn block_excludes_link_reference_scan(block: &MarkdownStructureBlock) -> bool {
+    matches!(
+        block.kind,
+        MarkdownBlockKind::FencedCodeBlock
+            | MarkdownBlockKind::IndentedCodeBlock
+            | MarkdownBlockKind::HtmlBlock
+            | MarkdownBlockKind::PipeTable
+    )
+}
+
+#[cfg(any(test, perf_enabled))]
+fn pulldown_link_reference_definition_range_for_line(
+    source: &str,
+    source_range: Range<usize>,
+) -> Option<Range<usize>> {
+    let trimmed_range = trim_line_end(source, source_range.clone());
+    let line = source.get(trimmed_range)?;
+    let bytes = line.as_bytes();
+
+    let mut cursor = 0;
+    while bytes.get(cursor) == Some(&b' ') {
+        cursor += 1;
+    }
+    if cursor > 3 || bytes.get(cursor) != Some(&b'[') {
+        return None;
+    }
+
+    let label_start = cursor + 1;
+    let label_end = line[label_start..]
+        .find("]:")
+        .map(|offset| label_start + offset)?;
+    if label_end == label_start {
+        return None;
+    }
+
+    Some(source_range)
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -226,7 +316,7 @@ fn pulldown_structure_block_from_start_tag(
             source,
             line_starts,
             id,
-            range,
+            pulldown_indented_code_block_range(source, line_starts, range),
         )),
         Tag::CodeBlock(CodeBlockKind::Fenced(_)) => Some(structure_fenced_code_block_from_range(
             source,
@@ -282,6 +372,28 @@ fn pulldown_fenced_code_block_range(source: &str, mut range: Range<usize>) -> Ra
         range.end += 1;
     }
     range
+}
+
+#[cfg(any(test, perf_enabled))]
+fn pulldown_indented_code_block_range(
+    source: &str,
+    line_starts: &[usize],
+    range: Range<usize>,
+) -> Range<usize> {
+    let row = line_starts.partition_point(|line_start| *line_start <= range.start) - 1;
+    let mut end = range.end;
+    while end < source.len() {
+        let next_row = line_starts.partition_point(|line_start| *line_start <= end) - 1;
+        let next_line = line_range(source, line_starts, next_row);
+        if !source[trim_line_end(source, next_line.clone())]
+            .trim()
+            .is_empty()
+        {
+            break;
+        }
+        end = next_line.end;
+    }
+    line_starts[row]..end
 }
 
 #[cfg(any(test, perf_enabled))]

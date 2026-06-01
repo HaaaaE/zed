@@ -836,6 +836,37 @@ mod tests {
     }
 
     #[test]
+    fn pulldown_backend_matches_tree_sitter_link_reference_definition_blocks() {
+        let source = concat!(
+            "See [full][ref] and [shortcut].\n",
+            "\n",
+            "[ref]: https://example.com\n",
+            "   [shortcut]: https://example.com \"Title\"\n",
+            "\n",
+            "    [code]: https://example.com\n",
+            "\n",
+            "```\n",
+            "[fenced]: https://example.com\n",
+            "```\n",
+        );
+        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
+
+        assert_eq!(
+            pulldown
+                .blocks()
+                .iter()
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>(),
+            tree_sitter
+                .blocks()
+                .iter()
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn pulldown_backend_matches_tree_sitter_inline_and_projection_semantics() {
         let source = concat!(
             "# **Title** &amp;\n",

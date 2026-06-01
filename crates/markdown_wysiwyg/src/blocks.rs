@@ -250,6 +250,24 @@ pub(super) fn structure_paragraph_block_from_range(
 }
 
 #[cfg(any(test, perf_enabled))]
+pub(super) fn structure_link_reference_definition_block_from_range(
+    source: &str,
+    line_starts: &[usize],
+    id: MarkdownNodeId,
+    source_range: Range<usize>,
+) -> MarkdownStructureBlock {
+    MarkdownStructureBlock {
+        id,
+        kind: MarkdownBlockKind::LinkReferenceDefinition,
+        source_range: source_range.clone(),
+        content_range: trim_line_end(source, source_range.clone()),
+        marker_ranges: Vec::new(),
+        row_range: row_range_for_byte_range(line_starts, source_range),
+        tagfilter_disallowed: false,
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
 pub(super) fn structure_thematic_break_block_from_range(
     line_starts: &[usize],
     id: MarkdownNodeId,
