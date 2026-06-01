@@ -135,6 +135,11 @@ impl MarkdownInlineTree {
 }
 
 impl MarkdownSyntaxData {
+    #[cfg(any(test, perf_enabled))]
+    pub fn parse_with_pulldown_for_benchmarks(source: &str) -> Self {
+        backend::PulldownMarkdownBackend::parse_syntax_data(source)
+    }
+
     pub fn source_len(&self) -> usize {
         self.source_len
     }

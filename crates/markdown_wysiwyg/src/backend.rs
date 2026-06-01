@@ -132,6 +132,7 @@ impl PulldownMarkdownBackend {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn parse_syntax_tree(source: &str) -> MarkdownSyntaxTree {
         let (structure, parser_state) = pulldown_structure_and_parser_state(source);
         let data = record_timed_collect_syntax_data(|| {
@@ -141,6 +142,7 @@ impl PulldownMarkdownBackend {
         MarkdownSyntaxTree { parser_state, data }
     }
 
+    #[cfg(test)]
     pub(super) fn parse_syntax_tree_after_edit(
         source: &str,
         previous: &MarkdownSyntaxTree,
@@ -169,7 +171,7 @@ fn pulldown_structure(source: &str) -> MarkdownStructure {
     MarkdownStructure::from_parts(blocks, inline_trees)
 }
 
-#[cfg(any(test, perf_enabled))]
+#[cfg(test)]
 fn pulldown_structure_and_parser_state(source: &str) -> (MarkdownStructure, MarkdownParseTree) {
     let source_line_starts = line_starts(source);
     let blocks = collect_pulldown_structure_blocks(source, &source_line_starts);

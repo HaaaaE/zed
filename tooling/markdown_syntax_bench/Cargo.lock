@@ -404,6 +404,7 @@ name = "markdown_wysiwyg"
 version = "0.1.0"
 dependencies = [
  "entities",
+ "pulldown-cmark",
  "tree-sitter",
  "tree-sitter-md",
 ]

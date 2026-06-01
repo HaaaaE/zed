@@ -9,7 +9,9 @@ use markdown_wysiwyg::{
     MarkdownBlock, MarkdownInlineSpan, MarkdownProjectionReplacement, MarkdownSyntaxData,
     MarkdownTable, ProjectionMarkerDependency,
 };
-use pulldown_cmark::{Event, Options, Parser, Tag};
+#[cfg(not(perf_enabled))]
+use pulldown_cmark::{Event, Tag};
+use pulldown_cmark::{Options, Parser};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct BenchmarkSyntaxData {
@@ -98,6 +100,7 @@ struct SyntaxDiffSummary {
 }
 
 #[derive(Default)]
+#[cfg(not(perf_enabled))]
 struct PulldownBuilder {
     source_len: usize,
     line_starts: Vec<usize>,
@@ -108,6 +111,7 @@ struct PulldownBuilder {
     projection_marker_dependencies: Vec<(Range<usize>, Range<usize>)>,
 }
 
+#[cfg(not(perf_enabled))]
 impl PulldownBuilder {
     fn finish(self) -> PulldownAssembly {
         let projection_replacements = self
@@ -305,6 +309,7 @@ fn source_row() {
     text
 }
 
+#[cfg(not(perf_enabled))]
 fn line_starts(source: &str) -> Vec<usize> {
     let mut starts = vec![0];
     starts.extend(
@@ -356,6 +361,7 @@ fn pulldown_parser_checksum(source: &str) -> usize {
         })
 }
 
+#[cfg(not(perf_enabled))]
 fn collect_blocks_from_pulldown(source: &str, _events: &[PulldownEvent]) -> Vec<BenchmarkBlock> {
     let mut blocks = Vec::new();
     let line_start_offsets = line_starts(source);
@@ -376,6 +382,7 @@ fn collect_blocks_from_pulldown(source: &str, _events: &[PulldownEvent]) -> Vec<
     blocks
 }
 
+#[cfg(not(perf_enabled))]
 fn line_range(starts: &[usize], source_len: usize, row: usize) -> Range<usize> {
     let start = starts[row];
     let end = starts.get(row + 1).copied().unwrap_or(source_len);
@@ -383,8 +390,19 @@ fn line_range(starts: &[usize], source_len: usize, row: usize) -> Range<usize> {
 }
 
 #[derive(Clone)]
+#[cfg(not(perf_enabled))]
 struct PulldownEvent;
 
+#[cfg(perf_enabled)]
+fn pulldown_adapter_syntax_data(source: &str) -> PulldownAssembly {
+    PulldownAssembly {
+        data: BenchmarkSyntaxData::from_production(
+            &MarkdownSyntaxData::parse_with_pulldown_for_benchmarks(source),
+        ),
+    }
+}
+
+#[cfg(not(perf_enabled))]
 fn pulldown_adapter_syntax_data(source: &str) -> PulldownAssembly {
     let options = Options::all();
     let mut builder = PulldownBuilder {
@@ -428,6 +446,7 @@ fn pulldown_adapter_syntax_data(source: &str) -> PulldownAssembly {
     builder.finish()
 }
 
+#[cfg(not(perf_enabled))]
 fn collect_start_tag(
     source: &str,
     tag: Tag<'_>,
@@ -579,7 +598,7 @@ fn main() {
         },
     );
 
-    measure("pulldown_exact_adapter", iterations, || {
+    measure("pulldown_semantics_adapter", iterations, || {
         let assembly = pulldown_adapter_syntax_data(black_box(&source));
         SyntaxDiffSummary::compare(black_box(&production_baseline), &assembly.data).checksum()
     });
