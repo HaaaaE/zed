@@ -26,6 +26,11 @@ thread_local! {
         const { Cell::new(MarkdownSyntaxStats {
             parse_calls: 0,
             parse_ns: 0,
+            block_parse_ns: 0,
+            inline_parent_scan_ns: 0,
+            inline_reuse_index_ns: 0,
+            inline_range_build_ns: 0,
+            inline_parse_ns: 0,
             line_start_collect_ns: 0,
             block_collect_ns: 0,
             table_collect_ns: 0,
@@ -39,6 +44,11 @@ thread_local! {
 pub struct MarkdownSyntaxStats {
     pub parse_calls: usize,
     pub parse_ns: u128,
+    pub block_parse_ns: u128,
+    pub inline_parent_scan_ns: u128,
+    pub inline_reuse_index_ns: u128,
+    pub inline_range_build_ns: u128,
+    pub inline_parse_ns: u128,
     pub line_start_collect_ns: u128,
     pub block_collect_ns: u128,
     pub table_collect_ns: u128,
@@ -874,6 +884,66 @@ fn record_timed_parse<T>(run: impl FnOnce() -> T) -> T {
 
 #[cfg(not(any(test, perf_enabled)))]
 fn record_timed_parse<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(crate) fn record_timed_block_parse<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.block_parse_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+pub(crate) fn record_timed_block_parse<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(crate) fn record_timed_inline_parent_scan<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.inline_parent_scan_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+pub(crate) fn record_timed_inline_parent_scan<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(crate) fn record_timed_inline_reuse_index<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.inline_reuse_index_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+pub(crate) fn record_timed_inline_reuse_index<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(crate) fn record_timed_inline_range_build<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.inline_range_build_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+pub(crate) fn record_timed_inline_range_build<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(crate) fn record_timed_inline_parse<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.inline_parse_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+pub(crate) fn record_timed_inline_parse<T>(run: impl FnOnce() -> T) -> T {
     run()
 }
 

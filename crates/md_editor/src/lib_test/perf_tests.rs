@@ -259,10 +259,15 @@ fn duration_from_ns(ns: u128) -> Duration {
 fn push_markdown_syntax_segments(
     segments: &mut Vec<(&'static str, Duration)>,
     stats: MarkdownSyntaxStats,
-    names: [&'static str; 6],
+    names: [&'static str; 11],
 ) {
     let durations = [
         stats.parse_ns,
+        stats.block_parse_ns,
+        stats.inline_parent_scan_ns,
+        stats.inline_reuse_index_ns,
+        stats.inline_range_build_ns,
+        stats.inline_parse_ns,
         stats.line_start_collect_ns,
         stats.block_collect_ns,
         stats.table_collect_ns,
@@ -278,7 +283,7 @@ fn push_markdown_syntax_segments(
 fn record_segment_with_markdown_syntax_stats<T>(
     segments: &mut Vec<(&'static str, Duration)>,
     name: &'static str,
-    syntax_names: [&'static str; 6],
+    syntax_names: [&'static str; 11],
     run: impl FnOnce() -> T,
 ) -> T {
     MarkdownSyntaxTree::reset_stats_for_tests();
@@ -434,6 +439,11 @@ fn run_editor_session(target_bytes: usize) {
             "rendered_edit_equal_length_apply",
             [
                 "rendered_edit_equal_length_apply_syntax_parse",
+                "rendered_edit_equal_length_apply_syntax_block_parse",
+                "rendered_edit_equal_length_apply_syntax_inline_parent_scan",
+                "rendered_edit_equal_length_apply_syntax_inline_reuse_index",
+                "rendered_edit_equal_length_apply_syntax_inline_range_build",
+                "rendered_edit_equal_length_apply_syntax_inline_parse",
                 "rendered_edit_equal_length_apply_syntax_line_starts",
                 "rendered_edit_equal_length_apply_syntax_blocks",
                 "rendered_edit_equal_length_apply_syntax_tables",
@@ -451,6 +461,11 @@ fn run_editor_session(target_bytes: usize) {
             "rendered_edit_equal_length_draw_after_edit",
             [
                 "rendered_edit_equal_length_draw_syntax_parse",
+                "rendered_edit_equal_length_draw_syntax_block_parse",
+                "rendered_edit_equal_length_draw_syntax_inline_parent_scan",
+                "rendered_edit_equal_length_draw_syntax_inline_reuse_index",
+                "rendered_edit_equal_length_draw_syntax_inline_range_build",
+                "rendered_edit_equal_length_draw_syntax_inline_parse",
                 "rendered_edit_equal_length_draw_syntax_line_starts",
                 "rendered_edit_equal_length_draw_syntax_blocks",
                 "rendered_edit_equal_length_draw_syntax_tables",
@@ -466,6 +481,11 @@ fn run_editor_session(target_bytes: usize) {
             "rendered_edit_length_change_apply",
             [
                 "rendered_edit_length_change_apply_syntax_parse",
+                "rendered_edit_length_change_apply_syntax_block_parse",
+                "rendered_edit_length_change_apply_syntax_inline_parent_scan",
+                "rendered_edit_length_change_apply_syntax_inline_reuse_index",
+                "rendered_edit_length_change_apply_syntax_inline_range_build",
+                "rendered_edit_length_change_apply_syntax_inline_parse",
                 "rendered_edit_length_change_apply_syntax_line_starts",
                 "rendered_edit_length_change_apply_syntax_blocks",
                 "rendered_edit_length_change_apply_syntax_tables",
@@ -487,6 +507,11 @@ fn run_editor_session(target_bytes: usize) {
             "rendered_edit_length_change_draw_after_edit",
             [
                 "rendered_edit_length_change_draw_syntax_parse",
+                "rendered_edit_length_change_draw_syntax_block_parse",
+                "rendered_edit_length_change_draw_syntax_inline_parent_scan",
+                "rendered_edit_length_change_draw_syntax_inline_reuse_index",
+                "rendered_edit_length_change_draw_syntax_inline_range_build",
+                "rendered_edit_length_change_draw_syntax_inline_parse",
                 "rendered_edit_length_change_draw_syntax_line_starts",
                 "rendered_edit_length_change_draw_syntax_blocks",
                 "rendered_edit_length_change_draw_syntax_tables",
@@ -502,6 +527,11 @@ fn run_editor_session(target_bytes: usize) {
             "rendered_enter_apply",
             [
                 "rendered_enter_apply_syntax_parse",
+                "rendered_enter_apply_syntax_block_parse",
+                "rendered_enter_apply_syntax_inline_parent_scan",
+                "rendered_enter_apply_syntax_inline_reuse_index",
+                "rendered_enter_apply_syntax_inline_range_build",
+                "rendered_enter_apply_syntax_inline_parse",
                 "rendered_enter_apply_syntax_line_starts",
                 "rendered_enter_apply_syntax_blocks",
                 "rendered_enter_apply_syntax_tables",
@@ -517,6 +547,11 @@ fn run_editor_session(target_bytes: usize) {
             "rendered_delete_apply",
             [
                 "rendered_delete_apply_syntax_parse",
+                "rendered_delete_apply_syntax_block_parse",
+                "rendered_delete_apply_syntax_inline_parent_scan",
+                "rendered_delete_apply_syntax_inline_reuse_index",
+                "rendered_delete_apply_syntax_inline_range_build",
+                "rendered_delete_apply_syntax_inline_parse",
                 "rendered_delete_apply_syntax_line_starts",
                 "rendered_delete_apply_syntax_blocks",
                 "rendered_delete_apply_syntax_tables",
@@ -532,6 +567,11 @@ fn run_editor_session(target_bytes: usize) {
             "rendered_enter_delete_draw_after_edit",
             [
                 "rendered_enter_delete_draw_syntax_parse",
+                "rendered_enter_delete_draw_syntax_block_parse",
+                "rendered_enter_delete_draw_syntax_inline_parent_scan",
+                "rendered_enter_delete_draw_syntax_inline_reuse_index",
+                "rendered_enter_delete_draw_syntax_inline_range_build",
+                "rendered_enter_delete_draw_syntax_inline_parse",
                 "rendered_enter_delete_draw_syntax_line_starts",
                 "rendered_enter_delete_draw_syntax_blocks",
                 "rendered_enter_delete_draw_syntax_tables",

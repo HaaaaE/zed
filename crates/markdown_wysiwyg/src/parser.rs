@@ -2,20 +2,26 @@ use std::collections::HashMap;
 
 use tree_sitter::{Node, Parser, Range as TreeSitterRange, Tree};
 
-use super::{MarkdownInlineTree, MarkdownParseTree};
+use super::{
+    MarkdownInlineTree, MarkdownParseTree, record_timed_block_parse,
+    record_timed_inline_parent_scan, record_timed_inline_parse, record_timed_inline_range_build,
+    record_timed_inline_reuse_index,
+};
 pub(super) fn parse_markdown(
     source: &str,
     old_tree: Option<&MarkdownParseTree>,
     changed_range: Option<&std::ops::Range<usize>>,
 ) -> MarkdownParseTree {
-    let mut block_parser = Parser::new();
-    let block_language = tree_sitter_md::LANGUAGE.into();
-    block_parser
-        .set_language(&block_language)
-        .expect("failed to load tree-sitter markdown block grammar");
-    let block_tree = block_parser
-        .parse(source, old_tree.map(|tree| &tree.block_tree))
-        .expect("tree-sitter markdown block parser was cancelled");
+    let block_tree = record_timed_block_parse(|| {
+        let mut block_parser = Parser::new();
+        let block_language = tree_sitter_md::LANGUAGE.into();
+        block_parser
+            .set_language(&block_language)
+            .expect("failed to load tree-sitter markdown block grammar");
+        block_parser
+            .parse(source, old_tree.map(|tree| &tree.block_tree))
+            .expect("tree-sitter markdown block parser was cancelled")
+    });
 
     let (inline_trees, inline_tree_by_parent_id) =
         parse_inline_trees(source, &block_tree, old_tree, changed_range);
@@ -41,18 +47,20 @@ fn parse_inline_trees(
 
     let mut inline_trees = Vec::new();
     let mut inline_tree_by_parent_id = HashMap::new();
-    let inline_parent_nodes = inline_parent_nodes(block_tree);
-    let old_inline_tree_by_parent_range = old_tree.map(|tree| {
-        tree.inline_trees()
-            .iter()
-            .enumerate()
-            .map(|(index, inline_tree)| {
-                (
-                    (inline_tree.parent_range.start, inline_tree.parent_range.end),
-                    index,
-                )
-            })
-            .collect::<HashMap<_, _>>()
+    let inline_parent_nodes = record_timed_inline_parent_scan(|| inline_parent_nodes(block_tree));
+    let old_inline_tree_by_parent_range = record_timed_inline_reuse_index(|| {
+        old_tree.map(|tree| {
+            tree.inline_trees()
+                .iter()
+                .enumerate()
+                .map(|(index, inline_tree)| {
+                    (
+                        (inline_tree.parent_range.start, inline_tree.parent_range.end),
+                        index,
+                    )
+                })
+                .collect::<HashMap<_, _>>()
+        })
     });
 
     for parent_node in inline_parent_nodes {
@@ -67,7 +75,7 @@ fn parse_inline_trees(
             continue;
         }
 
-        let ranges = inline_included_ranges(parent_node);
+        let ranges = record_timed_inline_range_build(|| inline_included_ranges(parent_node));
         if ranges
             .iter()
             .all(|range| range.start_byte == range.end_byte)
@@ -75,20 +83,22 @@ fn parse_inline_trees(
             continue;
         }
 
-        inline_parser
-            .set_included_ranges(&ranges)
-            .expect("failed to set markdown inline parse ranges");
-        let inline_tree = inline_parser
-            .parse(
-                source,
-                old_inline_tree_for_parent(
-                    old_tree,
-                    old_inline_tree_by_parent_range.as_ref(),
-                    parent_node,
+        let inline_tree = record_timed_inline_parse(|| {
+            inline_parser
+                .set_included_ranges(&ranges)
+                .expect("failed to set markdown inline parse ranges");
+            inline_parser
+                .parse(
+                    source,
+                    old_inline_tree_for_parent(
+                        old_tree,
+                        old_inline_tree_by_parent_range.as_ref(),
+                        parent_node,
+                    )
+                    .map(|tree| &tree.tree),
                 )
-                .map(|tree| &tree.tree),
-            )
-            .expect("tree-sitter markdown inline parser was cancelled");
+                .expect("tree-sitter markdown inline parser was cancelled")
+        });
         inline_tree_by_parent_id.insert(parent_node.id(), inline_trees.len());
         inline_trees.push(MarkdownInlineTree {
             parent_id: parent_node.id(),
