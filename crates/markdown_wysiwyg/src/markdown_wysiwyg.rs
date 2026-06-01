@@ -5,6 +5,7 @@ use std::{collections::HashMap, fmt, ops::Range};
 use tree_sitter::{InputEdit, Node, Tree};
 
 mod assembler;
+mod backend;
 mod blocks;
 mod inline;
 mod parser;
@@ -13,10 +14,9 @@ mod source;
 mod structure;
 mod tables;
 
-use assembler::MarkdownSemanticsAssembler;
-use parser::parse_markdown;
+use backend::{MarkdownBackendOutput, TreeSitterMarkdownBackend};
 use source::{edit_byte_range, line_starts_after_edit_range, point_for_offset};
-use structure::{MarkdownStructure, MarkdownStructureBlock};
+use structure::MarkdownStructureBlock;
 
 #[cfg(any(test, perf_enabled))]
 thread_local! {
@@ -73,30 +73,6 @@ pub struct MarkdownSyntaxData {
     projection_marker_dependencies: Vec<ProjectionMarkerDependency>,
     projection_marker_prefix_maximum_ends: Vec<usize>,
 }
-
-struct MarkdownBackendOutput {
-    structure: MarkdownStructure,
-    parser_state: MarkdownParseTree,
-    data: MarkdownSyntaxData,
-}
-
-trait MarkdownBackend {
-    fn parse(
-        source: &str,
-        old_tree: Option<&MarkdownParseTree>,
-        changed_range: Option<&Range<usize>>,
-    ) -> MarkdownBackendOutput;
-
-    fn parse_after_edit(
-        source: &str,
-        previous: &MarkdownSyntaxTree,
-        edited_tree: &MarkdownParseTree,
-        old_range: Range<usize>,
-        new_range: Range<usize>,
-    ) -> MarkdownBackendOutput;
-}
-
-struct TreeSitterMarkdownBackend;
 
 #[derive(Clone, Debug)]
 pub struct MarkdownParseTree {
@@ -515,79 +491,6 @@ impl MarkdownSyntaxTree {
 
         Self { parser_state, data }
     }
-}
-
-impl TreeSitterMarkdownBackend {
-    fn parse(
-        source: &str,
-        old_tree: Option<&MarkdownParseTree>,
-        changed_range: Option<&Range<usize>>,
-    ) -> MarkdownBackendOutput {
-        <Self as MarkdownBackend>::parse(source, old_tree, changed_range)
-    }
-
-    fn parse_after_edit(
-        source: &str,
-        previous: &MarkdownSyntaxTree,
-        edited_tree: &MarkdownParseTree,
-        old_range: Range<usize>,
-        new_range: Range<usize>,
-    ) -> MarkdownBackendOutput {
-        <Self as MarkdownBackend>::parse_after_edit(
-            source,
-            previous,
-            edited_tree,
-            old_range,
-            new_range,
-        )
-    }
-}
-
-impl MarkdownBackend for TreeSitterMarkdownBackend {
-    fn parse(
-        source: &str,
-        old_tree: Option<&MarkdownParseTree>,
-        changed_range: Option<&Range<usize>>,
-    ) -> MarkdownBackendOutput {
-        let parser_state = record_timed_parse(|| parse_markdown(source, old_tree, changed_range));
-        let structure = MarkdownStructure::from_parse_tree(source, &parser_state);
-        let data = record_timed_collect_syntax_data(|| {
-            MarkdownSemanticsAssembler::assemble(source, &structure)
-        });
-
-        MarkdownBackendOutput {
-            structure,
-            parser_state,
-            data,
-        }
-    }
-
-    fn parse_after_edit(
-        source: &str,
-        previous: &MarkdownSyntaxTree,
-        edited_tree: &MarkdownParseTree,
-        old_range: Range<usize>,
-        new_range: Range<usize>,
-    ) -> MarkdownBackendOutput {
-        let parser_state =
-            record_timed_parse(|| parse_markdown(source, Some(edited_tree), Some(&new_range)));
-        let structure = MarkdownStructure::from_parse_tree(source, &parser_state);
-        let data = record_timed_collect_syntax_data(|| {
-            MarkdownSemanticsAssembler::assemble_incremental(
-                source, previous, &structure, &old_range, &new_range,
-            )
-        });
-
-        MarkdownBackendOutput {
-            structure,
-            parser_state,
-            data,
-        }
-    }
-}
-
-fn record_timed_collect_syntax_data<T>(run: impl FnOnce() -> T) -> T {
-    run()
 }
 
 #[cfg(any(test, perf_enabled))]
