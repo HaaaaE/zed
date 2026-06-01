@@ -3,8 +3,8 @@ use std::{collections::HashMap, ops::Range, sync::OnceLock};
 use tree_sitter::Node;
 
 use super::{
-    MarkdownBlock, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineTree, MarkdownParseTree,
-    MarkdownProjectionReplacement, ProjectionMarkerDependency, ranges_overlap,
+    MarkdownBlock, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineTree,
+    MarkdownParseTree, MarkdownProjectionReplacement, ProjectionMarkerDependency, ranges_overlap,
 };
 pub(super) fn collect_inline_spans(
     source: &str,
@@ -85,8 +85,9 @@ pub(super) fn inline_span_prefix_maximum_ends(inline_spans: &[MarkdownInlineSpan
 pub(super) fn collect_projection_replacements(
     source: &str,
     parse_tree: &MarkdownParseTree,
+    blocks: &[MarkdownBlock],
 ) -> Vec<MarkdownProjectionReplacement> {
-    let mut replacements = collect_projection_replacements_for_block_tree(source, parse_tree);
+    let mut replacements = collect_projection_replacements_for_blocks(source, blocks);
     for inline_tree in parse_tree.inline_trees() {
         replacements.extend(collect_projection_replacements_for_inline_tree(
             source,
@@ -104,16 +105,16 @@ pub(super) fn collect_projection_replacements(
     replacements
 }
 
-pub(super) fn collect_projection_replacements_for_block_tree(
+pub(super) fn collect_projection_replacements_for_blocks(
     source: &str,
-    parse_tree: &MarkdownParseTree,
+    blocks: &[MarkdownBlock],
 ) -> Vec<MarkdownProjectionReplacement> {
     let mut replacements = Vec::new();
-    collect_projection_replacement_nodes(
-        source,
-        parse_tree.block_tree().root_node(),
-        &mut replacements,
-    );
+    for block in blocks {
+        if let Some(replacement) = task_list_marker_replacement_from_block(source, block) {
+            replacements.push(replacement);
+        }
+    }
     replacements
 }
 
@@ -238,6 +239,40 @@ fn projection_replacement_from_node(
         source_range: source_range.clone(),
         owner_source_range: source_range,
         display_text,
+    })
+}
+
+fn task_list_marker_replacement_from_block(
+    source: &str,
+    block: &MarkdownBlock,
+) -> Option<MarkdownProjectionReplacement> {
+    let MarkdownBlockKind::TaskListItem { checked } = block.kind else {
+        return None;
+    };
+
+    let source_range_start = block
+        .marker_ranges
+        .first()
+        .map_or(block.source_range.start, |range| range.end);
+    let source_range_end = source_range_start.checked_add(3)?;
+    if source_range_end > block.source_range.end {
+        return None;
+    }
+
+    let bytes = source.as_bytes();
+    if bytes[source_range_start] != b'[' || bytes[source_range_start + 2] != b']' {
+        return None;
+    }
+
+    let source_range = source_range_start..source_range_end;
+    Some(MarkdownProjectionReplacement {
+        source_range: source_range.clone(),
+        owner_source_range: source_range,
+        display_text: if checked {
+            "\u{2611}".to_string()
+        } else {
+            "\u{2610}".to_string()
+        },
     })
 }
 

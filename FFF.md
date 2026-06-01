@@ -113,3 +113,8 @@
   - 最新 perf artifact：`.perf-runs\20260601-035528-ea7d9ee98a.md_editor.json`。大文档 session 从约 21.21s 降到约 19.54s；`rendered_edit_equal_length_draw_syntax_inlines` 约 9.30ms，`rendered_edit_length_change_draw_syntax_inlines` 约 8.27ms，`rendered_enter_apply_syntax_inlines` 约 8.55ms，`rendered_delete_apply_syntax_inlines` 约 8.56ms。
   - 当前剩余热点：parse 仍约 0.24-0.64s，block 收集约 81-87ms，projection 收集约 177-182ms；projection 目前仍重新扫描 block tree，并且 projection marker dependencies 仍按 blocks/inlines/replacements 全量重算。
   - 已验证：`cargo fmt --check`、`cargo test -p markdown_wysiwyg`、`cargo check -p updraft_editor`、`cargo perf-test -p md_editor -- --important`。
+  - projection replacement 的 task marker 部分改为从已收集的 `MarkdownBlock::TaskListItem` 派生，不再为 task marker 递归扫描整棵 block tree；incremental projection marker dependencies 现在复用未触碰的旧 dependencies 并做 byte shift，只对 dirty blocks/spans/replacements 重新生成。
+  - 增量等价测试补上 blockquote marker owner range 的局部编辑场景，继续对比 full parse 的 inline spans、projection replacements、projection marker dependencies。
+  - 最新 perf artifact：`.perf-runs\20260601-100302-83a573ce15.md_editor.json`。该次整段 session 受环境/切换段影响为约 25.29s，不作为整体改善结论；但目标 projection bucket 已从约 177-182ms 降到约 14-17ms：`rendered_edit_equal_length_draw_syntax_projection` 约 16.83ms，`rendered_edit_length_change_draw_syntax_projection` 约 13.74ms，`rendered_enter_apply_syntax_projection` 约 14.76ms，`rendered_delete_apply_syntax_projection` 约 13.96ms。
+  - 当前剩余热点转为 parse 和 block collection：本次 run 中 parse 约 0.33-0.87s，block 收集约 117-123ms；下一步应优先做 block collection dirty-window/splice，或继续降低 incremental parse 输入成本。
+  - 已验证：`cargo fmt --check`、`cargo test -p markdown_wysiwyg`、`cargo check -p updraft_editor`、`cargo perf-test -p md_editor -- --important`。
