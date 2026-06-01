@@ -118,3 +118,8 @@
   - 最新 perf artifact：`.perf-runs\20260601-100302-83a573ce15.md_editor.json`。该次整段 session 受环境/切换段影响为约 25.29s，不作为整体改善结论；但目标 projection bucket 已从约 177-182ms 降到约 14-17ms：`rendered_edit_equal_length_draw_syntax_projection` 约 16.83ms，`rendered_edit_length_change_draw_syntax_projection` 约 13.74ms，`rendered_enter_apply_syntax_projection` 约 14.76ms，`rendered_delete_apply_syntax_projection` 约 13.96ms。
   - 当前剩余热点转为 parse 和 block collection：本次 run 中 parse 约 0.33-0.87s，block 收集约 117-123ms；下一步应优先做 block collection dirty-window/splice，或继续降低 incremental parse 输入成本。
   - 已验证：`cargo fmt --check`、`cargo test -p markdown_wysiwyg`、`cargo check -p updraft_editor`、`cargo perf-test -p md_editor -- --important`。
+  - block collection 增加 dirty row window 复用：未触碰窗口外的旧 `MarkdownBlock` 做 byte/row shift 后复用，dirty window 内从新 block tree 局部收集 blocks/blanks；增量等价测试现在同时对比 full parse 的 block semantics，并覆盖插入换行。
+  - 最新 perf artifact：`.perf-runs\20260601-102530-a4d4acc397.md_editor.json`。大文档 block collection 已从上一轮约 117-123ms 降到约 13-16ms：`rendered_edit_equal_length_draw_syntax_blocks` 约 12.85ms，`rendered_edit_length_change_draw_syntax_blocks` 约 12.88ms，`rendered_enter_apply_syntax_blocks` 约 14.50ms，`rendered_delete_apply_syntax_blocks` 约 16.19ms。
+  - 该次整段 session 约 26.57s 且 SD 较大，仍不作为整体改善结论；分段上 derived syntax 的 blocks/inlines/projection 已基本都降到十几毫秒级。
+  - 当前主要 syntax 热点剩 parse：`rendered_edit_equal_length_draw_syntax_parse` 约 868ms，`rendered_edit_length_change_draw_syntax_parse` 约 443ms，`rendered_enter_apply_syntax_parse` 约 438ms，`rendered_delete_apply_syntax_parse` 约 342ms；下一步需要继续降低 incremental parse 输入/复用成本，或让普通 rendered draw/apply 避开同步 parse。
+  - 已验证：`cargo fmt --check`、`cargo test -p markdown_wysiwyg`、`cargo check -p updraft_editor`、`cargo perf-test -p md_editor -- --important`。

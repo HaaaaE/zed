@@ -4,7 +4,7 @@ use tree_sitter::{Node, Tree};
 
 use super::{
     MarkdownBlock, MarkdownBlockKind, MarkdownNodeId, inline::raw_html_tagfilter_disallowed,
-    last_line_range, line_range, node_id, trim_ascii_whitespace, trim_line_end,
+    last_line_range, line_range, node_id, ranges_overlap, trim_ascii_whitespace, trim_line_end,
 };
 pub(super) fn collect_blocks(
     source: &str,
@@ -14,6 +14,20 @@ pub(super) fn collect_blocks(
     let mut blocks = Vec::new();
     collect_block_nodes(source, tree.root_node(), &mut blocks);
     add_blank_blocks(source, line_starts, &mut blocks);
+    blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
+    blocks
+}
+
+pub(super) fn collect_blocks_in_source_range(
+    source: &str,
+    line_starts: &[usize],
+    tree: &Tree,
+    source_range: Range<usize>,
+    row_range: Range<usize>,
+) -> Vec<MarkdownBlock> {
+    let mut blocks = Vec::new();
+    collect_block_nodes_in_source_range(source, tree.root_node(), &source_range, &mut blocks);
+    add_blank_blocks_in_row_range(source, line_starts, row_range, &mut blocks);
     blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
     blocks
 }
@@ -30,6 +44,32 @@ fn collect_block_nodes(source: &str, node: Node<'_>, blocks: &mut Vec<MarkdownBl
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         collect_block_nodes(source, child, blocks);
+    }
+}
+
+fn collect_block_nodes_in_source_range(
+    source: &str,
+    node: Node<'_>,
+    source_range: &Range<usize>,
+    blocks: &mut Vec<MarkdownBlock>,
+) {
+    if !ranges_overlap(&node.byte_range(), source_range) {
+        return;
+    }
+
+    if let Some(block) = block_from_node(source, node) {
+        let recurse = block_node_has_children(node.kind());
+        if ranges_overlap(&block.source_range, source_range) {
+            blocks.push(block);
+        }
+        if !recurse {
+            return;
+        }
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_block_nodes_in_source_range(source, child, source_range, blocks);
     }
 }
 
@@ -463,6 +503,38 @@ fn add_blank_blocks(source: &str, line_starts: &[usize], blocks: &mut Vec<Markdo
 
     for row in 0..line_starts.len() {
         if covered_rows[row] {
+            continue;
+        }
+
+        let range = line_range(source, line_starts, row);
+        if range.is_empty() || !source[range.clone()].trim().is_empty() {
+            continue;
+        }
+
+        blocks.push(MarkdownBlock {
+            id: MarkdownNodeId(1 << 63 | row as u64),
+            kind: MarkdownBlockKind::Blank,
+            source_range: range.clone(),
+            content_range: range.start..range.start,
+            marker_ranges: Vec::new(),
+            row_range: row..row + 1,
+            tagfilter_disallowed: false,
+        });
+    }
+}
+
+fn add_blank_blocks_in_row_range(
+    source: &str,
+    line_starts: &[usize],
+    row_range: Range<usize>,
+    blocks: &mut Vec<MarkdownBlock>,
+) {
+    if line_starts.is_empty() {
+        return;
+    }
+
+    for row in row_range.start..row_range.end.min(line_starts.len()) {
+        if blocks.iter().any(|block| block.row_range.contains(&row)) {
             continue;
         }
 

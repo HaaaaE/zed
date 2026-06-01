@@ -10,7 +10,7 @@ mod parser;
 mod projection;
 mod tables;
 
-use blocks::collect_blocks;
+use blocks::{collect_blocks, collect_blocks_in_source_range};
 use inline::{
     collect_inline_spans, collect_inline_spans_for_inline_tree, collect_projection_replacements,
     collect_projection_replacements_for_blocks, collect_projection_replacements_for_inline_tree,
@@ -763,8 +763,16 @@ impl MarkdownSyntaxTree {
         let tree =
             record_timed_parse(|| parse_markdown(source, Some(edited_tree), Some(&new_range)));
         let line_starts = record_timed_line_start_collect(|| line_starts(source));
-        let blocks =
-            record_timed_block_collect(|| collect_blocks(source, &line_starts, tree.block_tree()));
+        let blocks = record_timed_block_collect(|| {
+            collect_incremental_blocks(
+                source,
+                previous,
+                &line_starts,
+                tree.block_tree(),
+                &old_range,
+                &new_range,
+            )
+        });
         let tables = record_timed_table_collect(|| collect_tables(source, &line_starts, &blocks));
         let inline_spans = record_timed_inline_collect(|| {
             collect_incremental_inline_spans(source, previous, &tree, &old_range, &new_range)
@@ -1076,6 +1084,141 @@ fn shift_clean_old_range_to_new(
 
     debug_assert!(range.start >= old_range.end);
     shift_byte_range(range, old_range.end, new_range.end)
+}
+
+fn row_for_offset_in_line_starts(line_starts: &[usize], offset: usize) -> usize {
+    line_starts
+        .partition_point(|line_start| *line_start <= offset)
+        .saturating_sub(1)
+        .min(line_starts.len().saturating_sub(1))
+}
+
+fn edit_row_window(
+    line_starts: &[usize],
+    source_len: usize,
+    edit_range: &Range<usize>,
+) -> Range<usize> {
+    const CONTEXT_ROWS: usize = 2;
+
+    if line_starts.is_empty() {
+        return 0..0;
+    }
+
+    let start = row_for_offset_in_line_starts(line_starts, edit_range.start.min(source_len));
+    let end = row_for_offset_in_line_starts(line_starts, edit_range.end.min(source_len));
+    start.saturating_sub(CONTEXT_ROWS)..(end + 1 + CONTEXT_ROWS).min(line_starts.len())
+}
+
+fn source_range_for_row_window(
+    line_starts: &[usize],
+    source_len: usize,
+    rows: Range<usize>,
+) -> Range<usize> {
+    let start = line_starts.get(rows.start).copied().unwrap_or(source_len);
+    let end = line_starts.get(rows.end).copied().unwrap_or(source_len);
+    start..end
+}
+
+fn shift_row_offset(row: usize, row_delta: isize) -> usize {
+    if row_delta >= 0 {
+        row + row_delta as usize
+    } else {
+        row.saturating_sub(row_delta.unsigned_abs())
+    }
+}
+
+fn shift_clean_old_row_range_to_new(
+    range: Range<usize>,
+    old_dirty_rows: &Range<usize>,
+    row_delta: isize,
+) -> Range<usize> {
+    if range.end <= old_dirty_rows.start {
+        return range;
+    }
+
+    debug_assert!(range.start >= old_dirty_rows.end);
+    shift_row_offset(range.start, row_delta)..shift_row_offset(range.end, row_delta)
+}
+
+fn shift_block_after_edit(
+    mut block: MarkdownBlock,
+    old_range: &Range<usize>,
+    new_range: &Range<usize>,
+    old_dirty_rows: &Range<usize>,
+    row_delta: isize,
+) -> MarkdownBlock {
+    block.source_range = shift_clean_old_range_to_new(block.source_range, old_range, new_range);
+    block.content_range = shift_clean_old_range_to_new(block.content_range, old_range, new_range);
+    block.marker_ranges = block
+        .marker_ranges
+        .into_iter()
+        .map(|range| shift_clean_old_range_to_new(range, old_range, new_range))
+        .collect();
+    block.row_range = shift_clean_old_row_range_to_new(block.row_range, old_dirty_rows, row_delta);
+    if block.kind == MarkdownBlockKind::Blank {
+        block.id = MarkdownNodeId(1 << 63 | block.row_range.start as u64);
+    }
+    block
+}
+
+fn block_semantics_match(left: &MarkdownBlock, right: &MarkdownBlock) -> bool {
+    left.kind == right.kind
+        && left.source_range == right.source_range
+        && left.content_range == right.content_range
+        && left.marker_ranges == right.marker_ranges
+        && left.row_range == right.row_range
+        && left.tagfilter_disallowed == right.tagfilter_disallowed
+}
+
+fn collect_incremental_blocks(
+    source: &str,
+    previous: &MarkdownSyntaxTree,
+    line_starts: &[usize],
+    block_tree: &Tree,
+    old_range: &Range<usize>,
+    new_range: &Range<usize>,
+) -> Vec<MarkdownBlock> {
+    let old_dirty_rows = edit_row_window(&previous.line_starts, previous.source_len, old_range);
+    let new_dirty_rows = edit_row_window(line_starts, source.len(), new_range);
+    let old_dirty_source_range = source_range_for_row_window(
+        &previous.line_starts,
+        previous.source_len,
+        old_dirty_rows.clone(),
+    );
+    let new_dirty_source_range =
+        source_range_for_row_window(line_starts, source.len(), new_dirty_rows.clone());
+    let row_delta = line_starts.len() as isize - previous.line_starts.len() as isize;
+
+    let mut blocks = previous
+        .blocks
+        .iter()
+        .filter(|block| {
+            !ranges_overlap(&block.row_range, &old_dirty_rows)
+                && !ranges_overlap(&block.source_range, &old_dirty_source_range)
+        })
+        .cloned()
+        .map(|block| {
+            shift_block_after_edit(block, old_range, new_range, &old_dirty_rows, row_delta)
+        })
+        .collect::<Vec<_>>();
+
+    blocks.extend(collect_blocks_in_source_range(
+        source,
+        line_starts,
+        block_tree,
+        new_dirty_source_range,
+        new_dirty_rows,
+    ));
+    blocks.sort_by_key(|block| {
+        (
+            block.source_range.start,
+            block.source_range.end,
+            block.row_range.start,
+            block.row_range.end,
+        )
+    });
+    blocks.dedup_by(|right, left| block_semantics_match(left, right));
+    blocks
 }
 
 fn shift_inline_span_after_edit(
@@ -1759,6 +1902,11 @@ mod tests {
                 source.find("continued").unwrap()..source.find("continued").unwrap(),
                 "still ",
             ),
+            (
+                source.find("last line").unwrap() + "last line".len()
+                    ..source.find("last line").unwrap() + "last line".len(),
+                "\ninserted",
+            ),
         ];
 
         for (old_range, replacement) in cases {
@@ -1769,6 +1917,17 @@ mod tests {
             let tree = tree.reparse_after_edit_range(old_range, new_range, &new_source);
             let full_tree = MarkdownSyntaxTree::parse(&new_source);
 
+            assert_eq!(
+                tree.blocks
+                    .iter()
+                    .map(block_semantics_without_id)
+                    .collect::<Vec<_>>(),
+                full_tree
+                    .blocks
+                    .iter()
+                    .map(block_semantics_without_id)
+                    .collect::<Vec<_>>()
+            );
             assert_eq!(tree.inline_spans, full_tree.inline_spans);
             assert_eq!(
                 tree.projection_replacements,
