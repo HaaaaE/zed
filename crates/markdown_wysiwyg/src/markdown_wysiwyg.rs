@@ -858,6 +858,48 @@ mod tests {
     }
 
     #[test]
+    fn pulldown_backend_matches_tree_sitter_broader_inline_semantics() {
+        let source = concat!(
+            "~~strike~~ <span>html</span> <IFRAME src=\"x\"></IFRAME>\n",
+            "hard break  \n",
+            "soft break with \\* and &copy;\n",
+            "autolink <https://example.com> mail <me@example.com>\n",
+            "CJK 中文 **粗体** and $数学 + x$ with ![图](image.png)\n",
+        );
+        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
+        let tree_sitter_rendered_candidates = tree_sitter
+            .inline_spans()
+            .iter()
+            .filter(|span| span.kind.is_rendered_element_candidate())
+            .cloned()
+            .collect::<Vec<_>>();
+        let pulldown_rendered_candidates = pulldown
+            .inline_spans()
+            .iter()
+            .filter(|span| span.kind.is_rendered_element_candidate())
+            .cloned()
+            .collect::<Vec<_>>();
+
+        assert!(tree_sitter.inline_spans().iter().any(|span| {
+            span.kind == MarkdownInlineKind::InlineHtml && span.tagfilter_disallowed
+        }));
+        assert_eq!(pulldown.inline_spans(), tree_sitter.inline_spans());
+        assert_eq!(
+            pulldown.projection_replacements(),
+            tree_sitter.syntax_data().projection_replacements()
+        );
+        assert_eq!(
+            pulldown.projection_marker_dependencies(),
+            tree_sitter.syntax_data().projection_marker_dependencies()
+        );
+        assert_eq!(
+            pulldown_rendered_candidates,
+            tree_sitter_rendered_candidates
+        );
+    }
+
+    #[test]
     fn pulldown_backend_matches_tree_sitter_table_cell_inline_semantics() {
         let source = concat!(
             "| **Head** | ![alt](img.png) |\n",
