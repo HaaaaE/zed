@@ -3,10 +3,10 @@ use std::ops::Range;
 use tree_sitter::Node;
 
 use super::{
-    MarkdownBlock, MarkdownBlockKind, MarkdownNodeId, MarkdownStructure, MarkdownStructureBlock,
-    MarkdownSyntaxTree,
+    MarkdownBlock, MarkdownBlockKind, MarkdownNodeId, MarkdownSyntaxTree,
     inline::raw_html_tagfilter_disallowed,
     source::{last_line_range, line_range, node_id, trim_ascii_whitespace, trim_line_end},
+    structure::{MarkdownStructure, MarkdownStructureBlock},
 };
 
 impl MarkdownSyntaxTree {

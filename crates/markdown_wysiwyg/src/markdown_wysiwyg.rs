@@ -9,6 +9,7 @@ mod inline;
 mod parser;
 mod projection;
 mod source;
+mod structure;
 mod tables;
 
 use inline::{
@@ -20,6 +21,7 @@ use inline::{
 };
 use parser::parse_markdown;
 use source::{edit_byte_range, line_starts, line_starts_after_edit_range, point_for_offset};
+use structure::{MarkdownStructure, MarkdownStructureBlock};
 use tables::collect_structure_tables;
 
 #[cfg(any(test, perf_enabled))]
@@ -102,24 +104,7 @@ trait MarkdownBackend {
 
 struct TreeSitterMarkdownBackend;
 
-#[derive(Clone, Debug)]
-struct MarkdownStructure {
-    parser_state: MarkdownParseTree,
-    blocks: Vec<MarkdownStructureBlock>,
-}
-
 struct MarkdownSemanticsAssembler;
-
-#[derive(Clone, Debug)]
-struct MarkdownStructureBlock {
-    id: MarkdownNodeId,
-    kind: MarkdownBlockKind,
-    source_range: Range<usize>,
-    content_range: Range<usize>,
-    marker_ranges: Vec<Range<usize>>,
-    row_range: Range<usize>,
-    tagfilter_disallowed: bool,
-}
 
 #[derive(Clone, Debug)]
 pub struct MarkdownParseTree {
@@ -267,30 +252,6 @@ impl MarkdownSyntaxData {
             .wrapping_add(self.inline_span_prefix_maximum_ends.len())
             .wrapping_add(self.projection_replacement_prefix_maximum_ends.len())
             .wrapping_add(self.projection_marker_prefix_maximum_ends.len())
-    }
-}
-
-impl MarkdownStructure {
-    fn from_parse_tree(source: &str, parser_state: &MarkdownParseTree) -> Self {
-        let mut structure = Self {
-            parser_state: parser_state.clone(),
-            blocks: Vec::new(),
-        };
-        structure.collect_blocks_from_parse_tree(source);
-        structure
-    }
-
-    fn inline_trees(&self) -> &[MarkdownInlineTree] {
-        self.parser_state.inline_trees()
-    }
-
-    fn blocks(&self) -> &[MarkdownStructureBlock] {
-        &self.blocks
-    }
-
-    fn collect_blocks_from_parse_tree(&mut self, source: &str) {
-        self.blocks =
-            blocks::collect_structure_blocks(source, self.parser_state.block_tree().root_node());
     }
 }
 

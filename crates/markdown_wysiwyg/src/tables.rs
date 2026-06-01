@@ -1,9 +1,10 @@
 use std::ops::Range;
 
 use super::{
-    MarkdownBlock, MarkdownBlockKind, MarkdownStructure, MarkdownSyntaxTree, MarkdownTable,
-    MarkdownTableAlignment, MarkdownTableCell, MarkdownTableRow,
+    MarkdownBlock, MarkdownBlockKind, MarkdownSyntaxTree, MarkdownTable, MarkdownTableAlignment,
+    MarkdownTableCell, MarkdownTableRow,
     source::{line_range_checked, ranges_overlap, trim_ascii_whitespace, trim_line_end},
+    structure::MarkdownStructure,
 };
 
 impl MarkdownSyntaxTree {
