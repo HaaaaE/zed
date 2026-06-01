@@ -231,6 +231,204 @@ fn structure_block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownStr
     }
 }
 
+#[cfg(any(test, perf_enabled))]
+pub(super) fn structure_paragraph_block_from_range(
+    source: &str,
+    line_starts: &[usize],
+    id: MarkdownNodeId,
+    source_range: Range<usize>,
+) -> MarkdownStructureBlock {
+    MarkdownStructureBlock {
+        id,
+        kind: MarkdownBlockKind::Paragraph,
+        source_range: source_range.clone(),
+        content_range: trim_line_end(source, source_range.clone()),
+        marker_ranges: Vec::new(),
+        row_range: row_range_for_byte_range(line_starts, source_range),
+        tagfilter_disallowed: false,
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(super) fn structure_thematic_break_block_from_range(
+    line_starts: &[usize],
+    id: MarkdownNodeId,
+    source_range: Range<usize>,
+) -> MarkdownStructureBlock {
+    MarkdownStructureBlock {
+        id,
+        kind: MarkdownBlockKind::ThematicBreak,
+        content_range: source_range.start..source_range.start,
+        row_range: row_range_for_byte_range(line_starts, source_range.clone()),
+        source_range,
+        marker_ranges: Vec::new(),
+        tagfilter_disallowed: false,
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(super) fn structure_indented_code_block_from_range(
+    source: &str,
+    line_starts: &[usize],
+    id: MarkdownNodeId,
+    source_range: Range<usize>,
+) -> MarkdownStructureBlock {
+    MarkdownStructureBlock {
+        id,
+        kind: MarkdownBlockKind::IndentedCodeBlock,
+        source_range: source_range.clone(),
+        content_range: trim_line_end(source, source_range.clone()),
+        marker_ranges: Vec::new(),
+        row_range: row_range_for_byte_range(line_starts, source_range),
+        tagfilter_disallowed: false,
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(super) fn structure_html_block_from_range(
+    source: &str,
+    line_starts: &[usize],
+    id: MarkdownNodeId,
+    source_range: Range<usize>,
+) -> MarkdownStructureBlock {
+    MarkdownStructureBlock {
+        id,
+        kind: MarkdownBlockKind::HtmlBlock,
+        source_range: source_range.clone(),
+        content_range: trim_line_end(source, source_range.clone()),
+        marker_ranges: Vec::new(),
+        row_range: row_range_for_byte_range(line_starts, source_range.clone()),
+        tagfilter_disallowed: raw_html_tagfilter_disallowed(source, source_range),
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(super) fn structure_pipe_table_block_from_range(
+    source: &str,
+    line_starts: &[usize],
+    id: MarkdownNodeId,
+    source_range: Range<usize>,
+) -> MarkdownStructureBlock {
+    MarkdownStructureBlock {
+        id,
+        kind: MarkdownBlockKind::PipeTable,
+        source_range: source_range.clone(),
+        content_range: trim_line_end(source, source_range.clone()),
+        marker_ranges: structure_pipe_table_marker_ranges_from_range(source, &source_range),
+        row_range: row_range_for_byte_range(line_starts, source_range),
+        tagfilter_disallowed: false,
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(super) fn structure_block_quote_block_from_range(
+    source: &str,
+    line_starts: &[usize],
+    id: MarkdownNodeId,
+    source_range: Range<usize>,
+) -> MarkdownStructureBlock {
+    MarkdownStructureBlock {
+        id,
+        kind: MarkdownBlockKind::BlockQuote,
+        source_range: source_range.clone(),
+        content_range: trim_line_end(source, source_range.clone()),
+        marker_ranges: structure_block_quote_marker_ranges(source, source_range.clone()),
+        row_range: row_range_for_byte_range(line_starts, source_range),
+        tagfilter_disallowed: false,
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(super) fn structure_list_block_from_range(
+    source: &str,
+    line_starts: &[usize],
+    id: MarkdownNodeId,
+    source_range: Range<usize>,
+) -> MarkdownStructureBlock {
+    let content_range = trim_line_end(source, source_range.clone());
+    let kind = if structure_list_source_starts_ordered_marker(source, content_range.clone()) {
+        MarkdownBlockKind::OrderedList
+    } else {
+        MarkdownBlockKind::UnorderedList
+    };
+
+    MarkdownStructureBlock {
+        id,
+        kind,
+        source_range: source_range.clone(),
+        content_range,
+        marker_ranges: Vec::new(),
+        row_range: row_range_for_byte_range(line_starts, source_range),
+        tagfilter_disallowed: false,
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(super) fn structure_list_item_block_from_range(
+    source: &str,
+    line_starts: &[usize],
+    id: MarkdownNodeId,
+    node_range: Range<usize>,
+) -> MarkdownStructureBlock {
+    let marker_range = structure_list_item_marker_range(source, node_range.clone());
+    let source_start = marker_range
+        .as_ref()
+        .map_or(node_range.start, |range| range.start);
+    let source_range = source_start..node_range.end;
+    let content_start = marker_range
+        .as_ref()
+        .map_or(source_range.start, |range| range.end);
+    let task_marker =
+        structure_task_list_marker_after_list_marker(source, content_start, source_range.end);
+    let (kind, content_start) = if let Some((checked, task_content_start)) = task_marker {
+        (
+            MarkdownBlockKind::TaskListItem { checked },
+            task_content_start,
+        )
+    } else {
+        (MarkdownBlockKind::ListItem, content_start)
+    };
+
+    MarkdownStructureBlock {
+        id,
+        kind,
+        source_range: source_range.clone(),
+        content_range: trim_line_end(source, content_start..source_range.end),
+        marker_ranges: marker_range.into_iter().collect(),
+        row_range: row_range_for_byte_range(line_starts, source_range),
+        tagfilter_disallowed: false,
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(super) fn structure_heading_block_from_range(
+    source: &str,
+    line_starts: &[usize],
+    id: MarkdownNodeId,
+    source_range: Range<usize>,
+) -> Option<MarkdownStructureBlock> {
+    structure_atx_heading_block_from_range(source, line_starts, id, source_range.clone())
+        .or_else(|| structure_setext_heading_block_from_range(source, line_starts, id, source_range))
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(super) fn structure_fenced_code_block_from_range(
+    source: &str,
+    line_starts: &[usize],
+    id: MarkdownNodeId,
+    source_range: Range<usize>,
+) -> MarkdownStructureBlock {
+    MarkdownStructureBlock {
+        id,
+        kind: MarkdownBlockKind::FencedCodeBlock,
+        source_range: source_range.clone(),
+        content_range: structure_fenced_code_content_range_from_range(source, source_range.clone()),
+        marker_ranges: structure_fenced_code_marker_ranges_from_range(source, source_range.clone()),
+        row_range: row_range_for_byte_range(line_starts, source_range),
+        tagfilter_disallowed: false,
+    }
+}
+
 fn structure_block_node_has_children(kind: &str) -> bool {
     matches!(kind, "block_quote" | "list" | "list_item")
 }
@@ -364,6 +562,54 @@ fn structure_atx_heading_marker_range(
     }
 
     Some((level as u8, marker_start..content_start, content_start))
+}
+
+#[cfg(any(test, perf_enabled))]
+fn structure_setext_heading_block_from_range(
+    source: &str,
+    line_starts: &[usize],
+    id: MarkdownNodeId,
+    source_range: Range<usize>,
+) -> Option<MarkdownStructureBlock> {
+    let marker_range = last_line_range(source, source_range.clone())?;
+    let marker_text = &source[trim_ascii_whitespace(source, marker_range.clone())];
+    let level = match marker_text.as_bytes().first().copied()? {
+        b'=' => 1,
+        b'-' => 2,
+        _ => return None,
+    };
+
+    Some(MarkdownStructureBlock {
+        id,
+        kind: MarkdownBlockKind::SetextHeading { level },
+        source_range: source_range.clone(),
+        content_range: trim_line_end(source, source_range.start..marker_range.start),
+        marker_ranges: vec![marker_range],
+        row_range: row_range_for_byte_range(line_starts, source_range),
+        tagfilter_disallowed: false,
+    })
+}
+
+#[cfg(any(test, perf_enabled))]
+fn structure_atx_heading_block_from_range(
+    source: &str,
+    line_starts: &[usize],
+    id: MarkdownNodeId,
+    source_range: Range<usize>,
+) -> Option<MarkdownStructureBlock> {
+    let (level, marker_range, content_start) =
+        structure_atx_heading_marker_range(source, source_range.clone())?;
+    let content_end = trim_line_end(source, content_start..source_range.end).end;
+
+    Some(MarkdownStructureBlock {
+        id,
+        kind: MarkdownBlockKind::AtxHeading { level },
+        source_range: source_range.clone(),
+        content_range: content_start..content_end,
+        marker_ranges: vec![marker_range],
+        row_range: row_range_for_byte_range(line_starts, source_range),
+        tagfilter_disallowed: false,
+    })
 }
 
 fn structure_task_list_marker_after_list_marker(
@@ -546,6 +792,38 @@ fn structure_pipe_table_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
     marker_ranges
 }
 
+#[cfg(any(test, perf_enabled))]
+fn structure_pipe_table_marker_ranges_from_range(
+    source: &str,
+    source_range: &Range<usize>,
+) -> Vec<Range<usize>> {
+    let mut marker_ranges = Vec::new();
+    let mut line_start = source_range.start;
+    let mut row_index = 0;
+
+    while line_start < source_range.end {
+        let line_end = source[line_start..source_range.end]
+            .find('\n')
+            .map_or(source_range.end, |offset| line_start + offset + 1);
+        let line_range = trim_line_end(source, line_start..line_end);
+        if row_index == 1 {
+            marker_ranges.push(line_range.clone());
+        }
+        marker_ranges.extend(
+            source[line_range.clone()]
+                .match_indices('|')
+                .map(|(offset, _)| line_range.start + offset)
+                .map(|offset| offset..offset + 1),
+        );
+
+        row_index += 1;
+        line_start = line_end;
+    }
+
+    marker_ranges.sort_by_key(|range| (range.start, range.end));
+    marker_ranges
+}
+
 fn structure_fenced_code_content_range(source: &str, node: Node<'_>) -> Range<usize> {
     let mut content_range = trim_line_end(source, node.byte_range());
     let mut cursor = node.walk();
@@ -569,6 +847,106 @@ fn structure_fenced_code_content_range(source: &str, node: Node<'_>) -> Range<us
         }
     }
     content_range
+}
+
+#[cfg(any(test, perf_enabled))]
+fn structure_fenced_code_marker_ranges_from_range(
+    source: &str,
+    source_range: Range<usize>,
+) -> Vec<Range<usize>> {
+    let mut marker_ranges = Vec::new();
+    let first_line = first_line_range(source, source_range.clone());
+    if let Some((fence_byte, delimiter_range)) =
+        fenced_code_delimiter_range(source, first_line.clone())
+    {
+        marker_ranges.push(delimiter_range.clone());
+        let info_range = trim_ascii_whitespace(source, delimiter_range.end..first_line.end);
+        if !info_range.is_empty() {
+            marker_ranges.push(info_range);
+        }
+
+        if let Some(last_line) = last_line_range(source, source_range)
+            && last_line.start > first_line.start
+            && let Some((closing_fence_byte, closing_range)) =
+                fenced_code_delimiter_range(source, last_line)
+            && closing_fence_byte == fence_byte
+        {
+            marker_ranges.push(closing_range);
+        }
+    }
+
+    marker_ranges
+}
+
+#[cfg(any(test, perf_enabled))]
+fn structure_fenced_code_content_range_from_range(
+    source: &str,
+    source_range: Range<usize>,
+) -> Range<usize> {
+    let first_line = first_line_range(source, source_range.clone());
+    let content_start = line_end_with_newline(source, first_line.end, source_range.end);
+    let content_end = last_line_range(source, source_range.clone())
+        .filter(|last_line| last_line.start > first_line.start)
+        .map_or(source_range.end, |last_line| last_line.start);
+
+    content_start.min(content_end)..content_end
+}
+
+#[cfg(any(test, perf_enabled))]
+fn first_line_range(source: &str, range: Range<usize>) -> Range<usize> {
+    let end = source[range.clone()]
+        .find('\n')
+        .map_or(range.end, |offset| range.start + offset);
+    range.start..end
+}
+
+#[cfg(any(test, perf_enabled))]
+fn line_end_with_newline(source: &str, line_end: usize, source_end: usize) -> usize {
+    let bytes = source.as_bytes();
+    if line_end < source_end && bytes[line_end] == b'\r' {
+        return (line_end + 1 + usize::from(bytes.get(line_end + 1).copied() == Some(b'\n')))
+            .min(source_end);
+    }
+    if line_end < source_end && bytes[line_end] == b'\n' {
+        return line_end + 1;
+    }
+    source_end
+}
+
+#[cfg(any(test, perf_enabled))]
+fn fenced_code_delimiter_range(
+    source: &str,
+    line_range: Range<usize>,
+) -> Option<(u8, Range<usize>)> {
+    let bytes = source.as_bytes();
+    let mut cursor = line_range.start;
+    while cursor < line_range.end && matches!(bytes[cursor], b' ' | b'\t') {
+        cursor += 1;
+    }
+
+    let fence_byte = bytes.get(cursor).copied()?;
+    if !matches!(fence_byte, b'`' | b'~') {
+        return None;
+    }
+
+    let delimiter_start = cursor;
+    while cursor < line_range.end && bytes[cursor] == fence_byte {
+        cursor += 1;
+    }
+    (cursor - delimiter_start >= 3).then_some((fence_byte, delimiter_start..cursor))
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(super) fn row_range_for_byte_range(
+    line_starts: &[usize],
+    range: Range<usize>,
+) -> Range<usize> {
+    let start = line_starts.partition_point(|line_start| *line_start <= range.start) - 1;
+    let end_offset = range
+        .end
+        .saturating_sub(usize::from(range.end > range.start));
+    let end = line_starts.partition_point(|line_start| *line_start <= end_offset);
+    start..end.max(start + 1)
 }
 
 fn row_range_for_structure_node(node: Node<'_>) -> Range<usize> {

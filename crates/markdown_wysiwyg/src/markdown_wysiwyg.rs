@@ -793,6 +793,51 @@ mod tests {
     }
 
     #[test]
+    fn pulldown_backend_matches_tree_sitter_non_paragraph_block_semantics() {
+        let source = concat!(
+            "# Title\n",
+            "\n",
+            "Setext\n",
+            "------\n",
+            "\n",
+            "> quoted\n",
+            "> - [x] task\n",
+            "\n",
+            "- [ ] todo\n",
+            "  - nested\n",
+            "\n",
+            "```rust\n",
+            "let x = 1;\n",
+            "```\n",
+            "\n",
+            "<script>alert(1)</script>\n",
+            "\n",
+            "| a | b |\n",
+            "| - | - |\n",
+            "| 1 | 2 |\n",
+            "\n",
+            "---\n",
+        );
+        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
+
+        assert_eq!(
+            pulldown
+                .blocks()
+                .iter()
+                .filter(|block| block.kind != MarkdownBlockKind::Paragraph)
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>(),
+            tree_sitter
+                .blocks()
+                .iter()
+                .filter(|block| block.kind != MarkdownBlockKind::Paragraph)
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn parses_blockquotes_and_list_containers_without_losing_nested_blocks() {
         let source = "> quote\n> - [ ] todo\n>   1. ordered\n\n- loose\n  - nested\n1. one\n";
         let tree = MarkdownSyntaxTree::parse(source);

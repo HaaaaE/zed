@@ -1,12 +1,19 @@
 use std::ops::Range;
 
 #[cfg(any(test, perf_enabled))]
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag};
+use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 
 #[cfg(any(test, perf_enabled))]
 use super::{
-    MarkdownBlockKind, MarkdownNodeId,
-    source::{line_starts, trim_line_end},
+    MarkdownNodeId,
+    blocks::{
+        structure_block_quote_block_from_range, structure_fenced_code_block_from_range,
+        structure_heading_block_from_range, structure_html_block_from_range,
+        structure_indented_code_block_from_range, structure_list_block_from_range,
+        structure_list_item_block_from_range, structure_paragraph_block_from_range,
+        structure_pipe_table_block_from_range, structure_thematic_break_block_from_range,
+    },
+    source::line_starts,
     structure::MarkdownStructureBlock,
 };
 use super::{
@@ -139,15 +146,13 @@ fn collect_pulldown_structure_blocks(source: &str) -> Vec<MarkdownStructureBlock
                     blocks.push(block);
                 }
             }
-            Event::Rule => blocks.push(MarkdownStructureBlock {
-                id: pulldown_node_id(blocks.len()),
-                kind: MarkdownBlockKind::ThematicBreak,
-                content_range: range.start..range.start,
-                row_range: row_range_for_byte_range(&line_starts, range.clone()),
-                source_range: range,
-                marker_ranges: Vec::new(),
-                tagfilter_disallowed: false,
-            }),
+            Event::Rule => {
+                blocks.push(structure_thematic_break_block_from_range(
+                    &line_starts,
+                    pulldown_node_id(blocks.len()),
+                    range,
+                ));
+            }
             _ => {}
         }
     }
@@ -163,19 +168,52 @@ fn pulldown_structure_block_from_start_tag(
     range: Range<usize>,
     index: usize,
 ) -> Option<MarkdownStructureBlock> {
-    let kind = match tag {
-        Tag::Paragraph => MarkdownBlockKind::Paragraph,
-        Tag::Heading { level, .. } => MarkdownBlockKind::AtxHeading {
-            level: heading_level(level),
-        },
-        Tag::BlockQuote(_) => MarkdownBlockKind::BlockQuote,
-        Tag::CodeBlock(CodeBlockKind::Indented) => MarkdownBlockKind::IndentedCodeBlock,
-        Tag::CodeBlock(CodeBlockKind::Fenced(_)) => MarkdownBlockKind::FencedCodeBlock,
-        Tag::HtmlBlock => MarkdownBlockKind::HtmlBlock,
-        Tag::List(Some(_)) => MarkdownBlockKind::OrderedList,
-        Tag::List(None) => MarkdownBlockKind::UnorderedList,
-        Tag::Item => MarkdownBlockKind::ListItem,
-        Tag::Table(_) => MarkdownBlockKind::PipeTable,
+    let id = pulldown_node_id(index);
+    match tag {
+        Tag::Paragraph => Some(structure_paragraph_block_from_range(
+            source,
+            line_starts,
+            id,
+            range,
+        )),
+        Tag::Heading { .. } => structure_heading_block_from_range(source, line_starts, id, range),
+        Tag::BlockQuote(_) => Some(structure_block_quote_block_from_range(
+            source,
+            line_starts,
+            id,
+            range,
+        )),
+        Tag::CodeBlock(CodeBlockKind::Indented) => Some(structure_indented_code_block_from_range(
+            source,
+            line_starts,
+            id,
+            range,
+        )),
+        Tag::CodeBlock(CodeBlockKind::Fenced(_)) => Some(structure_fenced_code_block_from_range(
+            source,
+            line_starts,
+            id,
+            pulldown_fenced_code_block_range(source, range),
+        )),
+        Tag::HtmlBlock => Some(structure_html_block_from_range(source, line_starts, id, range)),
+        Tag::List(_) => Some(structure_list_block_from_range(
+            source,
+            line_starts,
+            id,
+            range,
+        )),
+        Tag::Item => Some(structure_list_item_block_from_range(
+            source,
+            line_starts,
+            id,
+            range,
+        )),
+        Tag::Table(_) => Some(structure_pipe_table_block_from_range(
+            source,
+            line_starts,
+            id,
+            range,
+        )),
         Tag::FootnoteDefinition(_)
         | Tag::DefinitionList
         | Tag::DefinitionListTitle
@@ -190,40 +228,16 @@ fn pulldown_structure_block_from_start_tag(
         | Tag::Subscript
         | Tag::Link { .. }
         | Tag::Image { .. }
-        | Tag::MetadataBlock(_) => return None,
-    };
-
-    Some(MarkdownStructureBlock {
-        id: pulldown_node_id(index),
-        kind,
-        content_range: trim_line_end(source, range.clone()),
-        marker_ranges: Vec::new(),
-        row_range: row_range_for_byte_range(line_starts, range.clone()),
-        source_range: range,
-        tagfilter_disallowed: false,
-    })
-}
-
-#[cfg(any(test, perf_enabled))]
-fn heading_level(level: HeadingLevel) -> u8 {
-    match level {
-        HeadingLevel::H1 => 1,
-        HeadingLevel::H2 => 2,
-        HeadingLevel::H3 => 3,
-        HeadingLevel::H4 => 4,
-        HeadingLevel::H5 => 5,
-        HeadingLevel::H6 => 6,
+        | Tag::MetadataBlock(_) => None,
     }
 }
 
 #[cfg(any(test, perf_enabled))]
-fn row_range_for_byte_range(line_starts: &[usize], range: Range<usize>) -> Range<usize> {
-    let start = line_starts.partition_point(|line_start| *line_start <= range.start) - 1;
-    let end_offset = range
-        .end
-        .saturating_sub(usize::from(range.end > range.start));
-    let end = line_starts.partition_point(|line_start| *line_start <= end_offset);
-    start..end.max(start + 1)
+fn pulldown_fenced_code_block_range(source: &str, mut range: Range<usize>) -> Range<usize> {
+    if source.as_bytes().get(range.end).copied() == Some(b'\n') {
+        range.end += 1;
+    }
+    range
 }
 
 #[cfg(any(test, perf_enabled))]

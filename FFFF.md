@@ -46,6 +46,7 @@
 - 2026-06-01：tree-sitter backend 边界已从 `markdown_wysiwyg.rs` 下沉到 `backend.rs`，`MarkdownBackend` trait、`MarkdownBackendOutput` 与 `TreeSitterMarkdownBackend` 的生产 baseline 组装逻辑独立于主门面文件；第二十二轮验证 `cargo check -p markdown_wysiwyg`、`cargo test -p markdown_wysiwyg` 与 `cargo check -p updraft_editor` 全部通过。
 - 2026-06-01：`MarkdownStructure` 已从持有完整 `MarkdownParseTree` 改为直接持有粗结构 blocks 与 inline trees，非 tree-sitter backend 后续可直接构造结构载体而不必伪造 parse tree；第二十三轮验证 `cargo check -p markdown_wysiwyg`、`cargo test -p markdown_wysiwyg` 与 `cargo check -p updraft_editor` 全部通过。
 - 2026-06-01：已把 `pulldown-cmark` 接入 `markdown_wysiwyg` 的非默认 backend path，`PulldownMarkdownBackend::parse_syntax_data()` 可构造粗结构 blocks 并通过现有 `MarkdownSemanticsAssembler` 产出兼容 `MarkdownSyntaxData`，生产 `MarkdownSyntaxTree::parse()` 仍保持 tree-sitter baseline；第二十四轮验证 `cargo check -p markdown_wysiwyg --locked`、`cargo test -p markdown_wysiwyg --locked` 与 `cargo check -p updraft_editor --locked` 全部通过。
+- 2026-06-01：pulldown 粗结构 backend 已复用 `blocks.rs` 的 source-range 块级语义 helper，heading / setext heading / blockquote / list / task item / fenced code / HTML / table / thematic break 等非 paragraph blocks 的 marker、content、row、tagfilter 语义已用 tree-sitter baseline 对齐测试覆盖；第二十五轮验证 `cargo check -p markdown_wysiwyg --locked`、`cargo test -p markdown_wysiwyg --locked`、`cargo check -p updraft_editor --locked` 与 `git diff --check` 全部通过。
 
 ## Implementation
 
@@ -84,7 +85,7 @@
 - 第一步只改 `markdown_wysiwyg` 和 benchmark，不改 `md_editor` 消费接口。
 - 第二步让 pulldown 适配器和 tree-sitter baseline 在同一批 fixture 上完全对齐，再决定是否切默认 backend。
 - 第三步只有在 pulldown 端到端更快且语义全等时，才把它设成默认；comrak 保留为参考/正确性后端，不进入热路径。
-- 当前状态已完成第一步中的 benchmark 雏形，并在 `markdown_wysiwyg` 主体里建立 backend / structure / assembler 的最小边界；`MarkdownStructure` 已实际驱动 full/incremental block 输出、table 生成、full/incremental inline 与 projection 收集，block structure 构建、block 语义组装与 block 查询逻辑已回收到 `blocks.rs`，full/incremental inline、projection helper 与 inline 查询逻辑已回收到 `inline.rs`，projection 查询、range semantics 与 projection 查询索引 helper 已回收到 `projection.rs`，table wrapper 与 table 查询入口已回收到 `tables.rs`，source/range 通用 helper 已回收到 `source.rs`，粗结构载体已回收到 `structure.rs` 且不再持有完整 tree-sitter parse state，语义 assembler 已回收到 `assembler.rs`，tree-sitter backend 已回收到 `backend.rs`，pulldown 已作为非默认粗结构 backend 接入同一 assembler 边界，退役 dead-code 对照入口已清理；benchmark 已开始输出裸 parser、baseline 和候选 adapter+diff 三类数据，下一步是继续补齐 pulldown 粗结构映射与语义等价 fixture，并在 comrak 后端真正接线时再恢复对应依赖。
+- 当前状态已完成第一步中的 benchmark 雏形，并在 `markdown_wysiwyg` 主体里建立 backend / structure / assembler 的最小边界；`MarkdownStructure` 已实际驱动 full/incremental block 输出、table 生成、full/incremental inline 与 projection 收集，block structure 构建、block 语义组装与 block 查询逻辑已回收到 `blocks.rs`，full/incremental inline、projection helper 与 inline 查询逻辑已回收到 `inline.rs`，projection 查询、range semantics 与 projection 查询索引 helper 已回收到 `projection.rs`，table wrapper 与 table 查询入口已回收到 `tables.rs`，source/range 通用 helper 已回收到 `source.rs`，粗结构载体已回收到 `structure.rs` 且不再持有完整 tree-sitter parse state，语义 assembler 已回收到 `assembler.rs`，tree-sitter backend 已回收到 `backend.rs`，pulldown 已作为非默认粗结构 backend 接入同一 assembler 边界并开始复用块级 source-range 语义 helper，非 paragraph block 已有 tree-sitter 对齐测试，退役 dead-code 对照入口已清理；benchmark 已开始输出裸 parser、baseline 和候选 adapter+diff 三类数据，下一步是继续补齐 pulldown tight-list/list-in-blockquote paragraph synthesis、粗结构映射与语义等价 fixture，并在 comrak 后端真正接线时再恢复对应依赖。
 
 ## Assumptions
 
