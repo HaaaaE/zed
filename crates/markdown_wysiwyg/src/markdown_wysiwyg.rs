@@ -1426,6 +1426,17 @@ mod tests {
             "| --- | --- |\n",
             "| **a** | `b` |\n",
             "\n",
+            "edge left | edge center | edge right\n",
+            "--- | :---: | ---:\n",
+            "edge 1 | **edge 2** | edge 3\n",
+            "\n",
+            "| empty a |  | empty c |\n",
+            "| - | - | - |\n",
+            "|  | **empty b** |  |\n",
+            "\n",
+            "| broken a | broken b |\n",
+            "| not a delimiter |\n",
+            "\n",
             "<div class=\"note\">raw html</div>\n",
             "\n",
             "- [ ] task item\n",
@@ -1607,6 +1618,30 @@ mod tests {
                 "\n| extra | **c** |",
             ),
             (
+                source.find("edge center").unwrap()
+                    ..source.find("edge center").unwrap() + "edge center".len(),
+                "edge middle",
+            ),
+            (
+                source.find(":---:").unwrap()..source.find(":---:").unwrap() + ":---:".len(),
+                "---",
+            ),
+            (
+                source.find("|  | **empty b** |  |").unwrap() + 1
+                    ..source.find("|  | **empty b** |  |").unwrap() + 3,
+                " filled ",
+            ),
+            (
+                source.find("**empty b**").unwrap()
+                    ..source.find("**empty b**").unwrap() + "**empty b**".len(),
+                "**filled b**",
+            ),
+            (
+                source.find("not a delimiter").unwrap()
+                    ..source.find("not a delimiter").unwrap() + "not a delimiter".len(),
+                "--- | ---",
+            ),
+            (
                 source.find("`b`").unwrap() + 1..source.find("`b`").unwrap() + 2,
                 "code",
             ),
@@ -1703,6 +1738,17 @@ mod tests {
             "| --- | --- |\n",
             "| **a** | `b` |\n",
             "\n",
+            "edge left | edge center | edge right\n",
+            "--- | :---: | ---:\n",
+            "edge 1 | **edge 2** | edge 3\n",
+            "\n",
+            "| empty a |  | empty c |\n",
+            "| - | - | - |\n",
+            "|  | **empty b** |  |\n",
+            "\n",
+            "| broken a | broken b |\n",
+            "| not a delimiter |\n",
+            "\n",
             "- item\n",
         );
         let pulldown = PulldownMarkdownBackend::parse_syntax_tree(source);
@@ -1740,6 +1786,17 @@ mod tests {
             "| head | value |\n",
             "| --- | --- |\n",
             "| **a** | `b` |\n",
+            "\n",
+            "edge left | edge center | edge right\n",
+            "--- | :---: | ---:\n",
+            "edge 1 | **edge 2** | edge 3\n",
+            "\n",
+            "| empty a |  | empty c |\n",
+            "| - | - | - |\n",
+            "|  | **empty b** |  |\n",
+            "\n",
+            "| broken a | broken b |\n",
+            "| not a delimiter |\n",
             "\n",
             "- item\n",
         );
@@ -1861,6 +1918,30 @@ mod tests {
                 source.find("| **a** | `b` |").unwrap() + "| **a** | `b` |".len()
                     ..source.find("| **a** | `b` |").unwrap() + "| **a** | `b` |".len(),
                 "\n| extra | **c** |",
+            ),
+            (
+                source.find("edge center").unwrap()
+                    ..source.find("edge center").unwrap() + "edge center".len(),
+                "edge middle",
+            ),
+            (
+                source.find(":---:").unwrap()..source.find(":---:").unwrap() + ":---:".len(),
+                "---",
+            ),
+            (
+                source.find("|  | **empty b** |  |").unwrap() + 1
+                    ..source.find("|  | **empty b** |  |").unwrap() + 3,
+                " filled ",
+            ),
+            (
+                source.find("**empty b**").unwrap()
+                    ..source.find("**empty b**").unwrap() + "**empty b**".len(),
+                "**filled b**",
+            ),
+            (
+                source.find("not a delimiter").unwrap()
+                    ..source.find("not a delimiter").unwrap() + "not a delimiter".len(),
+                "--- | ---",
             ),
             (
                 source.find("`b`").unwrap() + 1..source.find("`b`").unwrap() + 2,
