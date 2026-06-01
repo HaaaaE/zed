@@ -1354,6 +1354,10 @@ mod tests {
         );
         let cases = [
             (
+                source.find("# Title").unwrap() + 1..source.find("# Title").unwrap() + 1,
+                "#",
+            ),
+            (
                 source.find("Title").unwrap() + "Title".len()
                     ..source.find("Title").unwrap() + "Title".len(),
                 "!",
@@ -1397,9 +1401,23 @@ mod tests {
                 "Quoted",
             ),
             (
+                source.find("> # Quote").unwrap() + 3..source.find("> # Quote").unwrap() + 3,
+                "#",
+            ),
+            (
                 source.find("let x").unwrap() + "let x".len()
                     ..source.find("let x").unwrap() + "let x".len(),
                 "mut ",
+            ),
+            (
+                source.find("| --- | --- |").unwrap() + 2
+                    ..source.find("| --- | --- |").unwrap() + 2,
+                ":",
+            ),
+            (
+                source.find("| --- | --- |").unwrap() + "| --- | ---".len()
+                    ..source.find("| --- | --- |").unwrap() + "| --- | ---".len(),
+                ":",
             ),
             (
                 source.find("`b`").unwrap() + 1..source.find("`b`").unwrap() + 2,
@@ -1413,6 +1431,10 @@ mod tests {
             (
                 source.find("task").unwrap()..source.find("task").unwrap() + "task".len(),
                 "todo",
+            ),
+            (
+                source.find("[ ]").unwrap() + 1..source.find("[ ]").unwrap() + 2,
+                "x",
             ),
         ];
 
