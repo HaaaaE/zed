@@ -1564,6 +1564,16 @@ mod tests {
                 "## ",
             ),
             (
+                source.find("Paragraph").unwrap() + "Paragraph".len()
+                    ..source.find("Paragraph").unwrap() + "Paragraph".len(),
+                concat!(
+                    "\n",
+                    "\n",
+                    "> inserted query quote\n",
+                    "> with **inline** content",
+                ),
+            ),
+            (
                 source.find("bold").unwrap()..source.find("bold").unwrap() + "bold".len(),
                 "strong",
             ),
@@ -1576,6 +1586,11 @@ mod tests {
                 "quoted text",
             ),
             (
+                source.find("> quoted").unwrap()
+                    ..source.find("> - [ ] task").unwrap(),
+                concat!("> replacement quote\n", "> with **inline** text\n"),
+            ),
+            (
                 source.find("> - [ ] task").unwrap() + 2
                     ..source.find("> - [ ] task").unwrap() + 3,
                 "1.",
@@ -1584,6 +1599,11 @@ mod tests {
                 source.find("| --- | --- |").unwrap() + 2
                     ..source.find("| --- | --- |").unwrap() + 3,
                 "x",
+            ),
+            (
+                source.find("| **a** | `b` |").unwrap() + "| **a** | `b` |".len()
+                    ..source.find("| **a** | `b` |").unwrap() + "| **a** | `b` |".len(),
+                "\n| extra | **c** |",
             ),
             (
                 source.find("`b`").unwrap() + 1..source.find("`b`").unwrap() + 2,
