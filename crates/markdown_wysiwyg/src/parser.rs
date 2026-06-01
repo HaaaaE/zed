@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, ops::Range};
 
 use tree_sitter::{Node, Parser, Range as TreeSitterRange, Tree};
 
@@ -7,20 +7,42 @@ use super::{
     record_timed_inline_parent_scan, record_timed_inline_parse, record_timed_inline_range_build,
     record_timed_inline_reuse_index,
 };
+
+thread_local! {
+    static BLOCK_PARSER: RefCell<Parser> = RefCell::new(markdown_block_parser());
+    static INLINE_PARSER: RefCell<Parser> = RefCell::new(markdown_inline_parser());
+}
+
+fn markdown_block_parser() -> Parser {
+    let mut parser = Parser::new();
+    let language = tree_sitter_md::LANGUAGE.into();
+    parser
+        .set_language(&language)
+        .expect("failed to load tree-sitter markdown block grammar");
+    parser
+}
+
+fn markdown_inline_parser() -> Parser {
+    let mut parser = Parser::new();
+    let language = tree_sitter_md::INLINE_LANGUAGE.into();
+    parser
+        .set_language(&language)
+        .expect("failed to load tree-sitter markdown inline grammar");
+    parser
+}
+
 pub(super) fn parse_markdown(
     source: &str,
     old_tree: Option<&MarkdownParseTree>,
-    changed_range: Option<&std::ops::Range<usize>>,
+    changed_range: Option<&Range<usize>>,
 ) -> MarkdownParseTree {
     let block_tree = record_timed_block_parse(|| {
-        let mut block_parser = Parser::new();
-        let block_language = tree_sitter_md::LANGUAGE.into();
-        block_parser
-            .set_language(&block_language)
-            .expect("failed to load tree-sitter markdown block grammar");
-        block_parser
-            .parse(source, old_tree.map(|tree| &tree.block_tree))
-            .expect("tree-sitter markdown block parser was cancelled")
+        BLOCK_PARSER.with(|parser| {
+            parser
+                .borrow_mut()
+                .parse(source, old_tree.map(|tree| &tree.block_tree))
+                .expect("tree-sitter markdown block parser was cancelled")
+        })
     });
 
     let (inline_trees, inline_tree_by_parent_id) =
@@ -37,17 +59,28 @@ fn parse_inline_trees(
     source: &str,
     block_tree: &Tree,
     old_tree: Option<&MarkdownParseTree>,
-    changed_range: Option<&std::ops::Range<usize>>,
+    changed_range: Option<&Range<usize>>,
 ) -> (Vec<MarkdownInlineTree>, HashMap<usize, usize>) {
-    let mut inline_parser = Parser::new();
-    let inline_language = tree_sitter_md::INLINE_LANGUAGE.into();
-    inline_parser
-        .set_language(&inline_language)
-        .expect("failed to load tree-sitter markdown inline grammar");
-
+    let dirty_ranges = inline_dirty_ranges(block_tree, old_tree, changed_range);
     let mut inline_trees = Vec::new();
-    let mut inline_tree_by_parent_id = HashMap::new();
-    let inline_parent_nodes = record_timed_inline_parent_scan(|| inline_parent_nodes(block_tree));
+
+    if let (Some(old_tree), Some(dirty_ranges)) = (old_tree, dirty_ranges.as_deref()) {
+        inline_trees.extend(
+            old_tree
+                .inline_trees()
+                .iter()
+                .filter(|inline_tree| !ranges_touch_any(&inline_tree.parent_range, dirty_ranges))
+                .cloned(),
+        );
+    }
+
+    let inline_parent_nodes = record_timed_inline_parent_scan(|| {
+        if let Some(dirty_ranges) = dirty_ranges.as_deref() {
+            inline_parent_nodes_touching_ranges(block_tree, dirty_ranges)
+        } else {
+            inline_parent_nodes(block_tree)
+        }
+    });
     let old_inline_tree_by_parent_range = record_timed_inline_reuse_index(|| {
         old_tree.map(|tree| {
             tree.inline_trees()
@@ -63,65 +96,120 @@ fn parse_inline_trees(
         })
     });
 
-    for parent_node in inline_parent_nodes {
-        if let Some(inline_tree) = reusable_inline_tree(
-            old_tree,
-            old_inline_tree_by_parent_range.as_ref(),
-            parent_node,
-            changed_range,
-        ) {
-            inline_tree_by_parent_id.insert(parent_node.id(), inline_trees.len());
-            inline_trees.push(inline_tree.clone());
-            continue;
-        }
+    INLINE_PARSER.with(|parser| {
+        let mut inline_parser = parser.borrow_mut();
+        for parent_node in inline_parent_nodes {
+            if let Some(inline_tree) = reusable_inline_tree(
+                old_tree,
+                old_inline_tree_by_parent_range.as_ref(),
+                parent_node,
+                dirty_ranges.as_deref(),
+            ) {
+                inline_trees.push(inline_tree.clone());
+                continue;
+            }
 
-        let ranges = record_timed_inline_range_build(|| inline_included_ranges(parent_node));
-        if ranges
-            .iter()
-            .all(|range| range.start_byte == range.end_byte)
-        {
-            continue;
-        }
+            let ranges = record_timed_inline_range_build(|| inline_included_ranges(parent_node));
+            if ranges
+                .iter()
+                .all(|range| range.start_byte == range.end_byte)
+            {
+                continue;
+            }
 
-        let inline_tree = record_timed_inline_parse(|| {
-            inline_parser
-                .set_included_ranges(&ranges)
-                .expect("failed to set markdown inline parse ranges");
-            inline_parser
-                .parse(
-                    source,
-                    old_inline_tree_for_parent(
-                        old_tree,
-                        old_inline_tree_by_parent_range.as_ref(),
-                        parent_node,
+            let inline_tree = record_timed_inline_parse(|| {
+                inline_parser
+                    .set_included_ranges(&ranges)
+                    .expect("failed to set markdown inline parse ranges");
+                inline_parser
+                    .parse(
+                        source,
+                        old_inline_tree_for_parent(
+                            old_tree,
+                            old_inline_tree_by_parent_range.as_ref(),
+                            parent_node,
+                        )
+                        .map(|tree| &tree.tree),
                     )
-                    .map(|tree| &tree.tree),
-                )
-                .expect("tree-sitter markdown inline parser was cancelled")
-        });
-        inline_tree_by_parent_id.insert(parent_node.id(), inline_trees.len());
-        inline_trees.push(MarkdownInlineTree {
-            parent_id: parent_node.id(),
-            parent_range: parent_node.byte_range(),
-            tree: inline_tree,
-        });
-    }
+                    .expect("tree-sitter markdown inline parser was cancelled")
+            });
+            inline_trees.push(MarkdownInlineTree {
+                parent_id: parent_node.id(),
+                parent_range: parent_node.byte_range(),
+                tree: inline_tree,
+            });
+        }
+    });
+
+    inline_trees.sort_by_key(|inline_tree| {
+        (
+            inline_tree.parent_range.start,
+            inline_tree.parent_range.end,
+            inline_tree.parent_id,
+        )
+    });
+    inline_trees.dedup_by_key(|inline_tree| {
+        (
+            inline_tree.parent_range.start,
+            inline_tree.parent_range.end,
+            inline_tree.parent_id,
+        )
+    });
+    let inline_tree_by_parent_id = inline_trees
+        .iter()
+        .enumerate()
+        .map(|(index, inline_tree)| (inline_tree.parent_id, index))
+        .collect();
 
     (inline_trees, inline_tree_by_parent_id)
+}
+
+fn inline_dirty_ranges(
+    block_tree: &Tree,
+    old_tree: Option<&MarkdownParseTree>,
+    changed_range: Option<&Range<usize>>,
+) -> Option<Vec<Range<usize>>> {
+    let old_tree = old_tree?;
+    let mut dirty_ranges = Vec::new();
+    if let Some(changed_range) = changed_range {
+        dirty_ranges.push(changed_range.clone());
+    }
+    dirty_ranges.extend(
+        old_tree
+            .block_tree
+            .changed_ranges(block_tree)
+            .map(|range| range.start_byte..range.end_byte),
+    );
+    Some(merge_ranges(dirty_ranges))
+}
+
+fn merge_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
+    ranges.sort_by_key(|range| (range.start, range.end));
+    let mut merged: Vec<Range<usize>> = Vec::new();
+    for range in ranges {
+        if let Some(previous) = merged.last_mut()
+            && range.start <= previous.end
+        {
+            previous.end = previous.end.max(range.end);
+            continue;
+        }
+        merged.push(range);
+    }
+    merged
 }
 
 fn reusable_inline_tree<'a>(
     old_tree: Option<&'a MarkdownParseTree>,
     old_inline_tree_by_parent_range: Option<&HashMap<(usize, usize), usize>>,
     parent_node: Node<'_>,
-    changed_range: Option<&std::ops::Range<usize>>,
+    dirty_ranges: Option<&[Range<usize>]>,
 ) -> Option<&'a MarkdownInlineTree> {
     let inline_tree =
         old_inline_tree_for_parent(old_tree, old_inline_tree_by_parent_range, parent_node)?;
     if inline_tree.parent_range != parent_node.byte_range() {
         return None;
     }
-    if changed_range.is_some_and(|range| ranges_touch(&inline_tree.parent_range, range)) {
+    if dirty_ranges.is_some_and(|ranges| ranges_touch_any(&inline_tree.parent_range, ranges)) {
         return None;
     }
     Some(inline_tree)
@@ -148,14 +236,52 @@ fn old_inline_tree_for_parent<'a>(
         .and_then(|index| old_tree.inline_trees.get(*index))
 }
 
-fn ranges_touch(left: &std::ops::Range<usize>, right: &std::ops::Range<usize>) -> bool {
+fn ranges_touch(left: &Range<usize>, right: &Range<usize>) -> bool {
     left.start <= right.end && right.start <= left.end
+}
+
+fn ranges_touch_any(range: &Range<usize>, dirty_ranges: &[Range<usize>]) -> bool {
+    dirty_ranges
+        .iter()
+        .any(|dirty_range| ranges_touch(range, dirty_range))
 }
 
 fn inline_parent_nodes(block_tree: &Tree) -> Vec<Node<'_>> {
     let mut nodes = Vec::new();
     collect_inline_parent_nodes(block_tree.root_node(), &mut nodes);
     nodes
+}
+
+fn inline_parent_nodes_touching_ranges<'tree>(
+    block_tree: &'tree Tree,
+    dirty_ranges: &[Range<usize>],
+) -> Vec<Node<'tree>> {
+    let mut nodes = Vec::new();
+    for dirty_range in dirty_ranges {
+        collect_inline_parent_nodes_touching_range(block_tree.root_node(), dirty_range, &mut nodes);
+    }
+    nodes.sort_by_key(|node| (node.start_byte(), node.end_byte(), node.id()));
+    nodes.dedup_by_key(|node| (node.start_byte(), node.end_byte(), node.id()));
+    nodes
+}
+
+fn collect_inline_parent_nodes_touching_range<'tree>(
+    node: Node<'tree>,
+    dirty_range: &Range<usize>,
+    nodes: &mut Vec<Node<'tree>>,
+) {
+    if !ranges_touch(&node.byte_range(), dirty_range) {
+        return;
+    }
+    if matches!(node.kind(), "inline" | "pipe_table_cell") {
+        nodes.push(node);
+        return;
+    }
+
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_inline_parent_nodes_touching_range(child, dirty_range, nodes);
+    }
 }
 
 fn collect_inline_parent_nodes<'tree>(node: Node<'tree>, nodes: &mut Vec<Node<'tree>>) {
