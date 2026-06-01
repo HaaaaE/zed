@@ -312,6 +312,17 @@ Hard break source-row"#,
 | source-row | 123 | **bold cell** and `code` |
 | another | 456 | [cell link](https://example.com) |
 
+edge left | edge center | edge right
+--- | :---: | ---:
+edge 1 | **edge 2** | edge 3
+
+| empty a |  | empty c |
+| - | - | - |
+|  | **empty b** |  |
+
+| broken a | broken b |
+| not a delimiter |
+
 ```rust
 fn source_row() {
     println!("source-row");
