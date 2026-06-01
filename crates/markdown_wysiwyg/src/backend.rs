@@ -332,9 +332,12 @@ fn pulldown_inline_parent_ranges(
         .filter_map(|block| match block.kind {
             MarkdownBlockKind::Paragraph
             | MarkdownBlockKind::AtxHeading { .. }
-            | MarkdownBlockKind::SetextHeading { .. } => Some(block.content_range.clone()),
+            | MarkdownBlockKind::SetextHeading { .. } => {
+                Some(pulldown_inline_parent_range(source, block.content_range.clone()))
+            }
             _ => None,
         })
+        .filter(|range| !range.is_empty())
         .collect::<Vec<_>>();
     ranges.extend(table_cell_content_ranges_for_blocks(
         source,
@@ -344,6 +347,61 @@ fn pulldown_inline_parent_ranges(
     ranges.sort_by_key(|range| (range.start, range.end));
     ranges.dedup();
     ranges
+}
+
+#[cfg(any(test, perf_enabled))]
+fn pulldown_inline_parent_range(source: &str, mut range: Range<usize>) -> Range<usize> {
+    loop {
+        let trimmed = trim_line_end(source, range.clone());
+        let Some(last_line) = last_line_before_range_end(source, range.start..trimmed.end) else {
+            return trimmed;
+        };
+        if last_line.start == range.start
+            || !line_is_blockquote_marker_only(source, last_line.clone())
+        {
+            return trimmed;
+        }
+
+        range.end = last_line.start;
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn last_line_before_range_end(source: &str, range: Range<usize>) -> Option<Range<usize>> {
+    if range.is_empty() {
+        return None;
+    }
+
+    let start = source[range.start..range.end]
+        .rfind('\n')
+        .map_or(range.start, |offset| range.start + offset + 1);
+    Some(start..range.end)
+}
+
+#[cfg(any(test, perf_enabled))]
+fn line_is_blockquote_marker_only(source: &str, range: Range<usize>) -> bool {
+    let bytes = source.as_bytes();
+    let mut cursor = range.start;
+    let mut saw_marker = false;
+
+    loop {
+        let mut leading_spaces = 0;
+        while cursor < range.end && bytes[cursor] == b' ' && leading_spaces < 4 {
+            cursor += 1;
+            leading_spaces += 1;
+        }
+
+        if cursor < range.end && bytes[cursor] == b'>' {
+            saw_marker = true;
+            cursor += 1;
+            if cursor < range.end && bytes[cursor] == b' ' {
+                cursor += 1;
+            }
+            continue;
+        }
+
+        return saw_marker && source[cursor..range.end].trim().is_empty();
+    }
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -385,7 +443,7 @@ fn pulldown_structure_block_from_start_tag(
             source,
             line_starts,
             id,
-            range,
+            pulldown_html_block_range(source, range),
         )),
         Tag::List(_) => Some(structure_list_block_from_range(
             source,
@@ -429,6 +487,57 @@ fn pulldown_fenced_code_block_range(source: &str, mut range: Range<usize>) -> Ra
         range.end += 1;
     }
     range
+}
+
+#[cfg(any(test, perf_enabled))]
+fn pulldown_html_block_range(source: &str, mut range: Range<usize>) -> Range<usize> {
+    if html_block_is_blank_line_terminated(source, range.clone())
+        && source.as_bytes().get(range.end).copied() == Some(b'\n')
+    {
+        range.end += 1;
+    }
+    range
+}
+
+#[cfg(any(test, perf_enabled))]
+fn html_block_is_blank_line_terminated(source: &str, range: Range<usize>) -> bool {
+    let first_line_end = source[range.clone()]
+        .find('\n')
+        .map_or(range.end, |offset| range.start + offset);
+    let first_line = source[trim_line_end(source, range.start..first_line_end)]
+        .trim_start_matches([' ', '\t'])
+        .to_ascii_lowercase();
+
+    !html_block_has_explicit_end_condition(&first_line)
+}
+
+#[cfg(any(test, perf_enabled))]
+fn html_block_has_explicit_end_condition(first_line: &str) -> bool {
+    html_start_tag_name_is(first_line, "script")
+        || html_start_tag_name_is(first_line, "pre")
+        || html_start_tag_name_is(first_line, "style")
+        || first_line.starts_with("<!--")
+        || first_line.starts_with("<?")
+        || first_line.starts_with("<![cdata[")
+        || first_line
+            .as_bytes()
+            .get(2)
+            .is_some_and(|byte| first_line.starts_with("<!") && byte.is_ascii_uppercase())
+}
+
+#[cfg(any(test, perf_enabled))]
+fn html_start_tag_name_is(line: &str, tag_name: &str) -> bool {
+    let Some(rest) = line.strip_prefix('<') else {
+        return false;
+    };
+    let Some(after_tag) = rest.strip_prefix(tag_name) else {
+        return false;
+    };
+
+    matches!(
+        after_tag.as_bytes().first(),
+        None | Some(b' ' | b'\t' | b'>' | b'/')
+    )
 }
 
 #[cfg(any(test, perf_enabled))]

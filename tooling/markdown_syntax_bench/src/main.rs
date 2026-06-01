@@ -571,6 +571,49 @@ impl SyntaxDiffSummary {
             self.projection_marker_dependencies
         );
     }
+
+    fn print_first_mismatches(
+        &self,
+        left: &BenchmarkSyntaxData,
+        right: &BenchmarkSyntaxData,
+    ) {
+        print_first_mismatch("line_starts", self.line_starts, &left.line_starts, &right.line_starts);
+        print_first_mismatch("blocks", self.blocks, &left.blocks, &right.blocks);
+        print_first_mismatch("tables", self.tables, &left.tables, &right.tables);
+        print_first_mismatch(
+            "inline_spans",
+            self.inline_spans,
+            &left.inline_spans,
+            &right.inline_spans,
+        );
+        print_first_mismatch(
+            "projection_replacements",
+            self.projection_replacements,
+            &left.projection_replacements,
+            &right.projection_replacements,
+        );
+        print_first_mismatch(
+            "projection_marker_dependencies",
+            self.projection_marker_dependencies,
+            &left.projection_marker_dependencies,
+            &right.projection_marker_dependencies,
+        );
+    }
+}
+
+fn print_first_mismatch<T: std::fmt::Debug>(
+    name: &str,
+    diff: SequenceDiff,
+    left: &[T],
+    right: &[T],
+) {
+    let Some(index) = diff.first_mismatch_index else {
+        return;
+    };
+
+    println!("  {name}_first_mismatch[{index}]:");
+    println!("    baseline={:?}", left.get(index));
+    println!("    candidate={:?}", right.get(index));
 }
 
 fn main() {
@@ -582,8 +625,9 @@ fn main() {
         markdown_wysiwyg::MarkdownSyntaxTree::parse(&source).syntax_data(),
     );
     let initial_pulldown_assembly = pulldown_adapter_syntax_data(&source);
-    SyntaxDiffSummary::compare(&production_baseline, &initial_pulldown_assembly.data)
-        .print("pulldown_structure_semantics_diff");
+    let initial_diff = SyntaxDiffSummary::compare(&production_baseline, &initial_pulldown_assembly.data);
+    initial_diff.print("pulldown_structure_semantics_diff");
+    initial_diff.print_first_mismatches(&production_baseline, &initial_pulldown_assembly.data);
 
     measure("pulldown_cmark_parse_events", iterations, || {
         pulldown_parser_checksum(black_box(&source))
