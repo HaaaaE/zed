@@ -1328,6 +1328,65 @@ mod tests {
     }
 
     #[test]
+    fn pulldown_backend_matches_tree_sitter_table_boundary_semantics() {
+        let cases = [
+            concat!(
+                "left | center | right\n",
+                "--- | :---: | ---:\n",
+                "1 | **2** | 3\n",
+            ),
+            concat!(
+                "| a |  | c |\n",
+                "| - | - | - |\n",
+                "|  | **b** |  |\n",
+            ),
+            concat!(
+                "| a | b |\n",
+                "| not a delimiter |\n",
+            ),
+        ];
+
+        for source in cases {
+            let tree_sitter = MarkdownSyntaxTree::parse(source);
+            let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
+
+            assert_eq!(
+                pulldown
+                    .blocks()
+                    .iter()
+                    .map(block_semantics_without_id)
+                    .collect::<Vec<_>>(),
+                tree_sitter
+                    .blocks()
+                    .iter()
+                    .map(block_semantics_without_id)
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                pulldown
+                    .tables()
+                    .iter()
+                    .map(table_semantics_without_id)
+                    .collect::<Vec<_>>(),
+                tree_sitter
+                    .tables()
+                    .iter()
+                    .map(table_semantics_without_id)
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(pulldown.inline_spans(), tree_sitter.inline_spans());
+            assert_eq!(
+                pulldown.projection_replacements(),
+                tree_sitter.syntax_data().projection_replacements()
+            );
+            assert_eq!(
+                pulldown.projection_marker_dependencies(),
+                tree_sitter.syntax_data().projection_marker_dependencies()
+            );
+        }
+    }
+
+    #[test]
     fn pulldown_incremental_matches_pulldown_full_after_local_edits() {
         let source = concat!(
             "# Title\n",
