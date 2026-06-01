@@ -745,6 +745,24 @@ mod tests {
             .collect()
     }
 
+    fn table_source_ranges(table: &MarkdownTable) -> Vec<Range<usize>> {
+        let mut ranges = vec![table.source_range.clone()];
+        for row in std::iter::once(&table.header)
+            .chain(std::iter::once(&table.delimiter))
+            .chain(table.body.iter())
+        {
+            ranges.push(row.source_range.clone());
+            for cell in &row.cells {
+                ranges.push(cell.source_range.clone());
+                ranges.push(cell.content_range.clone());
+            }
+        }
+        ranges
+            .into_iter()
+            .filter(|range| range.start < range.end)
+            .collect()
+    }
+
     fn assert_query_semantics_match_tree_sitter(source: &str, candidate: &MarkdownSyntaxTree) {
         let tree_sitter = MarkdownSyntaxTree::parse(source);
         let visible_source_range =
@@ -797,6 +815,16 @@ mod tests {
                 .table_for_source_range(visible_source_range.clone())
                 .map(table_semantics_without_id)
         );
+        for table_range in tree_sitter.tables().iter().flat_map(table_source_ranges) {
+            assert_eq!(
+                candidate
+                    .table_for_source_range(table_range.clone())
+                    .map(table_semantics_without_id),
+                tree_sitter
+                    .table_for_source_range(table_range)
+                    .map(table_semantics_without_id)
+            );
+        }
         for table_row in tree_sitter.tables().iter().flat_map(table_rows) {
             assert_eq!(
                 candidate
