@@ -832,6 +832,18 @@ mod tests {
             )
         );
         assert_eq!(
+            candidate.projection_for_source_range_with_inactive_ranges(
+                visible_source_range.clone(),
+                Some(active_source_range.clone()),
+                &inactive_source_ranges,
+            ),
+            tree_sitter.projection_for_source_range_with_inactive_ranges(
+                visible_source_range.clone(),
+                Some(active_source_range.clone()),
+                &inactive_source_ranges,
+            )
+        );
+        assert_eq!(
             candidate.active_projection_source_ranges_for_source_range(
                 visible_source_range.clone(),
                 Some(active_source_range.clone()),
