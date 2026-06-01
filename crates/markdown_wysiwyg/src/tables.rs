@@ -1,11 +1,25 @@
 use std::ops::Range;
 
 use super::{
-    MarkdownBlock, MarkdownTable, MarkdownTableAlignment, MarkdownTableCell, MarkdownTableRow,
-    line_range_checked, trim_ascii_whitespace, trim_line_end,
+    MarkdownBlock, MarkdownBlockKind, MarkdownStructure, MarkdownTable, MarkdownTableAlignment,
+    MarkdownTableCell, MarkdownTableRow, line_range_checked, trim_ascii_whitespace, trim_line_end,
 };
 
-pub(super) fn table_from_block(
+pub(super) fn collect_structure_tables(
+    source: &str,
+    line_starts: &[usize],
+    structure: &MarkdownStructure,
+) -> Vec<MarkdownTable> {
+    structure
+        .blocks()
+        .iter()
+        .filter(|block| block.kind == MarkdownBlockKind::PipeTable)
+        .map(MarkdownBlock::from_structure)
+        .filter_map(|block| table_from_block(source, line_starts, &block))
+        .collect()
+}
+
+fn table_from_block(
     source: &str,
     line_starts: &[usize],
     block: &MarkdownBlock,

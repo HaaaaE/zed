@@ -12,12 +12,13 @@ mod tables;
 
 use inline::{
     collect_inline_spans_for_inline_tree, collect_projection_replacements_for_blocks,
-    collect_projection_replacements_for_inline_tree, inline_span_prefix_maximum_ends,
+    collect_projection_replacements_for_inline_tree, collect_structure_inline_spans,
+    collect_structure_projection_replacements, inline_span_prefix_maximum_ends,
     projection_marker_dependencies, projection_marker_prefix_maximum_ends,
     projection_replacement_prefix_maximum_ends,
 };
 use parser::parse_markdown;
-use tables::table_from_block;
+use tables::collect_structure_tables;
 
 #[cfg(any(test, perf_enabled))]
 thread_local! {
@@ -470,55 +471,6 @@ impl MarkdownBlock {
             tagfilter_disallowed: block.tagfilter_disallowed,
         }
     }
-}
-
-fn collect_structure_tables(
-    source: &str,
-    line_starts: &[usize],
-    structure: &MarkdownStructure,
-) -> Vec<MarkdownTable> {
-    structure
-        .blocks()
-        .iter()
-        .filter(|block| block.kind == MarkdownBlockKind::PipeTable)
-        .map(MarkdownBlock::from_structure)
-        .filter_map(|block| table_from_block(source, line_starts, &block))
-        .collect()
-}
-
-fn collect_structure_inline_spans(
-    source: &str,
-    structure: &MarkdownStructure,
-) -> Vec<MarkdownInlineSpan> {
-    let mut spans = Vec::new();
-    for inline_tree in structure.inline_trees() {
-        spans.extend(collect_inline_spans_for_inline_tree(source, inline_tree));
-    }
-    spans.sort_by_key(|span| (span.source_range.start, span.source_range.end));
-    spans
-}
-
-fn collect_structure_projection_replacements(
-    source: &str,
-    structure: &MarkdownStructure,
-    blocks: &[MarkdownBlock],
-) -> Vec<MarkdownProjectionReplacement> {
-    let mut replacements = collect_projection_replacements_for_blocks(source, blocks);
-    for inline_tree in structure.inline_trees() {
-        replacements.extend(collect_projection_replacements_for_inline_tree(
-            source,
-            inline_tree,
-        ));
-    }
-    replacements.sort_by_key(|replacement| {
-        (
-            replacement.source_range.start,
-            replacement.source_range.end,
-            replacement.owner_source_range.start,
-            replacement.owner_source_range.end,
-        )
-    });
-    replacements
 }
 
 fn add_blank_structure_blocks(
