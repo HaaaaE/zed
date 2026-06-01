@@ -1363,6 +1363,15 @@ mod tests {
                 "!",
             ),
             (
+                source.find("alpha").unwrap()..source.find("alpha").unwrap(),
+                concat!(
+                    "inserted paragraph with **inline**\n",
+                    "\n",
+                    "> inserted quote\n",
+                    "\n",
+                ),
+            ),
+            (
                 source.find("bold").unwrap()..source.find("bold").unwrap() + "bold".len(),
                 "strong",
             ),
@@ -1401,6 +1410,11 @@ mod tests {
                 "still ",
             ),
             (
+                source.find("hard break").unwrap()
+                    ..source.find("\n\n> # Quote").unwrap(),
+                "",
+            ),
+            (
                 source.find("Quote").unwrap()..source.find("Quote").unwrap() + "Quote".len(),
                 "Quoted",
             ),
@@ -1412,6 +1426,11 @@ mod tests {
                 source.find("let x").unwrap() + "let x".len()
                     ..source.find("let x").unwrap() + "let x".len(),
                 "mut ",
+            ),
+            (
+                source.find("> ```rust").unwrap()
+                    ..source.find("> ```\n\n| head").unwrap() + "> ```\n".len(),
+                concat!("> replacement paragraph\n", "> with **inline** content\n"),
             ),
             (
                 source.find("| --- | --- |").unwrap() + 2
@@ -1427,6 +1446,11 @@ mod tests {
                 source.find("| --- | --- |").unwrap() + 2
                     ..source.find("| --- | --- |").unwrap() + 3,
                 "x",
+            ),
+            (
+                source.find("| **a** | `b` |").unwrap() + "| **a** | `b` |".len()
+                    ..source.find("| **a** | `b` |").unwrap() + "| **a** | `b` |".len(),
+                "\n| extra | **c** |",
             ),
             (
                 source.find("`b`").unwrap() + 1..source.find("`b`").unwrap() + 2,
