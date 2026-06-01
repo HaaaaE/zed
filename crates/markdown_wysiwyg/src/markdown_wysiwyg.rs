@@ -312,10 +312,6 @@ impl MarkdownStructure {
         structure
     }
 
-    fn parse_tree(&self) -> &MarkdownParseTree {
-        &self.parser_state
-    }
-
     fn inline_trees(&self) -> &[MarkdownInlineTree] {
         self.parser_state.inline_trees()
     }
@@ -857,7 +853,6 @@ impl MarkdownSemanticsAssembler {
         old_range: &Range<usize>,
         new_range: &Range<usize>,
     ) -> MarkdownSyntaxData {
-        let parser_state = structure.parse_tree();
         validate_structure_blocks(structure.blocks());
         let line_starts = record_timed_line_start_collect(|| line_starts(source));
         let blocks = record_timed_block_collect(|| {
@@ -867,7 +862,7 @@ impl MarkdownSemanticsAssembler {
             collect_structure_tables(source, &line_starts, structure)
         });
         let inline_spans = record_timed_inline_collect(|| {
-            collect_incremental_inline_spans(source, previous, parser_state, old_range, new_range)
+            collect_incremental_inline_spans(source, previous, structure, old_range, new_range)
         });
         let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
         let (
@@ -877,12 +872,7 @@ impl MarkdownSemanticsAssembler {
             projection_marker_prefix_maximum_ends,
         ) = record_timed_projection_collect(|| {
             let projection_replacements = collect_incremental_projection_replacements(
-                source,
-                previous,
-                parser_state,
-                &blocks,
-                old_range,
-                new_range,
+                source, previous, structure, &blocks, old_range, new_range,
             );
             let projection_replacement_prefix_maximum_ends =
                 projection_replacement_prefix_maximum_ends(&projection_replacements);
@@ -2228,7 +2218,7 @@ fn shift_projection_marker_dependency_after_edit(
 fn collect_incremental_inline_spans(
     source: &str,
     previous: &MarkdownSyntaxTree,
-    tree: &MarkdownParseTree,
+    structure: &MarkdownStructure,
     old_range: &Range<usize>,
     new_range: &Range<usize>,
 ) -> Vec<MarkdownInlineSpan> {
@@ -2239,7 +2229,7 @@ fn collect_incremental_inline_spans(
         .iter()
         .map(|inline_tree| (inline_tree.parent_range.clone(), ()))
         .collect::<HashMap<_, _>>();
-    for inline_tree in tree.inline_trees() {
+    for inline_tree in structure.inline_trees() {
         let new_parent_range = &inline_tree.parent_range;
         if ranges_touch(new_parent_range, new_range) {
             spans.extend(collect_inline_spans_for_inline_tree(source, inline_tree));
@@ -2282,7 +2272,7 @@ fn collect_incremental_inline_spans(
 fn collect_incremental_projection_replacements(
     source: &str,
     previous: &MarkdownSyntaxTree,
-    tree: &MarkdownParseTree,
+    structure: &MarkdownStructure,
     blocks: &[MarkdownBlock],
     old_range: &Range<usize>,
     new_range: &Range<usize>,
@@ -2294,7 +2284,7 @@ fn collect_incremental_projection_replacements(
         .iter()
         .map(|inline_tree| (inline_tree.parent_range.clone(), ()))
         .collect::<HashMap<_, _>>();
-    for inline_tree in tree.inline_trees() {
+    for inline_tree in structure.inline_trees() {
         let new_parent_range = &inline_tree.parent_range;
         if ranges_touch(new_parent_range, new_range) {
             replacements.extend(collect_projection_replacements_for_inline_tree(
