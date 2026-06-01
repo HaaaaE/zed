@@ -738,6 +738,13 @@ mod tests {
             .count()
     }
 
+    fn table_rows(table: &MarkdownTable) -> Vec<usize> {
+        std::iter::once(table.header.row)
+            .chain(std::iter::once(table.delimiter.row))
+            .chain(table.body.iter().map(|row| row.row))
+            .collect()
+    }
+
     fn assert_query_semantics_match_tree_sitter(source: &str, candidate: &MarkdownSyntaxTree) {
         let tree_sitter = MarkdownSyntaxTree::parse(source);
         let visible_source_range =
@@ -749,7 +756,6 @@ mod tests {
         let active_source_range = active_start..active_start + 1;
         let inactive_start = source.find("task").unwrap();
         let inactive_source_ranges = [inactive_start..inactive_start + "task".len()];
-        let table_row = row_for_source_substring(source, "| **a**");
         let visible_row_range = row_for_source_substring(source, "Paragraph")
             ..row_for_source_substring(source, "- item");
 
@@ -785,28 +791,30 @@ mod tests {
         );
         assert_eq!(
             candidate
-                .table_for_source_row(table_row)
-                .map(table_semantics_without_id),
-            tree_sitter
-                .table_for_source_row(table_row)
-                .map(table_semantics_without_id)
-        );
-        assert_eq!(
-            candidate
                 .table_for_source_range(visible_source_range.clone())
                 .map(table_semantics_without_id),
             tree_sitter
                 .table_for_source_range(visible_source_range.clone())
                 .map(table_semantics_without_id)
         );
-        assert_eq!(
-            candidate
-                .table_row_for_source_row(table_row)
-                .map(|(_, row)| row.clone()),
-            tree_sitter
-                .table_row_for_source_row(table_row)
-                .map(|(_, row)| row.clone())
-        );
+        for table_row in tree_sitter.tables().iter().flat_map(table_rows) {
+            assert_eq!(
+                candidate
+                    .table_for_source_row(table_row)
+                    .map(table_semantics_without_id),
+                tree_sitter
+                    .table_for_source_row(table_row)
+                    .map(table_semantics_without_id)
+            );
+            assert_eq!(
+                candidate
+                    .table_row_for_source_row(table_row)
+                    .map(|(_, row)| row.clone()),
+                tree_sitter
+                    .table_row_for_source_row(table_row)
+                    .map(|(_, row)| row.clone())
+            );
+        }
         assert_eq!(
             candidate.source_range_for_rows(visible_row_range.clone()),
             tree_sitter.source_range_for_rows(visible_row_range.clone())
