@@ -669,37 +669,6 @@ impl MarkdownSyntaxTree {
         self.data.source_len
     }
 
-    pub fn blocks(&self) -> &[MarkdownBlock] {
-        &self.data.blocks
-    }
-
-    pub fn inline_spans(&self) -> &[MarkdownInlineSpan] {
-        &self.data.inline_spans
-    }
-
-    pub fn inline_spans_in_source_range(
-        &self,
-        range: Range<usize>,
-    ) -> impl Iterator<Item = &MarkdownInlineSpan> {
-        let start = range.start;
-        let end = range.end;
-        let start_index = self.partition_inline_spans_by_prefix_end(start);
-        self.data.inline_spans[start_index..]
-            .iter()
-            .take_while(move |span| span.source_range.start < end)
-            .filter(move |span| span.source_range.start < end && span.source_range.end > start)
-    }
-
-    pub fn blocks_in_source_range(
-        &self,
-        range: Range<usize>,
-    ) -> impl Iterator<Item = &MarkdownBlock> {
-        let start = self.partition_blocks_by_end(range.start);
-        self.data.blocks[start..]
-            .iter()
-            .take_while(move |block| block.source_range.start < range.end)
-    }
-
     pub fn source_range_for_rows(&self, rows: Range<usize>) -> Range<usize> {
         let start = self
             .data

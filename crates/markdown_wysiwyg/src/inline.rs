@@ -9,6 +9,25 @@ use super::{
     ranges_touch, shift_clean_old_range_to_new,
 };
 
+impl MarkdownSyntaxTree {
+    pub fn inline_spans(&self) -> &[MarkdownInlineSpan] {
+        &self.data.inline_spans
+    }
+
+    pub fn inline_spans_in_source_range(
+        &self,
+        range: Range<usize>,
+    ) -> impl Iterator<Item = &MarkdownInlineSpan> {
+        let start = range.start;
+        let end = range.end;
+        let start_index = self.partition_inline_spans_by_prefix_end(start);
+        self.data.inline_spans[start_index..]
+            .iter()
+            .take_while(move |span| span.source_range.start < end)
+            .filter(move |span| span.source_range.start < end && span.source_range.end > start)
+    }
+}
+
 pub(super) fn collect_structure_inline_spans(
     source: &str,
     structure: &MarkdownStructure,

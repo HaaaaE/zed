@@ -4,9 +4,25 @@ use tree_sitter::Node;
 
 use super::{
     MarkdownBlock, MarkdownBlockKind, MarkdownNodeId, MarkdownStructure, MarkdownStructureBlock,
-    inline::raw_html_tagfilter_disallowed, last_line_range, line_range, node_id,
-    trim_ascii_whitespace, trim_line_end,
+    MarkdownSyntaxTree, inline::raw_html_tagfilter_disallowed, last_line_range, line_range,
+    node_id, trim_ascii_whitespace, trim_line_end,
 };
+
+impl MarkdownSyntaxTree {
+    pub fn blocks(&self) -> &[MarkdownBlock] {
+        &self.data.blocks
+    }
+
+    pub fn blocks_in_source_range(
+        &self,
+        range: Range<usize>,
+    ) -> impl Iterator<Item = &MarkdownBlock> {
+        let start = self.partition_blocks_by_end(range.start);
+        self.data.blocks[start..]
+            .iter()
+            .take_while(move |block| block.source_range.start < range.end)
+    }
+}
 
 pub(super) fn collect_structure_blocks(
     source: &str,
