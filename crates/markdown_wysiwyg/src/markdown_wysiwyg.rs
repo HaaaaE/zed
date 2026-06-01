@@ -731,6 +731,116 @@ mod tests {
         )
     }
 
+    fn row_for_source_substring(source: &str, substring: &str) -> usize {
+        source[..source.find(substring).unwrap()]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count()
+    }
+
+    fn assert_query_semantics_match_tree_sitter(source: &str, candidate: &MarkdownSyntaxTree) {
+        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let visible_source_range =
+            source.find("Paragraph").unwrap()..source.find("- item").unwrap();
+        let active_start = source
+            .find("bold")
+            .or_else(|| source.find("strong"))
+            .unwrap();
+        let active_source_range = active_start..active_start + 1;
+        let inactive_start = source.find("task").unwrap();
+        let inactive_source_ranges = [inactive_start..inactive_start + "task".len()];
+        let table_row = row_for_source_substring(source, "| **a**");
+
+        assert_eq!(
+            candidate
+                .blocks_in_source_range(visible_source_range.clone())
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>(),
+            tree_sitter
+                .blocks_in_source_range(visible_source_range.clone())
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            candidate
+                .inline_spans_in_source_range(visible_source_range.clone())
+                .collect::<Vec<_>>(),
+            tree_sitter
+                .inline_spans_in_source_range(visible_source_range.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            candidate
+                .tables()
+                .iter()
+                .map(table_semantics_without_id)
+                .collect::<Vec<_>>(),
+            tree_sitter
+                .tables()
+                .iter()
+                .map(table_semantics_without_id)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            candidate
+                .table_for_source_row(table_row)
+                .map(table_semantics_without_id),
+            tree_sitter
+                .table_for_source_row(table_row)
+                .map(table_semantics_without_id)
+        );
+        assert_eq!(
+            candidate
+                .table_for_source_range(visible_source_range.clone())
+                .map(table_semantics_without_id),
+            tree_sitter
+                .table_for_source_range(visible_source_range.clone())
+                .map(table_semantics_without_id)
+        );
+        assert_eq!(
+            candidate
+                .table_row_for_source_row(table_row)
+                .map(|(_, row)| row.clone()),
+            tree_sitter
+                .table_row_for_source_row(table_row)
+                .map(|(_, row)| row.clone())
+        );
+        assert_eq!(
+            candidate.projection_for_source_range(
+                visible_source_range.clone(),
+                Some(active_source_range.clone()),
+            ),
+            tree_sitter.projection_for_source_range(
+                visible_source_range.clone(),
+                Some(active_source_range.clone()),
+            )
+        );
+        assert_eq!(
+            candidate.active_projection_source_ranges_for_source_range(
+                visible_source_range.clone(),
+                Some(active_source_range.clone()),
+                &inactive_source_ranges,
+            ),
+            tree_sitter.active_projection_source_ranges_for_source_range(
+                visible_source_range.clone(),
+                Some(active_source_range.clone()),
+                &inactive_source_ranges,
+            )
+        );
+        assert_eq!(
+            range_semantics_without_block_ids(candidate.range_semantics_for_source_range(
+                visible_source_range.clone(),
+                Some(active_source_range.clone()),
+                &inactive_source_ranges,
+            )),
+            range_semantics_without_block_ids(tree_sitter.range_semantics_for_source_range(
+                visible_source_range,
+                Some(active_source_range),
+                &inactive_source_ranges,
+            ))
+        );
+    }
+
     #[test]
     fn parses_atx_headings_with_tree_sitter() {
         let tree = MarkdownSyntaxTree::parse("# Title\n\nText\n");
@@ -1319,102 +1429,64 @@ mod tests {
             "\n",
             "- item\n",
         );
-        let tree_sitter = MarkdownSyntaxTree::parse(source);
         let pulldown = PulldownMarkdownBackend::parse_syntax_tree(source);
-        let visible_source_range = source.find("Paragraph").unwrap()..source.find("- item").unwrap();
-        let active_start = source.find("bold").unwrap();
-        let active_source_range = active_start..active_start + 1;
-        let inactive_start = source.find("task").unwrap();
-        let inactive_source_ranges = [inactive_start..inactive_start + "task".len()];
-        let table_row = source[..source.find("| **a**").unwrap()]
-            .bytes()
-            .filter(|byte| *byte == b'\n')
-            .count();
+        assert_query_semantics_match_tree_sitter(source, &pulldown);
+    }
 
-        assert_eq!(
-            pulldown
-                .blocks_in_source_range(visible_source_range.clone())
-                .map(block_semantics_without_id)
-                .collect::<Vec<_>>(),
-            tree_sitter
-                .blocks_in_source_range(visible_source_range.clone())
-                .map(block_semantics_without_id)
-                .collect::<Vec<_>>()
+    #[test]
+    fn pulldown_incremental_query_semantics_match_tree_sitter_after_local_edits() {
+        let source = concat!(
+            "# Title\n",
+            "\n",
+            "Paragraph **bold** &amp; ![alt](img.png)\n",
+            "\n",
+            "> quoted\n",
+            "> - [ ] task\n",
+            "\n",
+            "| head | value |\n",
+            "| --- | --- |\n",
+            "| **a** | `b` |\n",
+            "\n",
+            "- item\n",
         );
-        assert_eq!(
-            pulldown.inline_spans_in_source_range(visible_source_range.clone()).collect::<Vec<_>>(),
-            tree_sitter
-                .inline_spans_in_source_range(visible_source_range.clone())
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(
-            pulldown
-                .tables()
-                .iter()
-                .map(table_semantics_without_id)
-                .collect::<Vec<_>>(),
-            tree_sitter
-                .tables()
-                .iter()
-                .map(table_semantics_without_id)
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(
-            pulldown.table_for_source_row(table_row).map(table_semantics_without_id),
-            tree_sitter
-                .table_for_source_row(table_row)
-                .map(table_semantics_without_id)
-        );
-        assert_eq!(
-            pulldown
-                .table_for_source_range(visible_source_range.clone())
-                .map(table_semantics_without_id),
-            tree_sitter
-                .table_for_source_range(visible_source_range.clone())
-                .map(table_semantics_without_id)
-        );
-        assert_eq!(
-            pulldown
-                .table_row_for_source_row(table_row)
-                .map(|(_, row)| row.clone()),
-            tree_sitter
-                .table_row_for_source_row(table_row)
-                .map(|(_, row)| row.clone())
-        );
-        assert_eq!(
-            pulldown.projection_for_source_range(
-                visible_source_range.clone(),
-                Some(active_source_range.clone()),
+        let cases = [
+            (
+                source.find("Title").unwrap() + "Title".len()
+                    ..source.find("Title").unwrap() + "Title".len(),
+                "!",
             ),
-            tree_sitter.projection_for_source_range(
-                visible_source_range.clone(),
-                Some(active_source_range.clone()),
-            )
-        );
-        assert_eq!(
-            pulldown.active_projection_source_ranges_for_source_range(
-                visible_source_range.clone(),
-                Some(active_source_range.clone()),
-                &inactive_source_ranges,
+            (
+                source.find("bold").unwrap()..source.find("bold").unwrap() + "bold".len(),
+                "strong",
             ),
-            tree_sitter.active_projection_source_ranges_for_source_range(
-                visible_source_range.clone(),
-                Some(active_source_range.clone()),
-                &inactive_source_ranges,
-            )
-        );
-        assert_eq!(
-            range_semantics_without_block_ids(pulldown.range_semantics_for_source_range(
-                visible_source_range.clone(),
-                Some(active_source_range.clone()),
-                &inactive_source_ranges,
-            )),
-            range_semantics_without_block_ids(tree_sitter.range_semantics_for_source_range(
-                visible_source_range,
-                Some(active_source_range),
-                &inactive_source_ranges,
-            ))
-        );
+            (
+                source.find("img.png").unwrap()..source.find("img.png").unwrap() + "img.png".len(),
+                "photo.png",
+            ),
+            (
+                source.find("quoted").unwrap()..source.find("quoted").unwrap() + "quoted".len(),
+                "quoted text",
+            ),
+            (
+                source.find("`b`").unwrap() + 1..source.find("`b`").unwrap() + 2,
+                "code",
+            ),
+        ];
+
+        for (old_range, replacement) in cases {
+            let previous = PulldownMarkdownBackend::parse_syntax_tree(source);
+            let mut new_source = source.to_string();
+            new_source.replace_range(old_range.clone(), replacement);
+            let new_range = old_range.start..old_range.start + replacement.len();
+            let incremental = PulldownMarkdownBackend::parse_syntax_tree_after_edit(
+                &new_source,
+                &previous,
+                old_range,
+                new_range,
+            );
+
+            assert_query_semantics_match_tree_sitter(&new_source, &incremental);
+        }
     }
 
     #[test]
