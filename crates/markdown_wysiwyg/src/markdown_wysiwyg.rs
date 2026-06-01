@@ -12,10 +12,10 @@ mod projection;
 mod tables;
 
 use inline::{
-    collect_inline_spans, collect_inline_spans_for_inline_tree, collect_projection_replacements,
-    collect_projection_replacements_for_blocks, collect_projection_replacements_for_inline_tree,
-    inline_span_prefix_maximum_ends, projection_marker_dependencies,
-    projection_marker_prefix_maximum_ends, projection_replacement_prefix_maximum_ends,
+    collect_inline_spans_for_inline_tree, collect_projection_replacements_for_blocks,
+    collect_projection_replacements_for_inline_tree, inline_span_prefix_maximum_ends,
+    projection_marker_dependencies, projection_marker_prefix_maximum_ends,
+    projection_replacement_prefix_maximum_ends,
 };
 use parser::parse_markdown;
 use tables::table_from_block;
@@ -314,6 +314,10 @@ impl MarkdownStructure {
 
     fn parse_tree(&self) -> &MarkdownParseTree {
         &self.parser_state
+    }
+
+    fn inline_trees(&self) -> &[MarkdownInlineTree] {
+        self.parser_state.inline_trees()
     }
 
     fn blocks(&self) -> &[MarkdownStructureBlock] {
@@ -792,7 +796,6 @@ fn row_range_for_structure_node(node: tree_sitter::Node<'_>) -> Range<usize> {
 
 impl MarkdownSemanticsAssembler {
     fn assemble(source: &str, structure: &MarkdownStructure) -> MarkdownSyntaxData {
-        let parser_state = structure.parse_tree();
         validate_structure_blocks(structure.blocks());
         let line_starts = record_timed_line_start_collect(|| line_starts(source));
         let blocks = record_timed_block_collect(|| {
@@ -809,7 +812,7 @@ impl MarkdownSemanticsAssembler {
             collect_structure_tables(source, &line_starts, structure)
         });
         let inline_spans =
-            record_timed_inline_collect(|| collect_inline_spans(source, parser_state));
+            record_timed_inline_collect(|| collect_structure_inline_spans(source, structure));
         let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
         let (
             projection_replacements,
@@ -818,7 +821,7 @@ impl MarkdownSemanticsAssembler {
             projection_marker_prefix_maximum_ends,
         ) = record_timed_projection_collect(|| {
             let projection_replacements =
-                collect_projection_replacements(source, parser_state, &blocks);
+                collect_structure_projection_replacements(source, structure, &blocks);
             let projection_replacement_prefix_maximum_ends =
                 projection_replacement_prefix_maximum_ends(&projection_replacements);
             let projection_marker_dependencies =
@@ -956,6 +959,41 @@ fn collect_structure_tables(
         .map(MarkdownBlock::from_structure)
         .filter_map(|block| table_from_block(source, line_starts, &block))
         .collect()
+}
+
+fn collect_structure_inline_spans(
+    source: &str,
+    structure: &MarkdownStructure,
+) -> Vec<MarkdownInlineSpan> {
+    let mut spans = Vec::new();
+    for inline_tree in structure.inline_trees() {
+        spans.extend(collect_inline_spans_for_inline_tree(source, inline_tree));
+    }
+    spans.sort_by_key(|span| (span.source_range.start, span.source_range.end));
+    spans
+}
+
+fn collect_structure_projection_replacements(
+    source: &str,
+    structure: &MarkdownStructure,
+    blocks: &[MarkdownBlock],
+) -> Vec<MarkdownProjectionReplacement> {
+    let mut replacements = collect_projection_replacements_for_blocks(source, blocks);
+    for inline_tree in structure.inline_trees() {
+        replacements.extend(collect_projection_replacements_for_inline_tree(
+            source,
+            inline_tree,
+        ));
+    }
+    replacements.sort_by_key(|replacement| {
+        (
+            replacement.source_range.start,
+            replacement.source_range.end,
+            replacement.owner_source_range.start,
+            replacement.owner_source_range.end,
+        )
+    });
+    replacements
 }
 
 fn add_blank_structure_blocks(

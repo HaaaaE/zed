@@ -6,6 +6,7 @@ use super::{
     MarkdownBlock, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineTree,
     MarkdownParseTree, MarkdownProjectionReplacement, ProjectionMarkerDependency, ranges_overlap,
 };
+#[allow(dead_code)]
 pub(super) fn collect_inline_spans(
     source: &str,
     parse_tree: &MarkdownParseTree,
@@ -82,6 +83,7 @@ pub(super) fn inline_span_prefix_maximum_ends(inline_spans: &[MarkdownInlineSpan
         .collect()
 }
 
+#[allow(dead_code)]
 pub(super) fn collect_projection_replacements(
     source: &str,
     parse_tree: &MarkdownParseTree,
