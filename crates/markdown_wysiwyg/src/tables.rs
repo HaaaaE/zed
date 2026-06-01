@@ -1,9 +1,41 @@
 use std::ops::Range;
 
 use super::{
-    MarkdownBlock, MarkdownBlockKind, MarkdownStructure, MarkdownTable, MarkdownTableAlignment,
-    MarkdownTableCell, MarkdownTableRow, line_range_checked, trim_ascii_whitespace, trim_line_end,
+    MarkdownBlock, MarkdownBlockKind, MarkdownStructure, MarkdownSyntaxTree, MarkdownTable,
+    MarkdownTableAlignment, MarkdownTableCell, MarkdownTableRow, line_range_checked,
+    ranges_overlap, trim_ascii_whitespace, trim_line_end,
 };
+
+impl MarkdownSyntaxTree {
+    pub fn tables(&self) -> &[MarkdownTable] {
+        &self.data.tables
+    }
+
+    pub fn table_for_source_row(&self, row: usize) -> Option<&MarkdownTable> {
+        self.data
+            .tables
+            .iter()
+            .find(|table| table.row_range.contains(&row))
+    }
+
+    pub fn table_for_source_range(&self, range: Range<usize>) -> Option<&MarkdownTable> {
+        self.data
+            .tables
+            .iter()
+            .find(|table| ranges_overlap(&table.source_range, &range))
+    }
+
+    pub fn table_row_for_source_row(
+        &self,
+        row: usize,
+    ) -> Option<(&MarkdownTable, &MarkdownTableRow)> {
+        let table = self.table_for_source_row(row)?;
+        table
+            .rows()
+            .find(|table_row| table_row.row == row)
+            .map(|table_row| (table, table_row))
+    }
+}
 
 pub(super) fn collect_structure_tables(
     source: &str,

@@ -35,6 +35,7 @@
 - 2026-06-01：block 语义组装 helper 已继续回收到 `blocks.rs`，包括 structure block 校验、blank block 补齐、full/incremental `MarkdownBlock` 汇总与增量 dedup；第十二轮验证 `cargo check -p markdown_wysiwyg` 与 `cargo test -p markdown_wysiwyg` 全部通过。
 - 2026-06-01：增量 inline span、projection replacement 与 projection marker dependency 的复用 helper 已回收到 `inline.rs`，`markdown_wysiwyg.rs` 继续只负责 assembler 编排；第十三轮验证 `cargo check -p markdown_wysiwyg` 与 `cargo test -p markdown_wysiwyg` 全部通过。
 - 2026-06-01：projection 查询与 range semantics 组装已从 `markdown_wysiwyg.rs` 移回 `projection.rs`，包含 active marker/source 判断 helper；第十四轮验证 `cargo check -p markdown_wysiwyg` 与 `cargo test -p markdown_wysiwyg` 全部通过。
+- 2026-06-01：table 查询入口 `tables()`、`table_for_source_row()`、`table_for_source_range()`、`table_row_for_source_row()` 已从 `markdown_wysiwyg.rs` 移回 `tables.rs`；第十五轮验证 `cargo check -p markdown_wysiwyg` 与 `cargo test -p markdown_wysiwyg` 全部通过。
 
 ## Implementation
 
@@ -73,7 +74,7 @@
 - 第一步只改 `markdown_wysiwyg` 和 benchmark，不改 `md_editor` 消费接口。
 - 第二步让 pulldown 适配器和 tree-sitter baseline 在同一批 fixture 上完全对齐，再决定是否切默认 backend。
 - 第三步只有在 pulldown 端到端更快且语义全等时，才把它设成默认；comrak 保留为参考/正确性后端，不进入热路径。
-- 当前状态已完成第一步中的 benchmark 雏形，并在 `markdown_wysiwyg` 主体里建立 backend / structure / assembler 的最小边界；`MarkdownStructure` 已实际驱动 full/incremental block 输出、table 生成、full/incremental inline 与 projection 收集，block structure 构建和 block 语义组装逻辑已回收到 `blocks.rs`，full/incremental inline 与 projection helper 已回收到 `inline.rs`，projection 查询与 range semantics 已回收到 `projection.rs`，table wrapper 已回收到 `tables.rs`，退役 dead-code 对照入口已清理，下一步是继续把剩余共享 helper 拆回模块边界。
+- 当前状态已完成第一步中的 benchmark 雏形，并在 `markdown_wysiwyg` 主体里建立 backend / structure / assembler 的最小边界；`MarkdownStructure` 已实际驱动 full/incremental block 输出、table 生成、full/incremental inline 与 projection 收集，block structure 构建和 block 语义组装逻辑已回收到 `blocks.rs`，full/incremental inline 与 projection helper 已回收到 `inline.rs`，projection 查询与 range semantics 已回收到 `projection.rs`，table wrapper 与 table 查询入口已回收到 `tables.rs`，退役 dead-code 对照入口已清理，下一步是继续把剩余共享 helper 拆回模块边界。
 
 ## Assumptions
 
