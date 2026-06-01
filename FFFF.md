@@ -30,6 +30,7 @@
 - 2026-06-01：增量 inline span 与 projection replacement helper 的当前输入也已迁到 `MarkdownStructure`，dirty-window 复用逻辑保持不变，并移除了 `MarkdownStructure::parse_tree` 退役入口。
 - 2026-06-01：第八轮验证 `cargo check -p markdown_wysiwyg` 与 `cargo test -p markdown_wysiwyg` 全部通过且无新增警告。
 - 2026-06-01：block structure 构建 helper 已从 `markdown_wysiwyg.rs` 收回到 `blocks.rs`，`blocks.rs` 不再作为退役 tree-sitter block 对照模块；第九轮验证 `cargo check -p markdown_wysiwyg` 与 `cargo test -p markdown_wysiwyg` 全部通过。
+- 2026-06-01：已清理 `inline.rs`、`tables.rs` 和 `markdown_wysiwyg.rs` 中剩余的退役 dead-code helper 入口，去掉旧 whole-tree inline/table wrapper 与旧 block row-shift 复用路径；第十轮验证 `cargo check -p markdown_wysiwyg` 与 `cargo test -p markdown_wysiwyg` 全部通过。
 
 ## Implementation
 
@@ -68,7 +69,7 @@
 - 第一步只改 `markdown_wysiwyg` 和 benchmark，不改 `md_editor` 消费接口。
 - 第二步让 pulldown 适配器和 tree-sitter baseline 在同一批 fixture 上完全对齐，再决定是否切默认 backend。
 - 第三步只有在 pulldown 端到端更快且语义全等时，才把它设成默认；comrak 保留为参考/正确性后端，不进入热路径。
-- 当前状态已完成第一步中的 benchmark 雏形，并在 `markdown_wysiwyg` 主体里建立 backend / structure / assembler 的最小边界；`MarkdownStructure` 已实际驱动 full/incremental block 输出、table 生成、full/incremental inline 与 projection 收集，block structure 构建逻辑已回收到 `blocks.rs`，下一步是继续把剩余共享 helper 拆回模块边界并清理旧对照代码。
+- 当前状态已完成第一步中的 benchmark 雏形，并在 `markdown_wysiwyg` 主体里建立 backend / structure / assembler 的最小边界；`MarkdownStructure` 已实际驱动 full/incremental block 输出、table 生成、full/incremental inline 与 projection 收集，block structure 构建逻辑已回收到 `blocks.rs`，退役 dead-code 对照入口已清理，下一步是继续把剩余共享 helper 拆回模块边界。
 
 ## Assumptions
 

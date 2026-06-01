@@ -557,39 +557,6 @@ fn add_blank_structure_blocks(
     }
 }
 
-#[allow(dead_code)]
-fn add_blank_structure_blocks_in_row_range(
-    source: &str,
-    line_starts: &[usize],
-    row_range: Range<usize>,
-    blocks: &mut Vec<MarkdownBlock>,
-) {
-    if line_starts.is_empty() {
-        return;
-    }
-
-    for row in row_range.start..row_range.end.min(line_starts.len()) {
-        if blocks.iter().any(|block| block.row_range.contains(&row)) {
-            continue;
-        }
-
-        let range = line_range(source, line_starts, row);
-        if range.is_empty() || !source[range.clone()].trim().is_empty() {
-            continue;
-        }
-
-        blocks.push(MarkdownBlock {
-            id: MarkdownNodeId(1 << 63 | row as u64),
-            kind: MarkdownBlockKind::Blank,
-            source_range: range.clone(),
-            content_range: range.start..range.start,
-            marker_ranges: Vec::new(),
-            row_range: row..row + 1,
-            tagfilter_disallowed: false,
-        });
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MarkdownBlock {
     pub id: MarkdownNodeId,
@@ -1592,87 +1559,6 @@ fn shift_clean_old_range_to_new(
 
     debug_assert!(range.start >= old_range.end);
     shift_byte_range(range, old_range.end, new_range.end)
-}
-
-#[allow(dead_code)]
-fn row_for_offset_in_line_starts(line_starts: &[usize], offset: usize) -> usize {
-    line_starts
-        .partition_point(|line_start| *line_start <= offset)
-        .saturating_sub(1)
-        .min(line_starts.len().saturating_sub(1))
-}
-
-#[allow(dead_code)]
-fn edit_row_window(
-    line_starts: &[usize],
-    source_len: usize,
-    edit_range: &Range<usize>,
-) -> Range<usize> {
-    const CONTEXT_ROWS: usize = 2;
-
-    if line_starts.is_empty() {
-        return 0..0;
-    }
-
-    let start = row_for_offset_in_line_starts(line_starts, edit_range.start.min(source_len));
-    let end = row_for_offset_in_line_starts(line_starts, edit_range.end.min(source_len));
-    start.saturating_sub(CONTEXT_ROWS)..(end + 1 + CONTEXT_ROWS).min(line_starts.len())
-}
-
-#[allow(dead_code)]
-fn source_range_for_row_window(
-    line_starts: &[usize],
-    source_len: usize,
-    rows: Range<usize>,
-) -> Range<usize> {
-    let start = line_starts.get(rows.start).copied().unwrap_or(source_len);
-    let end = line_starts.get(rows.end).copied().unwrap_or(source_len);
-    start..end
-}
-
-#[allow(dead_code)]
-fn shift_row_offset(row: usize, row_delta: isize) -> usize {
-    if row_delta >= 0 {
-        row + row_delta as usize
-    } else {
-        row.saturating_sub(row_delta.unsigned_abs())
-    }
-}
-
-#[allow(dead_code)]
-fn shift_clean_old_row_range_to_new(
-    range: Range<usize>,
-    old_dirty_rows: &Range<usize>,
-    row_delta: isize,
-) -> Range<usize> {
-    if range.end <= old_dirty_rows.start {
-        return range;
-    }
-
-    debug_assert!(range.start >= old_dirty_rows.end);
-    shift_row_offset(range.start, row_delta)..shift_row_offset(range.end, row_delta)
-}
-
-#[allow(dead_code)]
-fn shift_block_after_edit(
-    mut block: MarkdownBlock,
-    old_range: &Range<usize>,
-    new_range: &Range<usize>,
-    old_dirty_rows: &Range<usize>,
-    row_delta: isize,
-) -> MarkdownBlock {
-    block.source_range = shift_clean_old_range_to_new(block.source_range, old_range, new_range);
-    block.content_range = shift_clean_old_range_to_new(block.content_range, old_range, new_range);
-    block.marker_ranges = block
-        .marker_ranges
-        .into_iter()
-        .map(|range| shift_clean_old_range_to_new(range, old_range, new_range))
-        .collect();
-    block.row_range = shift_clean_old_row_range_to_new(block.row_range, old_dirty_rows, row_delta);
-    if block.kind == MarkdownBlockKind::Blank {
-        block.id = MarkdownNodeId(1 << 63 | block.row_range.start as u64);
-    }
-    block
 }
 
 fn block_semantics_match(left: &MarkdownBlock, right: &MarkdownBlock) -> bool {

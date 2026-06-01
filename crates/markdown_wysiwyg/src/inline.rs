@@ -4,20 +4,8 @@ use tree_sitter::Node;
 
 use super::{
     MarkdownBlock, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineTree,
-    MarkdownParseTree, MarkdownProjectionReplacement, ProjectionMarkerDependency, ranges_overlap,
+    MarkdownProjectionReplacement, ProjectionMarkerDependency, ranges_overlap,
 };
-#[allow(dead_code)]
-pub(super) fn collect_inline_spans(
-    source: &str,
-    parse_tree: &MarkdownParseTree,
-) -> Vec<MarkdownInlineSpan> {
-    let mut spans = Vec::new();
-    for inline_tree in parse_tree.inline_trees() {
-        spans.extend(collect_inline_spans_for_inline_tree(source, inline_tree));
-    }
-    spans.sort_by_key(|span| (span.source_range.start, span.source_range.end));
-    spans
-}
 
 pub(super) fn collect_inline_spans_for_inline_tree(
     source: &str,
@@ -81,30 +69,6 @@ pub(super) fn inline_span_prefix_maximum_ends(inline_spans: &[MarkdownInlineSpan
             maximum_end
         })
         .collect()
-}
-
-#[allow(dead_code)]
-pub(super) fn collect_projection_replacements(
-    source: &str,
-    parse_tree: &MarkdownParseTree,
-    blocks: &[MarkdownBlock],
-) -> Vec<MarkdownProjectionReplacement> {
-    let mut replacements = collect_projection_replacements_for_blocks(source, blocks);
-    for inline_tree in parse_tree.inline_trees() {
-        replacements.extend(collect_projection_replacements_for_inline_tree(
-            source,
-            inline_tree,
-        ));
-    }
-    replacements.sort_by_key(|replacement| {
-        (
-            replacement.source_range.start,
-            replacement.source_range.end,
-            replacement.owner_source_range.start,
-            replacement.owner_source_range.end,
-        )
-    });
-    replacements
 }
 
 pub(super) fn collect_projection_replacements_for_blocks(
