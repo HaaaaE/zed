@@ -1677,6 +1677,97 @@ mod tests {
     }
 
     #[test]
+    fn pulldown_incremental_query_semantics_match_tree_sitter_after_crlf_local_edits() {
+        let source = concat!(
+            "# Title\n",
+            "\n",
+            "Paragraph **bold** &amp; ![alt](img.png)\n",
+            "Broad inline ~~strike~~ <IFRAME src=\"x\"></IFRAME> <https://example.com/auto>\n",
+            "Break line  \n",
+            "continued with \\* escape &copy; mail <me@example.com> CJK 中文 $x + y$\n",
+            "\n",
+            "Setext title\n",
+            "------------\n",
+            "\n",
+            "[ref]: https://example.com/ref\n",
+            "\n",
+            "> quoted\n",
+            "> - [ ] task\n",
+            ">   1. nested ordered\n",
+            "\n",
+            "- parent\n",
+            "  > nested quote\n",
+            "  > continuation\n",
+            "\n",
+            "| head | value |\n",
+            "| --- | --- |\n",
+            "| **a** | `b` |\n",
+            "\n",
+            "edge left | edge center | edge right\n",
+            "--- | :---: | ---:\n",
+            "edge 1 | **edge 2** | edge 3\n",
+            "\n",
+            "| empty a |  | empty c |\n",
+            "| - | - | - |\n",
+            "|  | **empty b** |  |\n",
+            "\n",
+            "| broken a | broken b |\n",
+            "| not a delimiter |\n",
+            "\n",
+            "- item\n",
+        )
+        .replace('\n', "\r\n");
+        let cases = [
+            (
+                source.find("bold").unwrap()..source.find("bold").unwrap() + "bold".len(),
+                "strong",
+            ),
+            (
+                source.find("Break line").unwrap()..source.find("\r\n\r\nSetext title").unwrap(),
+                "",
+            ),
+            (
+                source.find("> quoted").unwrap()..source.find("> - [ ] task").unwrap(),
+                concat!("> replacement quote\r\n", "> with **inline** text\r\n"),
+            ),
+            (
+                source.find("| **a** | `b` |").unwrap() + "| **a** | `b` |".len()
+                    ..source.find("| **a** | `b` |").unwrap() + "| **a** | `b` |".len(),
+                "\r\n| extra | **c** |",
+            ),
+            (
+                source.find("edge center").unwrap()
+                    ..source.find("edge center").unwrap() + "edge center".len(),
+                "edge middle",
+            ),
+            (
+                source.find("not a delimiter").unwrap()
+                    ..source.find("not a delimiter").unwrap() + "not a delimiter".len(),
+                "--- | ---",
+            ),
+            (
+                source.find("[ ] task").unwrap() + 1..source.find("[ ] task").unwrap() + 2,
+                "x",
+            ),
+        ];
+
+        for (old_range, replacement) in cases {
+            let previous = PulldownMarkdownBackend::parse_syntax_tree(&source);
+            let mut new_source = source.to_string();
+            new_source.replace_range(old_range.clone(), replacement);
+            let new_range = old_range.start..old_range.start + replacement.len();
+            let incremental = PulldownMarkdownBackend::parse_syntax_tree_after_edit(
+                &new_source,
+                &previous,
+                old_range,
+                new_range,
+            );
+
+            assert_query_semantics_match_tree_sitter(&new_source, &incremental);
+        }
+    }
+
+    #[test]
     fn pulldown_incremental_matches_pulldown_full_after_local_edits() {
         let source = concat!(
             "# Title\n",
