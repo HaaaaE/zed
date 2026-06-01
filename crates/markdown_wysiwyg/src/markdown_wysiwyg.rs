@@ -4,13 +4,13 @@ use std::{collections::HashMap, fmt, ops::Range};
 
 use tree_sitter::{InputEdit, Node, Point, Tree};
 
+#[allow(dead_code)]
 mod blocks;
 mod inline;
 mod parser;
 mod projection;
 mod tables;
 
-use blocks::collect_blocks_in_source_range;
 use inline::{
     collect_inline_spans, collect_inline_spans_for_inline_tree, collect_projection_replacements,
     collect_projection_replacements_for_blocks, collect_projection_replacements_for_inline_tree,
@@ -856,14 +856,7 @@ impl MarkdownSemanticsAssembler {
         validate_structure_blocks(structure.blocks());
         let line_starts = record_timed_line_start_collect(|| line_starts(source));
         let blocks = record_timed_block_collect(|| {
-            collect_incremental_blocks(
-                source,
-                previous,
-                &line_starts,
-                parser_state.block_tree(),
-                old_range,
-                new_range,
-            )
+            collect_incremental_blocks(source, structure, &line_starts)
         });
         let tables = record_timed_table_collect(|| collect_tables(source, &line_starts, &blocks));
         let inline_spans = record_timed_inline_collect(|| {
@@ -963,6 +956,39 @@ fn add_blank_structure_blocks(
 
     for row in 0..line_starts.len() {
         if covered_rows[row] {
+            continue;
+        }
+
+        let range = line_range(source, line_starts, row);
+        if range.is_empty() || !source[range.clone()].trim().is_empty() {
+            continue;
+        }
+
+        blocks.push(MarkdownBlock {
+            id: MarkdownNodeId(1 << 63 | row as u64),
+            kind: MarkdownBlockKind::Blank,
+            source_range: range.clone(),
+            content_range: range.start..range.start,
+            marker_ranges: Vec::new(),
+            row_range: row..row + 1,
+            tagfilter_disallowed: false,
+        });
+    }
+}
+
+#[allow(dead_code)]
+fn add_blank_structure_blocks_in_row_range(
+    source: &str,
+    line_starts: &[usize],
+    row_range: Range<usize>,
+    blocks: &mut Vec<MarkdownBlock>,
+) {
+    if line_starts.is_empty() {
+        return;
+    }
+
+    for row in row_range.start..row_range.end.min(line_starts.len()) {
+        if blocks.iter().any(|block| block.row_range.contains(&row)) {
             continue;
         }
 
@@ -1987,6 +2013,7 @@ fn shift_clean_old_range_to_new(
     shift_byte_range(range, old_range.end, new_range.end)
 }
 
+#[allow(dead_code)]
 fn row_for_offset_in_line_starts(line_starts: &[usize], offset: usize) -> usize {
     line_starts
         .partition_point(|line_start| *line_start <= offset)
@@ -1994,6 +2021,7 @@ fn row_for_offset_in_line_starts(line_starts: &[usize], offset: usize) -> usize 
         .min(line_starts.len().saturating_sub(1))
 }
 
+#[allow(dead_code)]
 fn edit_row_window(
     line_starts: &[usize],
     source_len: usize,
@@ -2010,6 +2038,7 @@ fn edit_row_window(
     start.saturating_sub(CONTEXT_ROWS)..(end + 1 + CONTEXT_ROWS).min(line_starts.len())
 }
 
+#[allow(dead_code)]
 fn source_range_for_row_window(
     line_starts: &[usize],
     source_len: usize,
@@ -2020,6 +2049,7 @@ fn source_range_for_row_window(
     start..end
 }
 
+#[allow(dead_code)]
 fn shift_row_offset(row: usize, row_delta: isize) -> usize {
     if row_delta >= 0 {
         row + row_delta as usize
@@ -2028,6 +2058,7 @@ fn shift_row_offset(row: usize, row_delta: isize) -> usize {
     }
 }
 
+#[allow(dead_code)]
 fn shift_clean_old_row_range_to_new(
     range: Range<usize>,
     old_dirty_rows: &Range<usize>,
@@ -2041,6 +2072,7 @@ fn shift_clean_old_row_range_to_new(
     shift_row_offset(range.start, row_delta)..shift_row_offset(range.end, row_delta)
 }
 
+#[allow(dead_code)]
 fn shift_block_after_edit(
     mut block: MarkdownBlock,
     old_range: &Range<usize>,
@@ -2073,48 +2105,15 @@ fn block_semantics_match(left: &MarkdownBlock, right: &MarkdownBlock) -> bool {
 
 fn collect_incremental_blocks(
     source: &str,
-    previous: &MarkdownSyntaxTree,
+    structure: &MarkdownStructure,
     line_starts: &[usize],
-    block_tree: &Tree,
-    old_range: &Range<usize>,
-    new_range: &Range<usize>,
 ) -> Vec<MarkdownBlock> {
-    let old_dirty_rows = edit_row_window(
-        &previous.data.line_starts,
-        previous.data.source_len,
-        old_range,
-    );
-    let new_dirty_rows = edit_row_window(line_starts, source.len(), new_range);
-    let old_dirty_source_range = source_range_for_row_window(
-        &previous.data.line_starts,
-        previous.data.source_len,
-        old_dirty_rows.clone(),
-    );
-    let new_dirty_source_range =
-        source_range_for_row_window(line_starts, source.len(), new_dirty_rows.clone());
-    let row_delta = line_starts.len() as isize - previous.data.line_starts.len() as isize;
-
-    let mut blocks = previous
-        .data
-        .blocks
+    let mut blocks = structure
+        .blocks()
         .iter()
-        .filter(|block| {
-            !ranges_overlap(&block.row_range, &old_dirty_rows)
-                && !ranges_overlap(&block.source_range, &old_dirty_source_range)
-        })
-        .cloned()
-        .map(|block| {
-            shift_block_after_edit(block, old_range, new_range, &old_dirty_rows, row_delta)
-        })
+        .map(MarkdownBlock::from_structure)
         .collect::<Vec<_>>();
-
-    blocks.extend(collect_blocks_in_source_range(
-        source,
-        line_starts,
-        block_tree,
-        new_dirty_source_range,
-        new_dirty_rows,
-    ));
+    add_blank_structure_blocks(source, line_starts, &mut blocks);
     blocks.sort_by_key(|block| {
         (
             block.source_range.start,
