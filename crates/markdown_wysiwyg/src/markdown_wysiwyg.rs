@@ -1507,6 +1507,85 @@ mod tests {
     }
 
     #[test]
+    fn pulldown_backend_matches_tree_sitter_crlf_semantics() {
+        let source = concat!(
+            "# Title\n",
+            "\n",
+            "Paragraph **bold** &amp; ![alt](img.png)\n",
+            "Broad inline ~~strike~~ <IFRAME src=\"x\"></IFRAME> <https://example.com/auto>\n",
+            "continued with \\* escape &copy; mail <me@example.com> CJK 中文 $x + y$\n",
+            "\n",
+            "Setext title\n",
+            "------------\n",
+            "\n",
+            "[ref]: https://example.com/ref\n",
+            "\n",
+            "> quoted\n",
+            "> - [ ] task\n",
+            ">   1. nested ordered\n",
+            "\n",
+            "- parent\n",
+            "  > nested quote\n",
+            "  > continuation\n",
+            "\n",
+            "| head | value |\n",
+            "| --- | --- |\n",
+            "| **a** | `b` |\n",
+            "\n",
+            "edge left | edge center | edge right\n",
+            "--- | :---: | ---:\n",
+            "edge 1 | **edge 2** | edge 3\n",
+            "\n",
+            "| empty a |  | empty c |\n",
+            "| - | - | - |\n",
+            "|  | **empty b** |  |\n",
+            "\n",
+            "- item\n",
+        )
+        .replace('\n', "\r\n");
+        let tree_sitter = MarkdownSyntaxTree::parse(&source);
+        let pulldown = PulldownMarkdownBackend::parse_syntax_data(&source);
+
+        assert_eq!(pulldown.line_starts(), tree_sitter.syntax_data().line_starts());
+        assert_eq!(
+            pulldown
+                .blocks()
+                .iter()
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>(),
+            tree_sitter
+                .blocks()
+                .iter()
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            pulldown
+                .tables()
+                .iter()
+                .map(table_semantics_without_id)
+                .collect::<Vec<_>>(),
+            tree_sitter
+                .tables()
+                .iter()
+                .map(table_semantics_without_id)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(pulldown.inline_spans(), tree_sitter.inline_spans());
+        assert_eq!(
+            pulldown.projection_replacements(),
+            tree_sitter.syntax_data().projection_replacements()
+        );
+        assert_eq!(
+            pulldown.projection_marker_dependencies(),
+            tree_sitter.syntax_data().projection_marker_dependencies()
+        );
+
+        let pulldown_tree = PulldownMarkdownBackend::parse_syntax_tree(&source);
+        assert_query_semantics_match_tree_sitter(&source, &pulldown_tree);
+    }
+
+    #[test]
     fn pulldown_incremental_matches_pulldown_full_after_local_edits() {
         let source = concat!(
             "# Title\n",
