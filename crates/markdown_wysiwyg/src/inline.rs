@@ -4,7 +4,9 @@ use tree_sitter::Node;
 
 use super::{
     MarkdownBlock, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineTree,
-    MarkdownProjectionReplacement, MarkdownStructure, ProjectionMarkerDependency, ranges_overlap,
+    MarkdownProjectionReplacement, MarkdownStructure, MarkdownSyntaxTree,
+    ProjectionMarkerDependency, old_range_for_clean_new_range, range_contains, ranges_overlap,
+    ranges_touch, shift_clean_old_range_to_new,
 };
 
 pub(super) fn collect_structure_inline_spans(
@@ -14,6 +16,60 @@ pub(super) fn collect_structure_inline_spans(
     let mut spans = Vec::new();
     for inline_tree in structure.inline_trees() {
         spans.extend(collect_inline_spans_for_inline_tree(source, inline_tree));
+    }
+    spans.sort_by_key(|span| (span.source_range.start, span.source_range.end));
+    spans
+}
+
+pub(super) fn collect_incremental_inline_spans(
+    source: &str,
+    previous: &MarkdownSyntaxTree,
+    structure: &MarkdownStructure,
+    old_range: &Range<usize>,
+    new_range: &Range<usize>,
+) -> Vec<MarkdownInlineSpan> {
+    let mut spans = Vec::new();
+    let previous_inline_parent_ranges = previous
+        .parser_state
+        .inline_trees()
+        .iter()
+        .map(|inline_tree| (inline_tree.parent_range.clone(), ()))
+        .collect::<HashMap<_, _>>();
+    for inline_tree in structure.inline_trees() {
+        let new_parent_range = &inline_tree.parent_range;
+        if ranges_touch(new_parent_range, new_range) {
+            spans.extend(collect_inline_spans_for_inline_tree(source, inline_tree));
+            continue;
+        }
+
+        let old_parent_range =
+            old_range_for_clean_new_range(new_parent_range, new_range, old_range);
+        if ranges_touch(&old_parent_range, old_range) {
+            spans.extend(collect_inline_spans_for_inline_tree(source, inline_tree));
+            continue;
+        }
+
+        if !previous_inline_parent_ranges.contains_key(&old_parent_range) {
+            spans.extend(collect_inline_spans_for_inline_tree(source, inline_tree));
+            continue;
+        }
+
+        let first_span_index = previous
+            .data
+            .inline_spans
+            .partition_point(|span| span.source_range.start < old_parent_range.start);
+        spans.extend(
+            previous
+                .data
+                .inline_spans
+                .get(first_span_index..)
+                .unwrap_or_default()
+                .iter()
+                .take_while(|span| span.source_range.start < old_parent_range.end)
+                .filter(|span| range_contains(&old_parent_range, &span.source_range))
+                .cloned()
+                .map(|span| shift_inline_span_after_edit(span, old_range, new_range)),
+        );
     }
     spans.sort_by_key(|span| (span.source_range.start, span.source_range.end));
     spans
@@ -119,6 +175,81 @@ pub(super) fn collect_structure_projection_replacements(
     replacements
 }
 
+pub(super) fn collect_incremental_projection_replacements(
+    source: &str,
+    previous: &MarkdownSyntaxTree,
+    structure: &MarkdownStructure,
+    blocks: &[MarkdownBlock],
+    old_range: &Range<usize>,
+    new_range: &Range<usize>,
+) -> Vec<MarkdownProjectionReplacement> {
+    let mut replacements = collect_projection_replacements_for_blocks(source, blocks);
+    let previous_inline_parent_ranges = previous
+        .parser_state
+        .inline_trees()
+        .iter()
+        .map(|inline_tree| (inline_tree.parent_range.clone(), ()))
+        .collect::<HashMap<_, _>>();
+    for inline_tree in structure.inline_trees() {
+        let new_parent_range = &inline_tree.parent_range;
+        if ranges_touch(new_parent_range, new_range) {
+            replacements.extend(collect_projection_replacements_for_inline_tree(
+                source,
+                inline_tree,
+            ));
+            continue;
+        }
+
+        let old_parent_range =
+            old_range_for_clean_new_range(new_parent_range, new_range, old_range);
+        if ranges_touch(&old_parent_range, old_range) {
+            replacements.extend(collect_projection_replacements_for_inline_tree(
+                source,
+                inline_tree,
+            ));
+            continue;
+        }
+
+        if !previous_inline_parent_ranges.contains_key(&old_parent_range) {
+            replacements.extend(collect_projection_replacements_for_inline_tree(
+                source,
+                inline_tree,
+            ));
+            continue;
+        }
+
+        let first_replacement_index = previous
+            .data
+            .projection_replacements
+            .partition_point(|replacement| replacement.source_range.start < old_parent_range.start);
+        replacements.extend(
+            previous
+                .data
+                .projection_replacements
+                .get(first_replacement_index..)
+                .unwrap_or_default()
+                .iter()
+                .take_while(|replacement| replacement.source_range.start < old_parent_range.end)
+                .filter(|replacement| {
+                    range_contains(&old_parent_range, &replacement.owner_source_range)
+                })
+                .cloned()
+                .map(|replacement| {
+                    shift_projection_replacement_after_edit(replacement, old_range, new_range)
+                }),
+        );
+    }
+    replacements.sort_by_key(|replacement| {
+        (
+            replacement.source_range.start,
+            replacement.source_range.end,
+            replacement.owner_source_range.start,
+            replacement.owner_source_range.end,
+        )
+    });
+    replacements
+}
+
 pub(super) fn collect_projection_replacements_for_inline_tree(
     source: &str,
     inline_tree: &MarkdownInlineTree,
@@ -191,6 +322,87 @@ pub(super) fn projection_marker_dependencies(
     dependencies
 }
 
+pub(super) fn collect_incremental_projection_marker_dependencies(
+    previous: &MarkdownSyntaxTree,
+    blocks: &[MarkdownBlock],
+    inline_spans: &[MarkdownInlineSpan],
+    replacements: &[MarkdownProjectionReplacement],
+    old_range: &Range<usize>,
+    new_range: &Range<usize>,
+) -> Vec<ProjectionMarkerDependency> {
+    let mut dependencies = previous
+        .data
+        .projection_marker_dependencies
+        .iter()
+        .filter(|dependency| {
+            !ranges_touch(&dependency.marker_range, old_range)
+                && !ranges_touch(&dependency.owner_source_range, old_range)
+        })
+        .cloned()
+        .map(|dependency| {
+            shift_projection_marker_dependency_after_edit(dependency, old_range, new_range)
+        })
+        .collect::<Vec<_>>();
+
+    for block in blocks {
+        if !ranges_touch(&block.source_range, new_range) {
+            continue;
+        }
+
+        dependencies.extend(block.marker_ranges.iter().cloned().map(|marker_range| {
+            ProjectionMarkerDependency {
+                marker_range,
+                owner_source_range: block.source_range.clone(),
+            }
+        }));
+    }
+
+    for span in inline_spans {
+        if !ranges_touch(&span.source_range, new_range) {
+            continue;
+        }
+
+        if matches!(
+            span.kind,
+            MarkdownInlineKind::SoftBreak | MarkdownInlineKind::HardBreak
+        ) {
+            dependencies.push(ProjectionMarkerDependency {
+                marker_range: span.source_range.clone(),
+                owner_source_range: span.source_range.clone(),
+            });
+        }
+        dependencies.extend(span.marker_ranges.iter().cloned().map(|marker_range| {
+            ProjectionMarkerDependency {
+                marker_range,
+                owner_source_range: span.source_range.clone(),
+            }
+        }));
+    }
+
+    for replacement in replacements {
+        if !ranges_touch(&replacement.owner_source_range, new_range)
+            && !ranges_touch(&replacement.source_range, new_range)
+        {
+            continue;
+        }
+
+        dependencies.push(ProjectionMarkerDependency {
+            marker_range: replacement.source_range.clone(),
+            owner_source_range: replacement.owner_source_range.clone(),
+        });
+    }
+
+    dependencies.sort_by_key(|dependency| {
+        (
+            dependency.marker_range.start,
+            dependency.marker_range.end,
+            dependency.owner_source_range.start,
+            dependency.owner_source_range.end,
+        )
+    });
+    dependencies
+}
+
 pub(super) fn projection_marker_prefix_maximum_ends(
     dependencies: &[ProjectionMarkerDependency],
 ) -> Vec<usize> {
@@ -202,6 +414,49 @@ pub(super) fn projection_marker_prefix_maximum_ends(
             maximum_end
         })
         .collect()
+}
+
+fn shift_inline_span_after_edit(
+    mut span: MarkdownInlineSpan,
+    old_range: &Range<usize>,
+    new_range: &Range<usize>,
+) -> MarkdownInlineSpan {
+    span.source_range = shift_clean_old_range_to_new(span.source_range, old_range, new_range);
+    span.content_ranges = span
+        .content_ranges
+        .into_iter()
+        .map(|range| shift_clean_old_range_to_new(range, old_range, new_range))
+        .collect();
+    span.marker_ranges = span
+        .marker_ranges
+        .into_iter()
+        .map(|range| shift_clean_old_range_to_new(range, old_range, new_range))
+        .collect();
+    span
+}
+
+fn shift_projection_replacement_after_edit(
+    mut replacement: MarkdownProjectionReplacement,
+    old_range: &Range<usize>,
+    new_range: &Range<usize>,
+) -> MarkdownProjectionReplacement {
+    replacement.source_range =
+        shift_clean_old_range_to_new(replacement.source_range, old_range, new_range);
+    replacement.owner_source_range =
+        shift_clean_old_range_to_new(replacement.owner_source_range, old_range, new_range);
+    replacement
+}
+
+fn shift_projection_marker_dependency_after_edit(
+    mut dependency: ProjectionMarkerDependency,
+    old_range: &Range<usize>,
+    new_range: &Range<usize>,
+) -> ProjectionMarkerDependency {
+    dependency.marker_range =
+        shift_clean_old_range_to_new(dependency.marker_range, old_range, new_range);
+    dependency.owner_source_range =
+        shift_clean_old_range_to_new(dependency.owner_source_range, old_range, new_range);
+    dependency
 }
 
 fn collect_projection_replacement_nodes(
