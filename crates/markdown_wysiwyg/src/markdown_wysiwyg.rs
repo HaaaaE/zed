@@ -1332,11 +1332,20 @@ mod tests {
         let source = concat!(
             "# Title\n",
             "\n",
+            "Setext title\n",
+            "------------\n",
+            "\n",
             "alpha **bold** &amp; [link](https://example.com)\n",
             "gamma ~~strike~~ <IFRAME src=\"x\"></IFRAME> <https://example.com/auto> ",
             "<me@example.com> CJK 中文 $x + y$ ![alt](image.png)\n",
             "hard break  \n",
             "continued\n",
+            "\n",
+            "---\n",
+            "\n",
+            "    indented code\n",
+            "\n",
+            "[ref]: https://example.com/ref\n",
             "\n",
             "> # Quote\n",
             "> \n",
@@ -1380,6 +1389,10 @@ mod tests {
                 "## ",
             ),
             (
+                source.find("------------").unwrap()..source.find("------------").unwrap() + 1,
+                "=",
+            ),
+            (
                 source.find("strike").unwrap()..source.find("strike").unwrap() + "strike".len(),
                 "struck",
             ),
@@ -1413,6 +1426,21 @@ mod tests {
                 source.find("hard break").unwrap()
                     ..source.find("\n\n> # Quote").unwrap(),
                 "",
+            ),
+            (
+                source.find("---\n\n    indented").unwrap() + 1
+                    ..source.find("---\n\n    indented").unwrap() + 2,
+                "*",
+            ),
+            (
+                source.find("indented code").unwrap()
+                    ..source.find("indented code").unwrap() + "indented code".len(),
+                "indented edited code",
+            ),
+            (
+                source.find("example.com/ref").unwrap()
+                    ..source.find("example.com/ref").unwrap() + "example.com/ref".len(),
+                "example.com/updated-ref",
             ),
             (
                 source.find("Quote").unwrap()..source.find("Quote").unwrap() + "Quote".len(),
