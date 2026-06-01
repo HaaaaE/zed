@@ -155,7 +155,7 @@ fn collect_inline_parent_nodes<'tree>(node: Node<'tree>, nodes: &mut Vec<Node<'t
     }
 
     let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
+    for child in node.named_children(&mut cursor) {
         collect_inline_parent_nodes(child, nodes);
     }
 }
@@ -165,27 +165,18 @@ fn inline_included_ranges(parent_node: Node<'_>) -> Vec<TreeSitterRange> {
     let mut range = parent_node.range();
     let mut cursor = parent_node.walk();
 
-    if cursor.goto_first_child() {
-        loop {
-            let child = cursor.node();
-            if child.is_named() {
-                let child_range = child.range();
-                if range.start_byte < child_range.start_byte {
-                    ranges.push(TreeSitterRange {
-                        start_byte: range.start_byte,
-                        start_point: range.start_point,
-                        end_byte: child_range.start_byte,
-                        end_point: child_range.start_point,
-                    });
-                }
-                range.start_byte = child_range.end_byte;
-                range.start_point = child_range.end_point;
-            }
-
-            if !cursor.goto_next_sibling() {
-                break;
-            }
+    for child in parent_node.named_children(&mut cursor) {
+        let child_range = child.range();
+        if range.start_byte < child_range.start_byte {
+            ranges.push(TreeSitterRange {
+                start_byte: range.start_byte,
+                start_point: range.start_point,
+                end_byte: child_range.start_byte,
+                end_point: child_range.start_point,
+            });
         }
+        range.start_byte = child_range.end_byte;
+        range.start_point = child_range.end_point;
     }
 
     if range.start_byte < range.end_byte {

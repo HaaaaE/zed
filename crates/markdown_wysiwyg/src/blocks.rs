@@ -42,7 +42,7 @@ fn collect_block_nodes(source: &str, node: Node<'_>, blocks: &mut Vec<MarkdownBl
     }
 
     let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
+    for child in node.named_children(&mut cursor) {
         collect_block_nodes(source, child, blocks);
     }
 }
@@ -68,7 +68,7 @@ fn collect_block_nodes_in_source_range(
     }
 
     let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
+    for child in node.named_children(&mut cursor) {
         collect_block_nodes_in_source_range(source, child, source_range, blocks);
     }
 }

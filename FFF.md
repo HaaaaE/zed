@@ -123,3 +123,7 @@
   - 该次整段 session 约 26.57s 且 SD 较大，仍不作为整体改善结论；分段上 derived syntax 的 blocks/inlines/projection 已基本都降到十几毫秒级。
   - 当前主要 syntax 热点剩 parse：`rendered_edit_equal_length_draw_syntax_parse` 约 868ms，`rendered_edit_length_change_draw_syntax_parse` 约 443ms，`rendered_enter_apply_syntax_parse` 约 438ms，`rendered_delete_apply_syntax_parse` 约 342ms；下一步需要继续降低 incremental parse 输入/复用成本，或让普通 rendered draw/apply 避开同步 parse。
   - 已验证：`cargo fmt --check`、`cargo test -p markdown_wysiwyg`、`cargo check -p updraft_editor`、`cargo perf-test -p md_editor -- --important`。
+  - block/inline parent traversal 改用 tree-sitter named children，避免在只关心 block/inline parent 节点的路径上访问匿名标点节点；`inline_included_ranges` 也直接遍历 named children 来生成 included ranges。
+  - 最新 perf artifact：`.perf-runs\20260601-105142-dc0bb2e7ac.md_editor.json`。large session 约 23.88s 但 SD 仍较大；derived syntax 继续保持十几毫秒级，parse 仍是主项：equal-length draw parse 约 884ms，length-change draw parse 约 432ms，enter parse 约 435ms，delete parse 约 312ms。
+  - 这次 named-child cleanup 对 large-doc parse 没有形成决定性改善；下一步应避免同步 parse 或继续拆 parse 内部耗时（block parse vs inline parent collect/inline parse），不要再把主要精力放在 derived collection 上。
+  - 已验证：`cargo fmt --check`、`cargo test -p markdown_wysiwyg`、`cargo check -p updraft_editor`、`cargo perf-test -p md_editor -- --important`。
