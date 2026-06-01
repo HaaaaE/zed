@@ -5,8 +5,11 @@ use tree_sitter::Node;
 use super::{
     MarkdownBlock, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineTree,
     MarkdownProjectionReplacement, MarkdownStructure, MarkdownSyntaxTree,
-    ProjectionMarkerDependency, old_range_for_clean_new_range, range_contains, ranges_overlap,
-    ranges_touch, shift_clean_old_range_to_new,
+    ProjectionMarkerDependency,
+    source::{
+        old_range_for_clean_new_range, range_contains, ranges_overlap, ranges_touch,
+        shift_clean_old_range_to_new,
+    },
 };
 
 impl MarkdownSyntaxTree {

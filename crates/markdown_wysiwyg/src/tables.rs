@@ -2,8 +2,8 @@ use std::ops::Range;
 
 use super::{
     MarkdownBlock, MarkdownBlockKind, MarkdownStructure, MarkdownSyntaxTree, MarkdownTable,
-    MarkdownTableAlignment, MarkdownTableCell, MarkdownTableRow, line_range_checked,
-    ranges_overlap, trim_ascii_whitespace, trim_line_end,
+    MarkdownTableAlignment, MarkdownTableCell, MarkdownTableRow,
+    source::{line_range_checked, ranges_overlap, trim_ascii_whitespace, trim_line_end},
 };
 
 impl MarkdownSyntaxTree {

@@ -5,7 +5,7 @@ use tree_sitter::{Node, Parser, Range as TreeSitterRange, Tree};
 use super::{
     MarkdownInlineTree, MarkdownParseTree, record_timed_block_parse,
     record_timed_inline_parent_scan, record_timed_inline_parse, record_timed_inline_range_build,
-    record_timed_inline_reuse_index,
+    record_timed_inline_reuse_index, source::ranges_touch,
 };
 
 thread_local! {
@@ -234,10 +234,6 @@ fn old_inline_tree_for_parent<'a>(
             index_by_range.get(&(parent_node.start_byte(), parent_node.end_byte()))
         })
         .and_then(|index| old_tree.inline_trees.get(*index))
-}
-
-fn ranges_touch(left: &Range<usize>, right: &Range<usize>) -> bool {
-    left.start <= right.end && right.start <= left.end
 }
 
 fn ranges_touch_any(range: &Range<usize>, dirty_ranges: &[Range<usize>]) -> bool {

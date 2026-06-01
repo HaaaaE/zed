@@ -3,7 +3,8 @@ use std::ops::Range;
 use super::{
     MarkdownBlock, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan,
     MarkdownProjectionMap, MarkdownProjectionOperation, MarkdownProjectionReplacement,
-    MarkdownRangeSemantics, MarkdownSyntaxTree, range_contains, ranges_overlap,
+    MarkdownRangeSemantics, MarkdownSyntaxTree,
+    source::{range_contains, ranges_overlap},
 };
 
 impl MarkdownSyntaxTree {
