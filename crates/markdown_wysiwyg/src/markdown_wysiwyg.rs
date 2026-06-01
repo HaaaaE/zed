@@ -1536,6 +1536,10 @@ mod tests {
                 "!",
             ),
             (
+                source.find("Paragraph").unwrap()..source.find("Paragraph").unwrap(),
+                "## ",
+            ),
+            (
                 source.find("bold").unwrap()..source.find("bold").unwrap() + "bold".len(),
                 "strong",
             ),
@@ -1546,6 +1550,16 @@ mod tests {
             (
                 source.find("quoted").unwrap()..source.find("quoted").unwrap() + "quoted".len(),
                 "quoted text",
+            ),
+            (
+                source.find("> - [ ] task").unwrap() + 2
+                    ..source.find("> - [ ] task").unwrap() + 3,
+                "1.",
+            ),
+            (
+                source.find("| --- | --- |").unwrap() + 2
+                    ..source.find("| --- | --- |").unwrap() + 3,
+                "x",
             ),
             (
                 source.find("`b`").unwrap() + 1..source.find("`b`").unwrap() + 2,
