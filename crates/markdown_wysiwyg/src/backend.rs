@@ -126,17 +126,72 @@ impl MarkdownBackend for TreeSitterMarkdownBackend {
 #[cfg(any(test, perf_enabled))]
 impl PulldownMarkdownBackend {
     pub(super) fn parse_syntax_data(source: &str) -> MarkdownSyntaxData {
-        let source_line_starts = line_starts(source);
-        let blocks = collect_pulldown_structure_blocks(source, &source_line_starts);
-        let inline_trees = parse_inline_trees_for_ranges(
-            source,
-            pulldown_inline_parent_ranges(source, &source_line_starts, &blocks),
-        );
-        let structure = MarkdownStructure::from_parts(blocks, inline_trees);
+        let structure = pulldown_structure(source);
         record_timed_collect_syntax_data(|| {
             MarkdownSemanticsAssembler::assemble(source, &structure)
         })
     }
+
+    pub(super) fn parse_syntax_tree(source: &str) -> MarkdownSyntaxTree {
+        let (structure, parser_state) = pulldown_structure_and_parser_state(source);
+        let data = record_timed_collect_syntax_data(|| {
+            MarkdownSemanticsAssembler::assemble(source, &structure)
+        });
+
+        MarkdownSyntaxTree { parser_state, data }
+    }
+
+    pub(super) fn parse_syntax_tree_after_edit(
+        source: &str,
+        previous: &MarkdownSyntaxTree,
+        old_range: Range<usize>,
+        new_range: Range<usize>,
+    ) -> MarkdownSyntaxTree {
+        let (structure, parser_state) = pulldown_structure_and_parser_state(source);
+        let data = record_timed_collect_syntax_data(|| {
+            MarkdownSemanticsAssembler::assemble_incremental(
+                source, previous, &structure, &old_range, &new_range,
+            )
+        });
+
+        MarkdownSyntaxTree { parser_state, data }
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn pulldown_structure(source: &str) -> MarkdownStructure {
+    let source_line_starts = line_starts(source);
+    let blocks = collect_pulldown_structure_blocks(source, &source_line_starts);
+    let inline_trees = parse_inline_trees_for_ranges(
+        source,
+        pulldown_inline_parent_ranges(source, &source_line_starts, &blocks),
+    );
+    MarkdownStructure::from_parts(blocks, inline_trees)
+}
+
+#[cfg(any(test, perf_enabled))]
+fn pulldown_structure_and_parser_state(source: &str) -> (MarkdownStructure, MarkdownParseTree) {
+    let source_line_starts = line_starts(source);
+    let blocks = collect_pulldown_structure_blocks(source, &source_line_starts);
+    let inline_trees = parse_inline_trees_for_ranges(
+        source,
+        pulldown_inline_parent_ranges(source, &source_line_starts, &blocks),
+    );
+    let inline_tree_by_parent_id = inline_trees
+        .iter()
+        .enumerate()
+        .map(|(index, inline_tree)| (inline_tree.parent_id, index))
+        .collect();
+    let parser_state = MarkdownParseTree {
+        block_tree: parse_markdown(source, None, None).block_tree,
+        inline_trees: inline_trees.clone(),
+        inline_tree_by_parent_id,
+    };
+
+    (
+        MarkdownStructure::from_parts(blocks, inline_trees),
+        parser_state,
+    )
 }
 
 #[cfg(any(test, perf_enabled))]

@@ -1065,6 +1065,91 @@ mod tests {
     }
 
     #[test]
+    fn pulldown_incremental_matches_pulldown_full_after_local_edits() {
+        let source = concat!(
+            "# Title\n",
+            "\n",
+            "alpha **bold** &amp; [link](https://example.com)\n",
+            "\n",
+            "> # Quote\n",
+            "> \n",
+            "> ```rust\n",
+            "> let x = 1;\n",
+            "> ```\n",
+            "\n",
+            "| head | value |\n",
+            "| --- | --- |\n",
+            "| **a** | `b` |\n",
+            "\n",
+            "- [ ] task item\n",
+        );
+        let cases = [
+            (
+                source.find("Title").unwrap() + "Title".len()
+                    ..source.find("Title").unwrap() + "Title".len(),
+                "!",
+            ),
+            (
+                source.find("bold").unwrap()..source.find("bold").unwrap() + "bold".len(),
+                "strong",
+            ),
+            (
+                source.find("Quote").unwrap()..source.find("Quote").unwrap() + "Quote".len(),
+                "Quoted",
+            ),
+            (
+                source.find("let x").unwrap() + "let x".len()
+                    ..source.find("let x").unwrap() + "let x".len(),
+                "mut ",
+            ),
+            (
+                source.find("`b`").unwrap() + 1..source.find("`b`").unwrap() + 2,
+                "code",
+            ),
+            (
+                source.find("task").unwrap()..source.find("task").unwrap() + "task".len(),
+                "todo",
+            ),
+        ];
+
+        for (old_range, replacement) in cases {
+            let tree = PulldownMarkdownBackend::parse_syntax_tree(source);
+            let mut new_source = source.to_string();
+            new_source.replace_range(old_range.clone(), replacement);
+            let new_range = old_range.start..old_range.start + replacement.len();
+            let incremental = PulldownMarkdownBackend::parse_syntax_tree_after_edit(
+                &new_source,
+                &tree,
+                old_range,
+                new_range,
+            );
+            let full = PulldownMarkdownBackend::parse_syntax_tree(&new_source);
+
+            assert_eq!(
+                incremental
+                    .blocks()
+                    .iter()
+                    .map(block_semantics_without_id)
+                    .collect::<Vec<_>>(),
+                full.blocks()
+                    .iter()
+                    .map(block_semantics_without_id)
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(incremental.tables(), full.tables());
+            assert_eq!(incremental.inline_spans(), full.inline_spans());
+            assert_eq!(
+                incremental.syntax_data().projection_replacements(),
+                full.syntax_data().projection_replacements()
+            );
+            assert_eq!(
+                incremental.syntax_data().projection_marker_dependencies(),
+                full.syntax_data().projection_marker_dependencies()
+            );
+        }
+    }
+
+    #[test]
     fn parses_blockquotes_and_list_containers_without_losing_nested_blocks() {
         let source = "> quote\n> - [ ] todo\n>   1. ordered\n\n- loose\n  - nested\n1. one\n";
         let tree = MarkdownSyntaxTree::parse(source);
