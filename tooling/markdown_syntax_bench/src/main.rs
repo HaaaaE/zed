@@ -323,6 +323,16 @@ edge 1 | **edge 2** | edge 3
 | broken a | broken b |
 | not a delimiter |
 
+"#,
+        "CRLF paragraph source-row with **strong** and [link](https://example.com/crlf)\r\n",
+        "CRLF hard break source-row  \r\n",
+        "continued CRLF source-row\r\n",
+        "\r\n",
+        "crlf left | crlf center | crlf right\r\n",
+        "--- | :---: | ---:\r\n",
+        "crlf 1 | **crlf 2** | crlf 3\r\n",
+        "\r\n",
+        r#"
 ```rust
 fn source_row() {
     println!("source-row");
