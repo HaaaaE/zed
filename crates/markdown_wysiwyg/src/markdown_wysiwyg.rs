@@ -678,6 +678,59 @@ mod tests {
         )
     }
 
+    fn table_semantics_without_id(
+        table: &MarkdownTable,
+    ) -> (
+        Range<usize>,
+        Range<usize>,
+        MarkdownTableRow,
+        MarkdownTableRow,
+        Vec<MarkdownTableRow>,
+        Vec<MarkdownTableAlignment>,
+        Vec<Range<usize>>,
+        Vec<Range<usize>>,
+    ) {
+        (
+            table.source_range.clone(),
+            table.row_range.clone(),
+            table.header.clone(),
+            table.delimiter.clone(),
+            table.body.clone(),
+            table.alignments.clone(),
+            table.pipe_marker_ranges.clone(),
+            table.delimiter_marker_ranges.clone(),
+        )
+    }
+
+    fn range_semantics_without_block_ids(
+        semantics: MarkdownRangeSemantics,
+    ) -> (
+        Vec<(
+            MarkdownBlockKind,
+            Range<usize>,
+            Range<usize>,
+            Vec<Range<usize>>,
+            Range<usize>,
+            bool,
+        )>,
+        Vec<MarkdownInlineSpan>,
+        MarkdownProjectionMap,
+        Vec<Range<usize>>,
+        Vec<MarkdownInlineSpan>,
+    ) {
+        (
+            semantics
+                .blocks
+                .iter()
+                .map(block_semantics_without_id)
+                .collect(),
+            semantics.inline_spans,
+            semantics.projection,
+            semantics.active_projection_source_ranges,
+            semantics.rendered_element_candidates,
+        )
+    }
+
     #[test]
     fn parses_atx_headings_with_tree_sitter() {
         let tree = MarkdownSyntaxTree::parse("# Title\n\nText\n");
@@ -1248,6 +1301,120 @@ mod tests {
                 full.syntax_data().projection_marker_dependencies()
             );
         }
+    }
+
+    #[test]
+    fn pulldown_backend_matches_tree_sitter_query_semantics() {
+        let source = concat!(
+            "# Title\n",
+            "\n",
+            "Paragraph **bold** &amp; ![alt](img.png)\n",
+            "\n",
+            "> quoted\n",
+            "> - [ ] task\n",
+            "\n",
+            "| head | value |\n",
+            "| --- | --- |\n",
+            "| **a** | `b` |\n",
+            "\n",
+            "- item\n",
+        );
+        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let pulldown = PulldownMarkdownBackend::parse_syntax_tree(source);
+        let visible_source_range = source.find("Paragraph").unwrap()..source.find("- item").unwrap();
+        let active_start = source.find("bold").unwrap();
+        let active_source_range = active_start..active_start + 1;
+        let inactive_start = source.find("task").unwrap();
+        let inactive_source_ranges = [inactive_start..inactive_start + "task".len()];
+        let table_row = source[..source.find("| **a**").unwrap()]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count();
+
+        assert_eq!(
+            pulldown
+                .blocks_in_source_range(visible_source_range.clone())
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>(),
+            tree_sitter
+                .blocks_in_source_range(visible_source_range.clone())
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            pulldown.inline_spans_in_source_range(visible_source_range.clone()).collect::<Vec<_>>(),
+            tree_sitter
+                .inline_spans_in_source_range(visible_source_range.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            pulldown
+                .tables()
+                .iter()
+                .map(table_semantics_without_id)
+                .collect::<Vec<_>>(),
+            tree_sitter
+                .tables()
+                .iter()
+                .map(table_semantics_without_id)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            pulldown.table_for_source_row(table_row).map(table_semantics_without_id),
+            tree_sitter
+                .table_for_source_row(table_row)
+                .map(table_semantics_without_id)
+        );
+        assert_eq!(
+            pulldown
+                .table_for_source_range(visible_source_range.clone())
+                .map(table_semantics_without_id),
+            tree_sitter
+                .table_for_source_range(visible_source_range.clone())
+                .map(table_semantics_without_id)
+        );
+        assert_eq!(
+            pulldown
+                .table_row_for_source_row(table_row)
+                .map(|(_, row)| row.clone()),
+            tree_sitter
+                .table_row_for_source_row(table_row)
+                .map(|(_, row)| row.clone())
+        );
+        assert_eq!(
+            pulldown.projection_for_source_range(
+                visible_source_range.clone(),
+                Some(active_source_range.clone()),
+            ),
+            tree_sitter.projection_for_source_range(
+                visible_source_range.clone(),
+                Some(active_source_range.clone()),
+            )
+        );
+        assert_eq!(
+            pulldown.active_projection_source_ranges_for_source_range(
+                visible_source_range.clone(),
+                Some(active_source_range.clone()),
+                &inactive_source_ranges,
+            ),
+            tree_sitter.active_projection_source_ranges_for_source_range(
+                visible_source_range.clone(),
+                Some(active_source_range.clone()),
+                &inactive_source_ranges,
+            )
+        );
+        assert_eq!(
+            range_semantics_without_block_ids(pulldown.range_semantics_for_source_range(
+                visible_source_range.clone(),
+                Some(active_source_range.clone()),
+                &inactive_source_ranges,
+            )),
+            range_semantics_without_block_ids(tree_sitter.range_semantics_for_source_range(
+                visible_source_range,
+                Some(active_source_range),
+                &inactive_source_ranges,
+            ))
+        );
     }
 
     #[test]
