@@ -4,6 +4,7 @@ use std::{collections::HashMap, fmt, ops::Range};
 
 use tree_sitter::{InputEdit, Node, Tree};
 
+mod assembler;
 mod blocks;
 mod inline;
 mod parser;
@@ -12,17 +13,10 @@ mod source;
 mod structure;
 mod tables;
 
-use inline::{
-    collect_incremental_inline_spans, collect_incremental_projection_marker_dependencies,
-    collect_incremental_projection_replacements, collect_structure_inline_spans,
-    collect_structure_projection_replacements, inline_span_prefix_maximum_ends,
-    projection_marker_dependencies, projection_marker_prefix_maximum_ends,
-    projection_replacement_prefix_maximum_ends,
-};
+use assembler::MarkdownSemanticsAssembler;
 use parser::parse_markdown;
-use source::{edit_byte_range, line_starts, line_starts_after_edit_range, point_for_offset};
+use source::{edit_byte_range, line_starts_after_edit_range, point_for_offset};
 use structure::{MarkdownStructure, MarkdownStructureBlock};
-use tables::collect_structure_tables;
 
 #[cfg(any(test, perf_enabled))]
 thread_local! {
@@ -103,8 +97,6 @@ trait MarkdownBackend {
 }
 
 struct TreeSitterMarkdownBackend;
-
-struct MarkdownSemanticsAssembler;
 
 #[derive(Clone, Debug)]
 pub struct MarkdownParseTree {
@@ -252,118 +244,6 @@ impl MarkdownSyntaxData {
             .wrapping_add(self.inline_span_prefix_maximum_ends.len())
             .wrapping_add(self.projection_replacement_prefix_maximum_ends.len())
             .wrapping_add(self.projection_marker_prefix_maximum_ends.len())
-    }
-}
-
-impl MarkdownSemanticsAssembler {
-    fn assemble(source: &str, structure: &MarkdownStructure) -> MarkdownSyntaxData {
-        blocks::validate_structure_blocks(structure.blocks());
-        let line_starts = record_timed_line_start_collect(|| line_starts(source));
-        let blocks = record_timed_block_collect(|| {
-            blocks::collect_markdown_blocks(source, &line_starts, structure)
-        });
-        let tables = record_timed_table_collect(|| {
-            collect_structure_tables(source, &line_starts, structure)
-        });
-        let inline_spans =
-            record_timed_inline_collect(|| collect_structure_inline_spans(source, structure));
-        let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
-        let (
-            projection_replacements,
-            projection_replacement_prefix_maximum_ends,
-            projection_marker_dependencies,
-            projection_marker_prefix_maximum_ends,
-        ) = record_timed_projection_collect(|| {
-            let projection_replacements =
-                collect_structure_projection_replacements(source, structure, &blocks);
-            let projection_replacement_prefix_maximum_ends =
-                projection_replacement_prefix_maximum_ends(&projection_replacements);
-            let projection_marker_dependencies =
-                projection_marker_dependencies(&blocks, &inline_spans, &projection_replacements);
-            let projection_marker_prefix_maximum_ends =
-                projection_marker_prefix_maximum_ends(&projection_marker_dependencies);
-            (
-                projection_replacements,
-                projection_replacement_prefix_maximum_ends,
-                projection_marker_dependencies,
-                projection_marker_prefix_maximum_ends,
-            )
-        });
-
-        MarkdownSyntaxData {
-            source_len: source.len(),
-            line_starts,
-            blocks,
-            tables,
-            inline_spans,
-            inline_span_prefix_maximum_ends,
-            projection_replacements,
-            projection_replacement_prefix_maximum_ends,
-            projection_marker_dependencies,
-            projection_marker_prefix_maximum_ends,
-        }
-    }
-
-    fn assemble_incremental(
-        source: &str,
-        previous: &MarkdownSyntaxTree,
-        structure: &MarkdownStructure,
-        old_range: &Range<usize>,
-        new_range: &Range<usize>,
-    ) -> MarkdownSyntaxData {
-        blocks::validate_structure_blocks(structure.blocks());
-        let line_starts = record_timed_line_start_collect(|| line_starts(source));
-        let blocks = record_timed_block_collect(|| {
-            blocks::collect_incremental_blocks(source, structure, &line_starts)
-        });
-        let tables = record_timed_table_collect(|| {
-            collect_structure_tables(source, &line_starts, structure)
-        });
-        let inline_spans = record_timed_inline_collect(|| {
-            collect_incremental_inline_spans(source, previous, structure, old_range, new_range)
-        });
-        let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
-        let (
-            projection_replacements,
-            projection_replacement_prefix_maximum_ends,
-            projection_marker_dependencies,
-            projection_marker_prefix_maximum_ends,
-        ) = record_timed_projection_collect(|| {
-            let projection_replacements = collect_incremental_projection_replacements(
-                source, previous, structure, &blocks, old_range, new_range,
-            );
-            let projection_replacement_prefix_maximum_ends =
-                projection_replacement_prefix_maximum_ends(&projection_replacements);
-            let projection_marker_dependencies = collect_incremental_projection_marker_dependencies(
-                previous,
-                &blocks,
-                &inline_spans,
-                &projection_replacements,
-                old_range,
-                new_range,
-            );
-            let projection_marker_prefix_maximum_ends =
-                projection_marker_prefix_maximum_ends(&projection_marker_dependencies);
-            (
-                projection_replacements,
-                projection_replacement_prefix_maximum_ends,
-                projection_marker_dependencies,
-                projection_marker_prefix_maximum_ends,
-            )
-        });
-
-        MarkdownSyntaxData {
-            source_len: source.len(),
-            line_starts,
-            blocks,
-            tables,
-            inline_spans,
-            inline_span_prefix_maximum_ends,
-            projection_replacements,
-            projection_replacement_prefix_maximum_ends,
-            projection_marker_dependencies,
-            projection_marker_prefix_maximum_ends,
-        }
     }
 }
 
@@ -866,7 +746,7 @@ fn record_timed_projection_collect<T>(run: impl FnOnce() -> T) -> T {
 
 #[cfg(test)]
 mod tests {
-    use super::source::trim_line_end;
+    use super::source::{line_starts, trim_line_end};
     use super::*;
 
     fn block_semantics_without_id(

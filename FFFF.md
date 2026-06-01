@@ -42,6 +42,7 @@
 - 2026-06-01：benchmark crate 暂时移除未接线的 comrak / markdown / rushdown 依赖，解除 `entities` 版本冲突；第十八轮验证 `cargo check -p markdown_wysiwyg` 与 `cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml` 全部通过。
 - 2026-06-01：共享 source/range helper 已从 `markdown_wysiwyg.rs` 下沉到 `source.rs`，block / inline / table / projection / parser 模块改为直接依赖该内部模块；第十九轮验证 `cargo check -p markdown_wysiwyg`、`cargo test -p markdown_wysiwyg` 与 `cargo check -p updraft_editor` 全部通过。
 - 2026-06-01：`MarkdownStructure` 与 `MarkdownStructureBlock` 已从 `markdown_wysiwyg.rs` 下沉到 `structure.rs`，粗结构载体和 parse-tree block 收集入口开始独立于主门面文件；第二十轮验证 `cargo check -p markdown_wysiwyg`、`cargo test -p markdown_wysiwyg` 与 `cargo check -p updraft_editor` 全部通过。
+- 2026-06-01：`MarkdownSemanticsAssembler` 已从 `markdown_wysiwyg.rs` 下沉到 `assembler.rs`，full/incremental 的 `MarkdownStructure -> MarkdownSyntaxData` 编排入口独立于主门面文件；第二十一轮验证 `cargo check -p markdown_wysiwyg`、`cargo test -p markdown_wysiwyg` 与 `cargo check -p updraft_editor` 全部通过。
 
 ## Implementation
 
@@ -80,7 +81,7 @@
 - 第一步只改 `markdown_wysiwyg` 和 benchmark，不改 `md_editor` 消费接口。
 - 第二步让 pulldown 适配器和 tree-sitter baseline 在同一批 fixture 上完全对齐，再决定是否切默认 backend。
 - 第三步只有在 pulldown 端到端更快且语义全等时，才把它设成默认；comrak 保留为参考/正确性后端，不进入热路径。
-- 当前状态已完成第一步中的 benchmark 雏形，并在 `markdown_wysiwyg` 主体里建立 backend / structure / assembler 的最小边界；`MarkdownStructure` 已实际驱动 full/incremental block 输出、table 生成、full/incremental inline 与 projection 收集，block structure 构建、block 语义组装与 block 查询逻辑已回收到 `blocks.rs`，full/incremental inline、projection helper 与 inline 查询逻辑已回收到 `inline.rs`，projection 查询、range semantics 与 projection 查询索引 helper 已回收到 `projection.rs`，table wrapper 与 table 查询入口已回收到 `tables.rs`，source/range 通用 helper 已回收到 `source.rs`，粗结构载体已回收到 `structure.rs`，退役 dead-code 对照入口已清理；benchmark 已开始输出裸 parser、baseline 和候选 adapter+diff 三类数据，下一步是继续把 backend / assembler 边界从主文件拆细，并在 pulldown/comrak 后端真正接线时再恢复对应依赖。
+- 当前状态已完成第一步中的 benchmark 雏形，并在 `markdown_wysiwyg` 主体里建立 backend / structure / assembler 的最小边界；`MarkdownStructure` 已实际驱动 full/incremental block 输出、table 生成、full/incremental inline 与 projection 收集，block structure 构建、block 语义组装与 block 查询逻辑已回收到 `blocks.rs`，full/incremental inline、projection helper 与 inline 查询逻辑已回收到 `inline.rs`，projection 查询、range semantics 与 projection 查询索引 helper 已回收到 `projection.rs`，table wrapper 与 table 查询入口已回收到 `tables.rs`，source/range 通用 helper 已回收到 `source.rs`，粗结构载体已回收到 `structure.rs`，语义 assembler 已回收到 `assembler.rs`，退役 dead-code 对照入口已清理；benchmark 已开始输出裸 parser、baseline 和候选 adapter+diff 三类数据，下一步是继续把 backend 边界从主文件拆细，并在 pulldown/comrak 后端真正接线时再恢复对应依赖。
 
 ## Assumptions
 
