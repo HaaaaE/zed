@@ -750,6 +750,8 @@ mod tests {
         let inactive_start = source.find("task").unwrap();
         let inactive_source_ranges = [inactive_start..inactive_start + "task".len()];
         let table_row = row_for_source_substring(source, "| **a**");
+        let visible_row_range =
+            row_for_source_substring(source, "Paragraph")..row_for_source_substring(source, "- item");
 
         assert_eq!(
             candidate
@@ -806,12 +808,26 @@ mod tests {
                 .map(|(_, row)| row.clone())
         );
         assert_eq!(
+            candidate.source_range_for_rows(visible_row_range.clone()),
+            tree_sitter.source_range_for_rows(visible_row_range.clone())
+        );
+        assert_eq!(
             candidate.projection_for_source_range(
                 visible_source_range.clone(),
                 Some(active_source_range.clone()),
             ),
             tree_sitter.projection_for_source_range(
                 visible_source_range.clone(),
+                Some(active_source_range.clone()),
+            )
+        );
+        assert_eq!(
+            candidate.projection_for_visible_rows(
+                visible_row_range.clone(),
+                Some(active_source_range.clone()),
+            ),
+            tree_sitter.projection_for_visible_rows(
+                visible_row_range.clone(),
                 Some(active_source_range.clone()),
             )
         );
@@ -835,6 +851,18 @@ mod tests {
             )),
             range_semantics_without_block_ids(tree_sitter.range_semantics_for_source_range(
                 visible_source_range,
+                Some(active_source_range.clone()),
+                &inactive_source_ranges,
+            ))
+        );
+        assert_eq!(
+            range_semantics_without_block_ids(candidate.range_semantics_for_visible_rows(
+                visible_row_range.clone(),
+                Some(active_source_range.clone()),
+                &inactive_source_ranges,
+            )),
+            range_semantics_without_block_ids(tree_sitter.range_semantics_for_visible_rows(
+                visible_row_range,
                 Some(active_source_range),
                 &inactive_source_ranges,
             ))
