@@ -874,6 +874,8 @@ fn structure_fenced_code_marker_ranges_from_range(
 ) -> Vec<Range<usize>> {
     let mut marker_ranges = Vec::new();
     let first_line = first_line_range(source, source_range.clone());
+    let starts_after_blockquote_prefix =
+        fenced_code_starts_after_blockquote_prefix(source, source_range.start);
     if let Some((fence_byte, delimiter_range)) =
         fenced_code_delimiter_range(source, first_line.clone())
     {
@@ -885,8 +887,11 @@ fn structure_fenced_code_marker_ranges_from_range(
 
         if let Some(last_line) = last_line_range(source, source_range)
             && last_line.start > first_line.start
-            && let Some((closing_fence_byte, closing_range)) =
-                fenced_code_delimiter_range(source, last_line)
+            && let Some((closing_fence_byte, closing_range)) = fenced_code_closing_delimiter_range(
+                source,
+                last_line,
+                starts_after_blockquote_prefix,
+            )
             && closing_fence_byte == fence_byte
         {
             marker_ranges.push(closing_range);
@@ -901,11 +906,29 @@ fn structure_fenced_code_content_range_from_range(
     source: &str,
     source_range: Range<usize>,
 ) -> Range<usize> {
+    let starts_after_blockquote_prefix =
+        fenced_code_starts_after_blockquote_prefix(source, source_range.start);
     let first_line = first_line_range(source, source_range.clone());
-    let content_start = line_end_with_newline(source, first_line.end, source_range.end);
+    let mut content_start = line_end_with_newline(source, first_line.end, source_range.end);
+    if starts_after_blockquote_prefix {
+        content_start = blockquote_content_start_for_line(
+            source,
+            content_start..line_end_after_line_start(source, content_start, source_range.end),
+        )
+        .unwrap_or(content_start);
+    }
     let content_end = last_line_range(source, source_range.clone())
         .filter(|last_line| last_line.start > first_line.start)
-        .map_or(source_range.end, |last_line| last_line.start);
+        .map_or(source_range.end, |last_line| {
+            if starts_after_blockquote_prefix
+                && let Some((_, closing_range)) =
+                    fenced_code_closing_delimiter_range(source, last_line.clone(), true)
+            {
+                closing_range.start
+            } else {
+                last_line.start
+            }
+        });
 
     content_start.min(content_end)..content_end
 }
@@ -916,6 +939,13 @@ fn first_line_range(source: &str, range: Range<usize>) -> Range<usize> {
         .find('\n')
         .map_or(range.end, |offset| range.start + offset);
     range.start..end
+}
+
+#[cfg(any(test, perf_enabled))]
+fn line_end_after_line_start(source: &str, line_start: usize, source_end: usize) -> usize {
+    source[line_start..source_end]
+        .find('\n')
+        .map_or(source_end, |offset| line_start + offset + 1)
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -952,6 +982,55 @@ fn fenced_code_delimiter_range(
         cursor += 1;
     }
     (cursor - delimiter_start >= 3).then_some((fence_byte, delimiter_start..cursor))
+}
+
+#[cfg(any(test, perf_enabled))]
+fn fenced_code_starts_after_blockquote_prefix(source: &str, offset: usize) -> bool {
+    let line_start = source[..offset]
+        .rfind('\n')
+        .map_or(0, |newline| newline + 1);
+    blockquote_content_start_for_line(source, line_start..offset) == Some(offset)
+}
+
+#[cfg(any(test, perf_enabled))]
+fn fenced_code_closing_delimiter_range(
+    source: &str,
+    line_range: Range<usize>,
+    starts_after_blockquote_prefix: bool,
+) -> Option<(u8, Range<usize>)> {
+    if starts_after_blockquote_prefix {
+        let content_start = blockquote_content_start_for_line(source, line_range.clone())?;
+        fenced_code_delimiter_range(source, content_start..line_range.end)
+    } else {
+        fenced_code_delimiter_range(source, line_range)
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn blockquote_content_start_for_line(source: &str, line_range: Range<usize>) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let line_range = trim_line_end(source, line_range);
+    let mut cursor = line_range.start;
+    let mut saw_marker = false;
+
+    loop {
+        let mut leading_spaces = 0;
+        while cursor < line_range.end && bytes[cursor] == b' ' && leading_spaces < 4 {
+            cursor += 1;
+            leading_spaces += 1;
+        }
+
+        if cursor < line_range.end && bytes[cursor] == b'>' {
+            saw_marker = true;
+            cursor += 1;
+            if cursor < line_range.end && bytes[cursor] == b' ' {
+                cursor += 1;
+            }
+            continue;
+        }
+
+        return saw_marker.then_some(cursor);
+    }
 }
 
 #[cfg(any(test, perf_enabled))]

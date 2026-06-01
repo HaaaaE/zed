@@ -434,6 +434,154 @@ fn synthesize_pulldown_paragraph_blocks(
     }
 
     blocks.extend(synthesized);
+    extend_blockquote_child_blocks_to_quoted_gaps(source, line_starts, blocks);
+}
+
+#[cfg(any(test, perf_enabled))]
+fn extend_blockquote_child_blocks_to_quoted_gaps(
+    source: &str,
+    line_starts: &[usize],
+    blocks: &mut [MarkdownStructureBlock],
+) {
+    let original_blocks = blocks.to_vec();
+    for block in blocks {
+        if matches!(
+            block.kind,
+            MarkdownBlockKind::BlockQuote | MarkdownBlockKind::FencedCodeBlock
+        ) || !block_is_inside_blockquote(&original_blocks, &block.source_range)
+        {
+            continue;
+        }
+
+        let Some(extended_end) =
+            quoted_gap_extension_end(source, line_starts, &block.source_range, block.kind)
+        else {
+            continue;
+        };
+        if extended_end <= block.source_range.end {
+            continue;
+        }
+
+        block.source_range.end = extended_end;
+        block.content_range.end = trim_line_end(source, block.content_range.start..extended_end).end;
+        block.row_range = row_range_for_byte_range(line_starts, block.source_range.clone());
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn block_is_inside_blockquote(blocks: &[MarkdownStructureBlock], range: &Range<usize>) -> bool {
+    blocks.iter().any(|block| {
+        block.kind == MarkdownBlockKind::BlockQuote
+            && block.source_range.start <= range.start
+            && block.source_range.end >= range.end
+    })
+}
+
+#[cfg(any(test, perf_enabled))]
+fn quoted_gap_extension_end(
+    source: &str,
+    line_starts: &[usize],
+    source_range: &Range<usize>,
+    kind: MarkdownBlockKind,
+) -> Option<usize> {
+    let extends_container = matches!(
+        kind,
+        MarkdownBlockKind::OrderedList
+            | MarkdownBlockKind::UnorderedList
+            | MarkdownBlockKind::ListItem
+            | MarkdownBlockKind::TaskListItem { .. }
+    );
+    let mut cursor = source_range.end;
+    let mut extended_blank = false;
+
+    loop {
+        let line = line_range_for_offset(source, line_starts, cursor)?;
+        if line.start != cursor {
+            return None;
+        }
+
+        let prefix = quoted_line_prefix(source, line.clone())?;
+        if prefix.content_is_blank {
+            if extends_container {
+                cursor = line.end;
+                extended_blank = true;
+                continue;
+            } else {
+                return Some(prefix.end);
+            }
+        }
+
+        return (extends_container
+            && (extended_blank
+                || block_ends_after_quoted_blank_line(source, line_starts, source_range)))
+        .then_some(prefix.end);
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn block_ends_after_quoted_blank_line(
+    source: &str,
+    line_starts: &[usize],
+    source_range: &Range<usize>,
+) -> bool {
+    if source_range.end == 0 {
+        return false;
+    }
+
+    let row = line_starts.partition_point(|line_start| *line_start < source_range.end) - 1;
+    let line = line_range(source, line_starts, row);
+    if line.end != source_range.end {
+        return false;
+    }
+
+    quoted_line_prefix(source, line).is_some_and(|prefix| prefix.content_is_blank)
+}
+
+#[cfg(any(test, perf_enabled))]
+fn line_range_for_offset(
+    source: &str,
+    line_starts: &[usize],
+    offset: usize,
+) -> Option<Range<usize>> {
+    if offset >= source.len() {
+        return None;
+    }
+
+    let row = line_starts.partition_point(|line_start| *line_start <= offset) - 1;
+    Some(line_range(source, line_starts, row))
+}
+
+#[cfg(any(test, perf_enabled))]
+struct QuotedLinePrefix {
+    end: usize,
+    content_is_blank: bool,
+}
+
+#[cfg(any(test, perf_enabled))]
+fn quoted_line_prefix(source: &str, line_range: Range<usize>) -> Option<QuotedLinePrefix> {
+    let bytes = source.as_bytes();
+    let trimmed_line = trim_line_end(source, line_range);
+    let mut cursor = trimmed_line.start;
+    let mut leading_spaces = 0;
+
+    while cursor < trimmed_line.end && bytes[cursor] == b' ' && leading_spaces < 4 {
+        cursor += 1;
+        leading_spaces += 1;
+    }
+
+    if cursor >= trimmed_line.end || bytes[cursor] != b'>' {
+        return None;
+    }
+
+    cursor += 1;
+    if cursor < trimmed_line.end && bytes[cursor] == b' ' {
+        cursor += 1;
+    }
+
+    Some(QuotedLinePrefix {
+        end: cursor,
+        content_is_blank: source[cursor..trimmed_line.end].trim().is_empty(),
+    })
 }
 
 #[cfg(any(test, perf_enabled))]
