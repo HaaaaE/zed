@@ -841,6 +841,39 @@ mod tests {
     }
 
     #[test]
+    fn pulldown_backend_matches_tree_sitter_html_block_range_semantics() {
+        let source = concat!(
+            "<div class=\"note\">raw html</div>\n",
+            "\n",
+            "<script>alert(1)</script>\n",
+            "\n",
+            "<style>.x { color: red; }</style>\n",
+            "\n",
+            "<?processing instruction?>\n",
+            "\n",
+            "<!-- comment -->\n",
+            "\n",
+            "<![CDATA[data]]>\n",
+            "\n",
+        );
+        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
+
+        assert_eq!(
+            pulldown
+                .blocks()
+                .iter()
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>(),
+            tree_sitter
+                .blocks()
+                .iter()
+                .map(block_semantics_without_id)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn pulldown_backend_matches_tree_sitter_link_reference_definition_blocks() {
         let source = concat!(
             "See [full][ref] and [shortcut].\n",
@@ -968,6 +1001,28 @@ mod tests {
                 .iter()
                 .map(block_semantics_without_id)
                 .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn pulldown_backend_matches_tree_sitter_blockquote_marker_only_inline_semantics() {
+        let source = concat!(
+            "> Blockquote source-row with **inline** content.\n",
+            "> - nested [item](https://example.com)\n",
+            "\n",
+            "after paragraph with *emphasis*\n",
+        );
+        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
+
+        assert_eq!(pulldown.inline_spans(), tree_sitter.inline_spans());
+        assert_eq!(
+            pulldown.projection_replacements(),
+            tree_sitter.syntax_data().projection_replacements()
+        );
+        assert_eq!(
+            pulldown.projection_marker_dependencies(),
+            tree_sitter.syntax_data().projection_marker_dependencies()
         );
     }
 
