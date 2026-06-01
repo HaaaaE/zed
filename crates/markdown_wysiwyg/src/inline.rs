@@ -26,6 +26,12 @@ impl MarkdownSyntaxTree {
             .take_while(move |span| span.source_range.start < end)
             .filter(move |span| span.source_range.start < end && span.source_range.end > start)
     }
+
+    fn partition_inline_spans_by_prefix_end(&self, offset: usize) -> usize {
+        self.data
+            .inline_span_prefix_maximum_ends
+            .partition_point(|end| *end <= offset)
+    }
 }
 
 pub(super) fn collect_structure_inline_spans(

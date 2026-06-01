@@ -7,6 +7,22 @@ use super::{
 };
 
 impl MarkdownSyntaxTree {
+    pub fn source_range_for_rows(&self, rows: Range<usize>) -> Range<usize> {
+        let start = self
+            .data
+            .line_starts
+            .get(rows.start)
+            .copied()
+            .unwrap_or(self.data.source_len);
+        let end = self
+            .data
+            .line_starts
+            .get(rows.end)
+            .copied()
+            .unwrap_or(self.data.source_len);
+        start..end
+    }
+
     fn projection_replacements_in_source_range(
         &self,
         range: Range<usize>,
@@ -277,6 +293,18 @@ impl MarkdownSyntaxTree {
         source_ranges.sort_by_key(|source_range| (source_range.start, source_range.end));
         source_ranges.dedup();
         source_ranges
+    }
+
+    fn partition_projection_marker_dependencies_by_prefix_end(&self, offset: usize) -> usize {
+        self.data
+            .projection_marker_prefix_maximum_ends
+            .partition_point(|end| *end <= offset)
+    }
+
+    fn partition_projection_replacements_by_prefix_end(&self, offset: usize) -> usize {
+        self.data
+            .projection_replacement_prefix_maximum_ends
+            .partition_point(|end| *end <= offset)
     }
 }
 

@@ -22,6 +22,12 @@ impl MarkdownSyntaxTree {
             .iter()
             .take_while(move |block| block.source_range.start < range.end)
     }
+
+    fn partition_blocks_by_end(&self, offset: usize) -> usize {
+        self.data
+            .blocks
+            .partition_point(|block| block.source_range.end <= offset)
+    }
 }
 
 pub(super) fn collect_structure_blocks(

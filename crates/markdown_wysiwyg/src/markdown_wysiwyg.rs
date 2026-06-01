@@ -669,22 +669,6 @@ impl MarkdownSyntaxTree {
         self.data.source_len
     }
 
-    pub fn source_range_for_rows(&self, rows: Range<usize>) -> Range<usize> {
-        let start = self
-            .data
-            .line_starts
-            .get(rows.start)
-            .copied()
-            .unwrap_or(self.data.source_len);
-        let end = self
-            .data
-            .line_starts
-            .get(rows.end)
-            .copied()
-            .unwrap_or(self.data.source_len);
-        start..end
-    }
-
     fn parse_with_previous_tree(
         source: &str,
         old_tree: Option<&MarkdownParseTree>,
@@ -721,30 +705,6 @@ impl MarkdownSyntaxTree {
         let _ = structure;
 
         Self { parser_state, data }
-    }
-
-    fn partition_blocks_by_end(&self, offset: usize) -> usize {
-        self.data
-            .blocks
-            .partition_point(|block| block.source_range.end <= offset)
-    }
-
-    fn partition_inline_spans_by_prefix_end(&self, offset: usize) -> usize {
-        self.data
-            .inline_span_prefix_maximum_ends
-            .partition_point(|end| *end <= offset)
-    }
-
-    fn partition_projection_marker_dependencies_by_prefix_end(&self, offset: usize) -> usize {
-        self.data
-            .projection_marker_prefix_maximum_ends
-            .partition_point(|end| *end <= offset)
-    }
-
-    fn partition_projection_replacements_by_prefix_end(&self, offset: usize) -> usize {
-        self.data
-            .projection_replacement_prefix_maximum_ends
-            .partition_point(|end| *end <= offset)
     }
 }
 
