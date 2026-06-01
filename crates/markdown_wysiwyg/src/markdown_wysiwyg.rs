@@ -1137,6 +1137,24 @@ mod tests {
     }
 
     #[test]
+    fn production_incremental_reparse_still_uses_tree_sitter_baseline() {
+        let old_source = "# Title\n\nParagraph **bold**\n\n| a | b |\n| - | - |\n| 1 | 2 |\n";
+        let tree = MarkdownSyntaxTree::parse(old_source);
+        let new_source = "# Title!\n\nParagraph **bold**\n\n| a | b |\n| - | - |\n| 1 | 2 |\n";
+
+        MarkdownSyntaxTree::reset_stats_for_tests();
+        let tree = tree.reparse_after_edit_range(7..7, 7..8, new_source);
+        let stats = MarkdownSyntaxTree::stats_for_tests();
+
+        assert_eq!(tree.source_len(), new_source.len());
+        assert_eq!(stats.parse_calls, 1);
+        assert!(
+            stats.block_parse_ns > 0,
+            "production incremental reparse must keep using tree-sitter block parsing until pulldown is proven equivalent"
+        );
+    }
+
+    #[test]
     fn pulldown_backend_matches_tree_sitter_block_semantics() {
         let source = concat!(
             "# Title\n",
