@@ -1505,6 +1505,29 @@ mod tests {
                 "*",
             ),
             (
+                source.find("> 1. quoted ordered").unwrap()
+                    ..source.find("- parent item").unwrap(),
+                "",
+            ),
+            (
+                source.find("- parent item").unwrap()
+                    ..source.find("\n\n1. numbered parent").unwrap(),
+                concat!("- parent item\n", "  paragraph continuation with **inline**\n"),
+            ),
+            (
+                source.find("1. numbered parent").unwrap()..source.find("\n\n| head").unwrap(),
+                "",
+            ),
+            (
+                source.find("| head | value |").unwrap()..source.find("\n\n<div").unwrap(),
+                "replacement table paragraph with **inline**\n",
+            ),
+            (
+                source.find("<div class=\"note\">raw html</div>").unwrap()
+                    ..source.find("- [ ] task item").unwrap(),
+                "<section>changed</section>\n\n",
+            ),
+            (
                 source.find("| --- | --- |").unwrap() + 2
                     ..source.find("| --- | --- |").unwrap() + 2,
                 ":",
@@ -1755,6 +1778,20 @@ mod tests {
                 source.find("   - ordered child").unwrap() + 3
                     ..source.find("   - ordered child").unwrap() + 4,
                 "*",
+            ),
+            (
+                source.find(">   1. nested ordered").unwrap()
+                    ..source.find("\n\n- parent").unwrap(),
+                "",
+            ),
+            (
+                source.find("  > nested quote").unwrap()
+                    ..source.find("\n\n1. ordered parent").unwrap(),
+                "  continuation paragraph with **inline**\n",
+            ),
+            (
+                source.find("1. ordered parent").unwrap()..source.find("\n\n| head").unwrap(),
+                "",
             ),
             (
                 source.find("| --- | --- |").unwrap() + 2

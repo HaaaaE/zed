@@ -912,14 +912,29 @@ fn pulldown_list_item_paragraph_end(
         })
         .map(|block| block.source_range.start)
         .min()
-        .unwrap_or_else(|| line_end_after_offset(source, paragraph_start, item.source_range.end))
+        .unwrap_or_else(|| {
+            paragraph_end_before_blank_line(source, paragraph_start, item.source_range.end)
+        })
 }
 
 #[cfg(any(test, perf_enabled))]
-fn line_end_after_offset(source: &str, offset: usize, limit: usize) -> usize {
-    source[offset..limit]
-        .find('\n')
-        .map_or(limit, |newline| offset + newline + 1)
+fn paragraph_end_before_blank_line(source: &str, mut cursor: usize, limit: usize) -> usize {
+    while cursor < limit {
+        let line_end = source[cursor..limit]
+            .find('\n')
+            .map_or(limit, |newline| cursor + newline + 1);
+        if source[trim_line_end(source, cursor..line_end)].trim().is_empty() {
+            return cursor;
+        }
+        if let Some(prefix) = quoted_line_prefix(source, cursor..line_end) {
+            if prefix.content_is_blank {
+                return prefix.end;
+            }
+        }
+        cursor = line_end;
+    }
+
+    limit
 }
 
 #[cfg(any(test, perf_enabled))]
