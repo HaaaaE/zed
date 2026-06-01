@@ -274,13 +274,24 @@ impl BenchmarkProjectionMarkerDependency {
 }
 
 fn mixed_fixture(target_bytes: usize) -> String {
-    let chunk = r#"
+    let chunk = concat!(
+        r#"
 # Source Row Heading
 
 Paragraph source-row with **strong text**, _emphasis_, `inline code`, [a link](https://example.com), and an escaped \* marker.
+Extended inline source-row with ~~strike~~, <IFRAME src="x"></IFRAME>, autolink <https://example.com/source-row>, mail <source-row@example.com>, CJK 中文, $x + y$, and ![source-row image](image.png).
+Hard break source-row"#,
+        "  \n",
+        r#"continued source-row
 
 > Blockquote source-row with **inline** content.
 > - nested item source-row
+"#,
+        "> \n",
+        r#"
+> ```rust
+> let source_row = true;
+> ```
 
 - [x] completed task source-row
 - [ ] open task with [link](https://example.com/path?q=1)
@@ -301,7 +312,8 @@ fn source_row() {
 
 [source-row-ref]: https://example.com/ref
 
-"#;
+"#,
+    );
     let mut text = String::with_capacity(target_bytes + chunk.len());
     while text.len() < target_bytes {
         text.push_str(chunk);
