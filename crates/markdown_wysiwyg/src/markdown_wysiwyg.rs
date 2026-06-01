@@ -1130,6 +1130,10 @@ mod tests {
             "# Title\n",
             "\n",
             "alpha **bold** &amp; [link](https://example.com)\n",
+            "gamma ~~strike~~ <IFRAME src=\"x\"></IFRAME> <https://example.com/auto> ",
+            "<me@example.com> CJK 中文 $x + y$ ![alt](image.png)\n",
+            "hard break  \n",
+            "continued\n",
             "\n",
             "> # Quote\n",
             "> \n",
@@ -1140,6 +1144,8 @@ mod tests {
             "| head | value |\n",
             "| --- | --- |\n",
             "| **a** | `b` |\n",
+            "\n",
+            "<div class=\"note\">raw html</div>\n",
             "\n",
             "- [ ] task item\n",
         );
@@ -1154,6 +1160,36 @@ mod tests {
                 "strong",
             ),
             (
+                source.find("strike").unwrap()..source.find("strike").unwrap() + "strike".len(),
+                "struck",
+            ),
+            (
+                source.find("IFRAME").unwrap()..source.find("IFRAME").unwrap() + "IFRAME".len(),
+                "SCRIPT",
+            ),
+            (
+                source.find("auto").unwrap()..source.find("auto").unwrap() + "auto".len(),
+                "edited",
+            ),
+            (
+                source.find("me@example.com").unwrap()
+                    ..source.find("me@example.com").unwrap() + "me@example.com".len(),
+                "you@example.com",
+            ),
+            (
+                source.find("x + y").unwrap()..source.find("x + y").unwrap() + "x + y".len(),
+                "x + z",
+            ),
+            (
+                source.find("image.png").unwrap()
+                    ..source.find("image.png").unwrap() + "image.png".len(),
+                "photo.png",
+            ),
+            (
+                source.find("continued").unwrap()..source.find("continued").unwrap(),
+                "still ",
+            ),
+            (
                 source.find("Quote").unwrap()..source.find("Quote").unwrap() + "Quote".len(),
                 "Quoted",
             ),
@@ -1165,6 +1201,11 @@ mod tests {
             (
                 source.find("`b`").unwrap() + 1..source.find("`b`").unwrap() + 2,
                 "code",
+            ),
+            (
+                source.find("raw html").unwrap()
+                    ..source.find("raw html").unwrap() + "raw html".len(),
+                "changed html",
             ),
             (
                 source.find("task").unwrap()..source.find("task").unwrap() + "task".len(),
