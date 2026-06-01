@@ -77,11 +77,33 @@ pub struct MarkdownSyntaxData {
 }
 
 struct MarkdownBackendOutput {
+    structure: MarkdownStructure,
     parser_state: MarkdownParseTree,
     data: MarkdownSyntaxData,
 }
 
+trait MarkdownBackend {
+    fn parse(
+        source: &str,
+        old_tree: Option<&MarkdownParseTree>,
+        changed_range: Option<&Range<usize>>,
+    ) -> MarkdownBackendOutput;
+
+    fn parse_after_edit(
+        source: &str,
+        previous: &MarkdownSyntaxTree,
+        edited_tree: &MarkdownParseTree,
+        old_range: Range<usize>,
+        new_range: Range<usize>,
+    ) -> MarkdownBackendOutput;
+}
+
 struct TreeSitterMarkdownBackend;
+
+#[derive(Clone, Debug)]
+struct MarkdownStructure {
+    parser_state: MarkdownParseTree,
+}
 
 #[derive(Clone, Debug)]
 pub struct MarkdownParseTree {
@@ -105,7 +127,10 @@ impl fmt::Debug for MarkdownSyntaxTree {
             .field("blocks", &self.data.blocks)
             .field("tables", &self.data.tables)
             .field("inline_spans", &self.data.inline_spans)
-            .field("projection_replacements", &self.data.projection_replacements)
+            .field(
+                "projection_replacements",
+                &self.data.projection_replacements,
+            )
             .finish_non_exhaustive()
     }
 }
@@ -260,6 +285,18 @@ impl MarkdownSyntaxData {
             .wrapping_add(self.inline_span_prefix_maximum_ends.len())
             .wrapping_add(self.projection_replacement_prefix_maximum_ends.len())
             .wrapping_add(self.projection_marker_prefix_maximum_ends.len())
+    }
+}
+
+impl MarkdownStructure {
+    fn from_parse_tree(parser_state: &MarkdownParseTree) -> Self {
+        Self {
+            parser_state: parser_state.clone(),
+        }
+    }
+
+    fn parse_tree(&self) -> &MarkdownParseTree {
+        &self.parser_state
     }
 }
 
@@ -790,7 +827,11 @@ impl MarkdownSyntaxTree {
             }
         }
 
-        MarkdownProjectionMap::with_operations(self.data.source_len, visible_source_range, operations)
+        MarkdownProjectionMap::with_operations(
+            self.data.source_len,
+            visible_source_range,
+            operations,
+        )
     }
 
     pub fn active_projection_source_ranges_for_source_range(
@@ -803,8 +844,8 @@ impl MarkdownSyntaxTree {
             return Vec::new();
         };
 
-        let start_index = self
-            .partition_projection_marker_dependencies_by_prefix_end(visible_source_range.start);
+        let start_index =
+            self.partition_projection_marker_dependencies_by_prefix_end(visible_source_range.start);
         let mut source_ranges = self.data.projection_marker_dependencies[start_index..]
             .iter()
             .take_while(|dependency| dependency.marker_range.start < visible_source_range.end)
@@ -829,8 +870,12 @@ impl MarkdownSyntaxTree {
         old_tree: Option<&MarkdownParseTree>,
         changed_range: Option<&Range<usize>>,
     ) -> Self {
-        let MarkdownBackendOutput { parser_state, data } =
-            TreeSitterMarkdownBackend::parse(source, old_tree, changed_range);
+        let MarkdownBackendOutput {
+            structure,
+            parser_state,
+            data,
+        } = TreeSitterMarkdownBackend::parse(source, old_tree, changed_range);
+        let _ = structure;
 
         Self { parser_state, data }
     }
@@ -842,14 +887,18 @@ impl MarkdownSyntaxTree {
         old_range: Range<usize>,
         new_range: Range<usize>,
     ) -> Self {
-        let MarkdownBackendOutput { parser_state, data } =
-            TreeSitterMarkdownBackend::parse_after_edit(
-                source,
-                previous,
-                edited_tree,
-                old_range,
-                new_range,
-            );
+        let MarkdownBackendOutput {
+            structure,
+            parser_state,
+            data,
+        } = TreeSitterMarkdownBackend::parse_after_edit(
+            source,
+            previous,
+            edited_tree,
+            old_range,
+            new_range,
+        );
+        let _ = structure;
 
         Self { parser_state, data }
     }
@@ -885,11 +934,41 @@ impl TreeSitterMarkdownBackend {
         old_tree: Option<&MarkdownParseTree>,
         changed_range: Option<&Range<usize>>,
     ) -> MarkdownBackendOutput {
-        let parser_state = record_timed_parse(|| parse_markdown(source, old_tree, changed_range));
-        let data =
-            record_timed_collect_syntax_data(|| collect_syntax_data(source, &parser_state));
+        <Self as MarkdownBackend>::parse(source, old_tree, changed_range)
+    }
 
-        MarkdownBackendOutput { parser_state, data }
+    fn parse_after_edit(
+        source: &str,
+        previous: &MarkdownSyntaxTree,
+        edited_tree: &MarkdownParseTree,
+        old_range: Range<usize>,
+        new_range: Range<usize>,
+    ) -> MarkdownBackendOutput {
+        <Self as MarkdownBackend>::parse_after_edit(
+            source,
+            previous,
+            edited_tree,
+            old_range,
+            new_range,
+        )
+    }
+}
+
+impl MarkdownBackend for TreeSitterMarkdownBackend {
+    fn parse(
+        source: &str,
+        old_tree: Option<&MarkdownParseTree>,
+        changed_range: Option<&Range<usize>>,
+    ) -> MarkdownBackendOutput {
+        let parser_state = record_timed_parse(|| parse_markdown(source, old_tree, changed_range));
+        let structure = MarkdownStructure::from_parse_tree(&parser_state);
+        let data = record_timed_collect_syntax_data(|| collect_syntax_data(source, &structure));
+
+        MarkdownBackendOutput {
+            structure,
+            parser_state,
+            data,
+        }
     }
 
     fn parse_after_edit(
@@ -901,15 +980,21 @@ impl TreeSitterMarkdownBackend {
     ) -> MarkdownBackendOutput {
         let parser_state =
             record_timed_parse(|| parse_markdown(source, Some(edited_tree), Some(&new_range)));
+        let structure = MarkdownStructure::from_parse_tree(&parser_state);
         let data = record_timed_collect_syntax_data(|| {
-            collect_incremental_syntax_data(source, previous, &parser_state, &old_range, &new_range)
+            collect_incremental_syntax_data(source, previous, &structure, &old_range, &new_range)
         });
 
-        MarkdownBackendOutput { parser_state, data }
+        MarkdownBackendOutput {
+            structure,
+            parser_state,
+            data,
+        }
     }
 }
 
-fn collect_syntax_data(source: &str, parser_state: &MarkdownParseTree) -> MarkdownSyntaxData {
+fn collect_syntax_data(source: &str, structure: &MarkdownStructure) -> MarkdownSyntaxData {
+    let parser_state = structure.parse_tree();
     let line_starts = record_timed_line_start_collect(|| line_starts(source));
     let blocks = record_timed_block_collect(|| {
         collect_blocks(source, &line_starts, parser_state.block_tree())
@@ -956,10 +1041,11 @@ fn collect_syntax_data(source: &str, parser_state: &MarkdownParseTree) -> Markdo
 fn collect_incremental_syntax_data(
     source: &str,
     previous: &MarkdownSyntaxTree,
-    parser_state: &MarkdownParseTree,
+    structure: &MarkdownStructure,
     old_range: &Range<usize>,
     new_range: &Range<usize>,
 ) -> MarkdownSyntaxData {
+    let parser_state = structure.parse_tree();
     let line_starts = record_timed_line_start_collect(|| line_starts(source));
     let blocks = record_timed_block_collect(|| {
         collect_incremental_blocks(

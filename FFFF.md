@@ -12,6 +12,9 @@
 - 2026-06-01：`tooling/markdown_syntax_bench` 已加入 pulldown 适配器雏形和 `BenchmarkSyntaxData` 兼容快照，用于和生产输出做精确对比。
 - 2026-06-01：`markdown_wysiwyg` 侧仍是 `parser.rs` 直接产出解析树，`blocks.rs`、`inline.rs`、`tables.rs` 仍依赖 tree-sitter 节点；共享 `MarkdownStructure` / `MarkdownSemanticsAssembler` 还未落地。
 - 2026-06-01：下一步应先补齐 backend trait 和粗结构层，再把 benchmark 从“兼容对比”推进到“结构/语义 diff 报告”。
+- 2026-06-01：已在 `markdown_wysiwyg` 里补入 `MarkdownBackend` 边界和 `MarkdownStructure` 载体，现有 tree-sitter 路径已通过新边界返回原有 `MarkdownSyntaxData`。
+- 2026-06-01：已验证 `cargo check -p markdown_wysiwyg`、`cargo test -p md_sum_tree`、`cargo test -p md_rope`、`cargo test -p md_text` 全部通过。
+- 2026-06-01：`tooling/markdown_syntax_bench` 仍受 `entities` 版本冲突影响，当前无法直接 `cargo check`，这是现有依赖状态问题，不是本轮实现引入的回归。
 
 ## Implementation
 
