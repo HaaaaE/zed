@@ -1,4 +1,5 @@
 use std::{
+    env,
     hint::black_box,
     ops::Range,
     time::{Duration, Instant},
@@ -77,6 +78,25 @@ struct PulldownAssembly {
     data: BenchmarkSyntaxData,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SequenceDiff {
+    left_len: usize,
+    right_len: usize,
+    common_prefix_len: usize,
+    first_mismatch_index: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SyntaxDiffSummary {
+    source_len_matches: bool,
+    line_starts: SequenceDiff,
+    blocks: SequenceDiff,
+    tables: SequenceDiff,
+    inline_spans: SequenceDiff,
+    projection_replacements: SequenceDiff,
+    projection_marker_dependencies: SequenceDiff,
+}
+
 #[derive(Default)]
 struct PulldownBuilder {
     source_len: usize,
@@ -102,12 +122,12 @@ impl PulldownBuilder {
         let projection_marker_dependencies = self
             .projection_marker_dependencies
             .into_iter()
-            .map(|(marker_range, owner_source_range)| {
-                BenchmarkProjectionMarkerDependency {
+            .map(
+                |(marker_range, owner_source_range)| BenchmarkProjectionMarkerDependency {
                     marker_range,
                     owner_source_range,
-                }
-            })
+                },
+            )
             .collect();
         PulldownAssembly {
             data: BenchmarkSyntaxData {
@@ -128,8 +148,16 @@ impl BenchmarkSyntaxData {
         Self {
             source_len: data.source_len(),
             line_starts: data.line_starts().to_vec(),
-            blocks: data.blocks().iter().map(BenchmarkBlock::from_production).collect(),
-            tables: data.tables().iter().map(BenchmarkTable::from_production).collect(),
+            blocks: data
+                .blocks()
+                .iter()
+                .map(BenchmarkBlock::from_production)
+                .collect(),
+            tables: data
+                .tables()
+                .iter()
+                .map(BenchmarkTable::from_production)
+                .collect(),
             inline_spans: data
                 .inline_spans()
                 .iter()
@@ -309,15 +337,36 @@ fn measure(name: &str, iterations: usize, mut run: impl FnMut() -> usize) {
     );
 }
 
+fn env_usize(name: &str, default: usize) -> usize {
+    env::var(name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default)
+}
+
+fn pulldown_parser_checksum(source: &str) -> usize {
+    Parser::new_ext(source, Options::all())
+        .into_offset_iter()
+        .fold(0usize, |checksum, (event, range)| {
+            black_box(event);
+            checksum
+                .wrapping_add(range.start)
+                .wrapping_mul(31)
+                .wrapping_add(range.end)
+        })
+}
+
 fn collect_blocks_from_pulldown(source: &str, _events: &[PulldownEvent]) -> Vec<BenchmarkBlock> {
     let mut blocks = Vec::new();
+    let line_start_offsets = line_starts(source);
     for (row, line) in source.split_inclusive('\n').enumerate() {
         let trimmed = line.trim_end_matches(['\n', '\r']);
         if trimmed.is_empty() {
+            let source_range = line_range(&line_start_offsets, source.len(), row);
             blocks.push(BenchmarkBlock {
                 kind: "Blank".to_string(),
-                source_range: line_range(source, row),
-                content_range: line_range(source, row).start..line_range(source, row).start,
+                content_range: source_range.start..source_range.start,
+                source_range,
                 marker_ranges: Vec::new(),
                 row_range: row..row + 1,
                 tagfilter_disallowed: false,
@@ -327,10 +376,9 @@ fn collect_blocks_from_pulldown(source: &str, _events: &[PulldownEvent]) -> Vec<
     blocks
 }
 
-fn line_range(source: &str, row: usize) -> Range<usize> {
-    let starts = line_starts(source);
+fn line_range(starts: &[usize], source_len: usize, row: usize) -> Range<usize> {
     let start = starts[row];
-    let end = starts.get(row + 1).copied().unwrap_or(source.len());
+    let end = starts.get(row + 1).copied().unwrap_or(source_len);
     start..end
 }
 
@@ -374,7 +422,9 @@ fn pulldown_adapter_syntax_data(source: &str) -> PulldownAssembly {
             Event::FootnoteReference(_) => {}
         }
     }
-    builder.blocks.extend(collect_blocks_from_pulldown(source, &events));
+    builder
+        .blocks
+        .extend(collect_blocks_from_pulldown(source, &events));
     builder.finish()
 }
 
@@ -414,50 +464,123 @@ fn collect_start_tag(
     });
 }
 
-fn compare_exact(left: &BenchmarkSyntaxData, right: &BenchmarkSyntaxData) -> usize {
-    let mut diff = 0usize;
-    if left.source_len != right.source_len {
-        diff += 1;
+impl SequenceDiff {
+    fn compare<T: Eq>(left: &[T], right: &[T]) -> Self {
+        let common_prefix_len = left
+            .iter()
+            .zip(right.iter())
+            .take_while(|(left, right)| left == right)
+            .count();
+        let first_mismatch_index = (left.len() != right.len() || common_prefix_len < left.len())
+            .then_some(common_prefix_len);
+        Self {
+            left_len: left.len(),
+            right_len: right.len(),
+            common_prefix_len,
+            first_mismatch_index,
+        }
     }
-    if left.line_starts != right.line_starts {
-        diff += 1;
+
+    fn is_exact(self) -> bool {
+        self.first_mismatch_index.is_none()
     }
-    if left.blocks != right.blocks {
-        diff += 1;
+
+    fn mismatch_score(self) -> usize {
+        usize::from(!self.is_exact())
+            .wrapping_add(self.left_len.abs_diff(self.right_len))
+            .wrapping_add(self.first_mismatch_index.unwrap_or(0))
     }
-    if left.tables != right.tables {
-        diff += 1;
+}
+
+impl SyntaxDiffSummary {
+    fn compare(left: &BenchmarkSyntaxData, right: &BenchmarkSyntaxData) -> Self {
+        Self {
+            source_len_matches: left.source_len == right.source_len,
+            line_starts: SequenceDiff::compare(&left.line_starts, &right.line_starts),
+            blocks: SequenceDiff::compare(&left.blocks, &right.blocks),
+            tables: SequenceDiff::compare(&left.tables, &right.tables),
+            inline_spans: SequenceDiff::compare(&left.inline_spans, &right.inline_spans),
+            projection_replacements: SequenceDiff::compare(
+                &left.projection_replacements,
+                &right.projection_replacements,
+            ),
+            projection_marker_dependencies: SequenceDiff::compare(
+                &left.projection_marker_dependencies,
+                &right.projection_marker_dependencies,
+            ),
+        }
     }
-    if left.inline_spans != right.inline_spans {
-        diff += 1;
+
+    fn mismatch_count(&self) -> usize {
+        usize::from(!self.source_len_matches)
+            + usize::from(!self.line_starts.is_exact())
+            + usize::from(!self.blocks.is_exact())
+            + usize::from(!self.tables.is_exact())
+            + usize::from(!self.inline_spans.is_exact())
+            + usize::from(!self.projection_replacements.is_exact())
+            + usize::from(!self.projection_marker_dependencies.is_exact())
     }
-    if left.projection_replacements != right.projection_replacements {
-        diff += 1;
+
+    fn checksum(&self) -> usize {
+        usize::from(self.source_len_matches)
+            .wrapping_add(self.line_starts.mismatch_score())
+            .wrapping_mul(31)
+            .wrapping_add(self.blocks.mismatch_score())
+            .wrapping_mul(31)
+            .wrapping_add(self.tables.mismatch_score())
+            .wrapping_mul(31)
+            .wrapping_add(self.inline_spans.mismatch_score())
+            .wrapping_mul(31)
+            .wrapping_add(self.projection_replacements.mismatch_score())
+            .wrapping_mul(31)
+            .wrapping_add(self.projection_marker_dependencies.mismatch_score())
     }
-    if left.projection_marker_dependencies != right.projection_marker_dependencies {
-        diff += 1;
+
+    fn print(&self, label: &str) {
+        println!("{label}: mismatch_fields={}", self.mismatch_count());
+        println!("  source_len_matches={}", self.source_len_matches);
+        println!("  line_starts={:?}", self.line_starts);
+        println!("  blocks={:?}", self.blocks);
+        println!("  tables={:?}", self.tables);
+        println!("  inline_spans={:?}", self.inline_spans);
+        println!(
+            "  projection_replacements={:?}",
+            self.projection_replacements
+        );
+        println!(
+            "  projection_marker_dependencies={:?}",
+            self.projection_marker_dependencies
+        );
     }
-    diff
 }
 
 fn main() {
-    let target_bytes = 300 * 1024;
-    let iterations = 30;
+    let target_bytes = env_usize("MARKDOWN_SYNTAX_BENCH_BYTES", 300 * 1024).max(1);
+    let iterations = env_usize("MARKDOWN_SYNTAX_BENCH_ITERATIONS", 30).max(1);
     let source = mixed_fixture(target_bytes);
     println!("fixture_bytes={} iterations={iterations}", source.len());
+    let production_baseline = BenchmarkSyntaxData::from_production(
+        markdown_wysiwyg::MarkdownSyntaxTree::parse(&source).syntax_data(),
+    );
+    let initial_pulldown_assembly = pulldown_adapter_syntax_data(&source);
+    SyntaxDiffSummary::compare(&production_baseline, &initial_pulldown_assembly.data)
+        .print("pulldown_structure_semantics_diff");
 
-    measure("markdown_wysiwyg_tree_sitter_syntax_data", iterations, || {
-        let tree = markdown_wysiwyg::MarkdownSyntaxTree::parse(black_box(&source));
-        tree.syntax_data().checksum_for_benchmarks()
+    measure("pulldown_cmark_parse_events", iterations, || {
+        pulldown_parser_checksum(black_box(&source))
     });
+
+    measure(
+        "markdown_wysiwyg_tree_sitter_syntax_data",
+        iterations,
+        || {
+            let tree = markdown_wysiwyg::MarkdownSyntaxTree::parse(black_box(&source));
+            tree.syntax_data().checksum_for_benchmarks()
+        },
+    );
 
     measure("pulldown_exact_adapter", iterations, || {
         let assembly = pulldown_adapter_syntax_data(black_box(&source));
-        compare_exact(
-            &BenchmarkSyntaxData::from_production(
-                markdown_wysiwyg::MarkdownSyntaxTree::parse(&source).syntax_data(),
-            ),
-            &assembly.data,
-        )
+        SyntaxDiffSummary::compare(black_box(&production_baseline), &assembly.data).checksum()
     });
 }

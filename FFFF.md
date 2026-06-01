@@ -38,6 +38,8 @@
 - 2026-06-01：table 查询入口 `tables()`、`table_for_source_row()`、`table_for_source_range()`、`table_row_for_source_row()` 已从 `markdown_wysiwyg.rs` 移回 `tables.rs`；第十五轮验证 `cargo check -p markdown_wysiwyg` 与 `cargo test -p markdown_wysiwyg` 全部通过。
 - 2026-06-01：block 与 inline span 查询入口 `blocks()`、`blocks_in_source_range()`、`inline_spans()`、`inline_spans_in_source_range()` 已分别回收到 `blocks.rs` 与 `inline.rs`；第十六轮验证 `cargo check -p markdown_wysiwyg` 与 `cargo test -p markdown_wysiwyg` 全部通过。
 - 2026-06-01：block / inline / projection 查询使用的私有 partition helper 已分别下沉到 `blocks.rs`、`inline.rs`、`projection.rs`，`source_range_for_rows()` 也随 projection 查询回收到 `projection.rs`；第十七轮验证 `cargo check -p markdown_wysiwyg` 与 `cargo test -p markdown_wysiwyg` 全部通过。
+- 2026-06-01：`tooling/markdown_syntax_bench` 已拆出裸 `pulldown-cmark` 事件解析计时、tree-sitter baseline 计时和 pulldown adapter 结构/语义 diff 计时；production baseline 现在只在候选循环外计算一次，diff 输出会报告各语义序列的长度与首个 mismatch，并可通过 `MARKDOWN_SYNTAX_BENCH_BYTES` / `MARKDOWN_SYNTAX_BENCH_ITERATIONS` 缩小 smoke test 规模。
+- 2026-06-01：benchmark crate 暂时移除未接线的 comrak / markdown / rushdown 依赖，解除 `entities` 版本冲突；第十八轮验证 `cargo check -p markdown_wysiwyg` 与 `cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml` 全部通过。
 
 ## Implementation
 
@@ -76,7 +78,7 @@
 - 第一步只改 `markdown_wysiwyg` 和 benchmark，不改 `md_editor` 消费接口。
 - 第二步让 pulldown 适配器和 tree-sitter baseline 在同一批 fixture 上完全对齐，再决定是否切默认 backend。
 - 第三步只有在 pulldown 端到端更快且语义全等时，才把它设成默认；comrak 保留为参考/正确性后端，不进入热路径。
-- 当前状态已完成第一步中的 benchmark 雏形，并在 `markdown_wysiwyg` 主体里建立 backend / structure / assembler 的最小边界；`MarkdownStructure` 已实际驱动 full/incremental block 输出、table 生成、full/incremental inline 与 projection 收集，block structure 构建、block 语义组装与 block 查询逻辑已回收到 `blocks.rs`，full/incremental inline、projection helper 与 inline 查询逻辑已回收到 `inline.rs`，projection 查询、range semantics 与 projection 查询索引 helper 已回收到 `projection.rs`，table wrapper 与 table 查询入口已回收到 `tables.rs`，退役 dead-code 对照入口已清理，下一步是继续把剩余共享 helper 拆回模块边界。
+- 当前状态已完成第一步中的 benchmark 雏形，并在 `markdown_wysiwyg` 主体里建立 backend / structure / assembler 的最小边界；`MarkdownStructure` 已实际驱动 full/incremental block 输出、table 生成、full/incremental inline 与 projection 收集，block structure 构建、block 语义组装与 block 查询逻辑已回收到 `blocks.rs`，full/incremental inline、projection helper 与 inline 查询逻辑已回收到 `inline.rs`，projection 查询、range semantics 与 projection 查询索引 helper 已回收到 `projection.rs`，table wrapper 与 table 查询入口已回收到 `tables.rs`，退役 dead-code 对照入口已清理；benchmark 已开始输出裸 parser、baseline 和候选 adapter+diff 三类数据，下一步是继续把剩余共享 helper 拆回模块边界，并在 pulldown/comrak 后端真正接线时再恢复对应依赖。
 
 ## Assumptions
 
