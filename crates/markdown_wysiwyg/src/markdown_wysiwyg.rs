@@ -1367,6 +1367,10 @@ mod tests {
                 "strong",
             ),
             (
+                source.find("alpha").unwrap()..source.find("alpha").unwrap(),
+                "## ",
+            ),
+            (
                 source.find("strike").unwrap()..source.find("strike").unwrap() + "strike".len(),
                 "struck",
             ),
@@ -1420,6 +1424,11 @@ mod tests {
                 ":",
             ),
             (
+                source.find("| --- | --- |").unwrap() + 2
+                    ..source.find("| --- | --- |").unwrap() + 3,
+                "x",
+            ),
+            (
                 source.find("`b`").unwrap() + 1..source.find("`b`").unwrap() + 2,
                 "code",
             ),
@@ -1429,12 +1438,21 @@ mod tests {
                 "changed html",
             ),
             (
+                source.find("<div").unwrap()..source.find("<div").unwrap() + 1,
+                "&lt;",
+            ),
+            (
                 source.find("task").unwrap()..source.find("task").unwrap() + "task".len(),
                 "todo",
             ),
             (
                 source.find("[ ]").unwrap() + 1..source.find("[ ]").unwrap() + 2,
                 "x",
+            ),
+            (
+                source.find("- [ ] task item").unwrap()
+                    ..source.find("- [ ] task item").unwrap() + 1,
+                "1.",
             ),
         ];
 

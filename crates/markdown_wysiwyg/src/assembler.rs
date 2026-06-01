@@ -3,11 +3,10 @@ use std::ops::Range;
 use super::{
     MarkdownSyntaxData, MarkdownSyntaxTree, blocks,
     inline::{
-        collect_incremental_inline_spans, collect_incremental_projection_marker_dependencies,
-        collect_incremental_projection_replacements, collect_structure_inline_spans,
-        collect_structure_projection_replacements, inline_span_prefix_maximum_ends,
-        projection_marker_dependencies, projection_marker_prefix_maximum_ends,
-        projection_replacement_prefix_maximum_ends,
+        collect_incremental_inline_spans, collect_incremental_projection_replacements,
+        collect_structure_inline_spans, collect_structure_projection_replacements,
+        inline_span_prefix_maximum_ends, projection_marker_dependencies,
+        projection_marker_prefix_maximum_ends, projection_replacement_prefix_maximum_ends,
     },
     record_timed_block_collect, record_timed_inline_collect, record_timed_line_start_collect,
     record_timed_projection_collect, record_timed_table_collect,
@@ -97,14 +96,8 @@ impl MarkdownSemanticsAssembler {
             );
             let projection_replacement_prefix_maximum_ends =
                 projection_replacement_prefix_maximum_ends(&projection_replacements);
-            let projection_marker_dependencies = collect_incremental_projection_marker_dependencies(
-                previous,
-                &blocks,
-                &inline_spans,
-                &projection_replacements,
-                old_range,
-                new_range,
-            );
+            let projection_marker_dependencies =
+                projection_marker_dependencies(&blocks, &inline_spans, &projection_replacements);
             let projection_marker_prefix_maximum_ends =
                 projection_marker_prefix_maximum_ends(&projection_marker_dependencies);
             (

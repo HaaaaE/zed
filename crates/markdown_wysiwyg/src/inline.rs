@@ -350,87 +350,6 @@ pub(super) fn projection_marker_dependencies(
     dependencies
 }
 
-pub(super) fn collect_incremental_projection_marker_dependencies(
-    previous: &MarkdownSyntaxTree,
-    blocks: &[MarkdownBlock],
-    inline_spans: &[MarkdownInlineSpan],
-    replacements: &[MarkdownProjectionReplacement],
-    old_range: &Range<usize>,
-    new_range: &Range<usize>,
-) -> Vec<ProjectionMarkerDependency> {
-    let mut dependencies = previous
-        .data
-        .projection_marker_dependencies
-        .iter()
-        .filter(|dependency| {
-            !ranges_touch(&dependency.marker_range, old_range)
-                && !ranges_touch(&dependency.owner_source_range, old_range)
-        })
-        .cloned()
-        .map(|dependency| {
-            shift_projection_marker_dependency_after_edit(dependency, old_range, new_range)
-        })
-        .collect::<Vec<_>>();
-
-    for block in blocks {
-        if !ranges_touch(&block.source_range, new_range) {
-            continue;
-        }
-
-        dependencies.extend(block.marker_ranges.iter().cloned().map(|marker_range| {
-            ProjectionMarkerDependency {
-                marker_range,
-                owner_source_range: block.source_range.clone(),
-            }
-        }));
-    }
-
-    for span in inline_spans {
-        if !ranges_touch(&span.source_range, new_range) {
-            continue;
-        }
-
-        if matches!(
-            span.kind,
-            MarkdownInlineKind::SoftBreak | MarkdownInlineKind::HardBreak
-        ) {
-            dependencies.push(ProjectionMarkerDependency {
-                marker_range: span.source_range.clone(),
-                owner_source_range: span.source_range.clone(),
-            });
-        }
-        dependencies.extend(span.marker_ranges.iter().cloned().map(|marker_range| {
-            ProjectionMarkerDependency {
-                marker_range,
-                owner_source_range: span.source_range.clone(),
-            }
-        }));
-    }
-
-    for replacement in replacements {
-        if !ranges_touch(&replacement.owner_source_range, new_range)
-            && !ranges_touch(&replacement.source_range, new_range)
-        {
-            continue;
-        }
-
-        dependencies.push(ProjectionMarkerDependency {
-            marker_range: replacement.source_range.clone(),
-            owner_source_range: replacement.owner_source_range.clone(),
-        });
-    }
-
-    dependencies.sort_by_key(|dependency| {
-        (
-            dependency.marker_range.start,
-            dependency.marker_range.end,
-            dependency.owner_source_range.start,
-            dependency.owner_source_range.end,
-        )
-    });
-    dependencies
-}
-
 pub(super) fn projection_marker_prefix_maximum_ends(
     dependencies: &[ProjectionMarkerDependency],
 ) -> Vec<usize> {
@@ -473,18 +392,6 @@ fn shift_projection_replacement_after_edit(
     replacement.owner_source_range =
         shift_clean_old_range_to_new(replacement.owner_source_range, old_range, new_range);
     replacement
-}
-
-fn shift_projection_marker_dependency_after_edit(
-    mut dependency: ProjectionMarkerDependency,
-    old_range: &Range<usize>,
-    new_range: &Range<usize>,
-) -> ProjectionMarkerDependency {
-    dependency.marker_range =
-        shift_clean_old_range_to_new(dependency.marker_range, old_range, new_range);
-    dependency.owner_source_range =
-        shift_clean_old_range_to_new(dependency.owner_source_range, old_range, new_range);
-    dependency
 }
 
 fn collect_projection_replacement_nodes(
