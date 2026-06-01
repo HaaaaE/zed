@@ -5,8 +5,12 @@ use tree_sitter::{Node, Parser, Range as TreeSitterRange, Tree};
 use super::{
     MarkdownInlineTree, MarkdownParseTree, record_timed_block_parse,
     record_timed_inline_parent_scan, record_timed_inline_parse, record_timed_inline_range_build,
-    record_timed_inline_reuse_index, source::ranges_touch,
+    record_timed_inline_reuse_index,
+    source::ranges_touch,
 };
+
+#[cfg(any(test, perf_enabled))]
+use super::source::point_for_offset;
 
 thread_local! {
     static BLOCK_PARSER: RefCell<Parser> = RefCell::new(markdown_block_parser());
@@ -162,6 +166,53 @@ fn parse_inline_trees(
         .collect();
 
     (inline_trees, inline_tree_by_parent_id)
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(super) fn parse_inline_trees_for_ranges(
+    source: &str,
+    parent_ranges: impl IntoIterator<Item = Range<usize>>,
+) -> Vec<MarkdownInlineTree> {
+    let line_starts = super::source::line_starts(source);
+    let mut inline_trees = Vec::new();
+
+    INLINE_PARSER.with(|parser| {
+        let mut inline_parser = parser.borrow_mut();
+        for (index, parent_range) in parent_ranges.into_iter().enumerate() {
+            if parent_range.is_empty() {
+                continue;
+            }
+
+            let ranges = [TreeSitterRange {
+                start_byte: parent_range.start,
+                start_point: point_for_offset(&line_starts, parent_range.start),
+                end_byte: parent_range.end,
+                end_point: point_for_offset(&line_starts, parent_range.end),
+            }];
+            let inline_tree = record_timed_inline_parse(|| {
+                inline_parser
+                    .set_included_ranges(&ranges)
+                    .expect("failed to set markdown inline parse ranges");
+                inline_parser
+                    .parse(source, None)
+                    .expect("tree-sitter markdown inline parser was cancelled")
+            });
+            inline_trees.push(MarkdownInlineTree {
+                parent_id: 1 << 61 | index,
+                parent_range,
+                tree: inline_tree,
+            });
+        }
+    });
+
+    inline_trees.sort_by_key(|inline_tree| {
+        (
+            inline_tree.parent_range.start,
+            inline_tree.parent_range.end,
+            inline_tree.parent_id,
+        )
+    });
+    inline_trees
 }
 
 fn inline_dirty_ranges(

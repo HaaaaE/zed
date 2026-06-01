@@ -23,6 +23,9 @@ use super::{
     structure::MarkdownStructure,
 };
 
+#[cfg(any(test, perf_enabled))]
+use super::parser::parse_inline_trees_for_ranges;
+
 pub(super) struct MarkdownBackendOutput {
     pub(super) structure: MarkdownStructure,
     pub(super) parser_state: MarkdownParseTree,
@@ -122,8 +125,12 @@ impl MarkdownBackend for TreeSitterMarkdownBackend {
 #[cfg(any(test, perf_enabled))]
 impl PulldownMarkdownBackend {
     pub(super) fn parse_syntax_data(source: &str) -> MarkdownSyntaxData {
-        let structure =
-            MarkdownStructure::from_parts(collect_pulldown_structure_blocks(source), Vec::new());
+        let blocks = collect_pulldown_structure_blocks(source);
+        let inline_trees = parse_inline_trees_for_ranges(
+            source,
+            pulldown_inline_parent_ranges(&blocks),
+        );
+        let structure = MarkdownStructure::from_parts(blocks, inline_trees);
         record_timed_collect_syntax_data(|| {
             MarkdownSemanticsAssembler::assemble(source, &structure)
         })
@@ -161,6 +168,20 @@ fn collect_pulldown_structure_blocks(source: &str) -> Vec<MarkdownStructureBlock
     synthesize_pulldown_paragraph_blocks(source, &line_starts, &mut blocks);
     blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
     blocks
+}
+
+#[cfg(any(test, perf_enabled))]
+fn pulldown_inline_parent_ranges(
+    blocks: &[MarkdownStructureBlock],
+) -> impl Iterator<Item = Range<usize>> + '_ {
+    blocks
+        .iter()
+        .filter_map(|block| match block.kind {
+            MarkdownBlockKind::Paragraph
+            | MarkdownBlockKind::AtxHeading { .. }
+            | MarkdownBlockKind::SetextHeading { .. } => Some(block.content_range.clone()),
+            _ => None,
+        })
 }
 
 #[cfg(any(test, perf_enabled))]
