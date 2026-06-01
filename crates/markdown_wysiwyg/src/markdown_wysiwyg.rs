@@ -1712,6 +1712,9 @@ mod tests {
             "# Title\n",
             "\n",
             "Paragraph **bold** &amp; ![alt](img.png)\n",
+            "Broad inline ~~strike~~ <IFRAME src=\"x\"></IFRAME> <https://example.com/auto>\n",
+            "Break line  \n",
+            "continued with \\* escape &copy; mail <me@example.com> CJK 中文 $x + y$\n",
             "\n",
             "Setext title\n",
             "------------\n",
@@ -1761,6 +1764,9 @@ mod tests {
             "# Title\n",
             "\n",
             "Paragraph **bold** &amp; ![alt](img.png)\n",
+            "Broad inline ~~strike~~ <IFRAME src=\"x\"></IFRAME> <https://example.com/auto>\n",
+            "Break line  \n",
+            "continued with \\* escape &copy; mail <me@example.com> CJK 中文 $x + y$\n",
             "\n",
             "Setext title\n",
             "------------\n",
@@ -1827,6 +1833,31 @@ mod tests {
             (
                 source.find("img.png").unwrap()..source.find("img.png").unwrap() + "img.png".len(),
                 "photo.png",
+            ),
+            (
+                source.find("strike").unwrap()..source.find("strike").unwrap() + "strike".len(),
+                "struck",
+            ),
+            (
+                source.find("IFRAME").unwrap()..source.find("IFRAME").unwrap() + "IFRAME".len(),
+                "SCRIPT",
+            ),
+            (
+                source.find("auto").unwrap()..source.find("auto").unwrap() + "auto".len(),
+                "edited",
+            ),
+            (
+                source.find("Break line").unwrap()..source.find("\ncontinued with").unwrap(),
+                "",
+            ),
+            (
+                source.find("me@example.com").unwrap()
+                    ..source.find("me@example.com").unwrap() + "me@example.com".len(),
+                "you@example.com",
+            ),
+            (
+                source.find("x + y").unwrap()..source.find("x + y").unwrap() + "x + y".len(),
+                "x + z",
             ),
             (
                 source.find("------------").unwrap()
