@@ -1288,6 +1288,39 @@ mod tests {
     }
 
     #[test]
+    fn comrak_inline_backend_matches_tree_sitter_escape_break_strikethrough_and_autolink_semantics()
+    {
+        let source = "Escape \\* and ~~strike~~ with <https://example.com> <me@example.com>\nsoft break continues  \nhard break continues\n";
+        let tree_sitter = PulldownMarkdownBackend::parse_syntax_data_with_inline_backend(
+            source,
+            InlineBackendKind::TreeSitter,
+        );
+
+        MarkdownSyntaxTree::reset_stats_for_tests();
+        let comrak = PulldownMarkdownBackend::parse_syntax_data_with_inline_backend(
+            source,
+            InlineBackendKind::Comrak,
+        );
+        let stats = MarkdownSyntaxTree::stats_for_tests();
+
+        assert_eq!(comrak.inline_spans(), tree_sitter.inline_spans());
+        assert_eq!(
+            comrak.projection_replacements(),
+            tree_sitter.projection_replacements()
+        );
+        assert_eq!(
+            comrak.projection_marker_dependencies(),
+            tree_sitter.projection_marker_dependencies()
+        );
+        assert_eq!(
+            stats.inline_backend_kind,
+            MarkdownInlineBackendStatsKind::Comrak
+        );
+        assert!(stats.inline_backend_parent_count > 0);
+        assert_eq!(stats.inline_backend_fallback_count, 0);
+    }
+
+    #[test]
     fn production_parse_still_uses_tree_sitter_baseline() {
         let source = "# Title\n\nParagraph **bold**\n\n| a | b |\n| - | - |\n| 1 | 2 |\n";
 

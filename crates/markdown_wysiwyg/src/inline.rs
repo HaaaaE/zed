@@ -74,7 +74,6 @@ pub(super) fn collect_comrak_inline_semantics_for_inline_trees(
             let parent_range = inline_tree.parent_range.clone();
             let mut spans = collect_comrak_inline_spans(source, parent_range.clone());
             spans.extend(scan_entity_spans(source, parent_range.clone()));
-            collect_soft_break_spans(source, parent_range.clone(), &mut spans);
             spans.sort_by_key(|span| (span.source_range.start, span.source_range.end));
             spans.dedup_by_key(|span| {
                 (
@@ -84,6 +83,7 @@ pub(super) fn collect_comrak_inline_semantics_for_inline_trees(
                     span.url.clone(),
                 )
             });
+            collect_soft_break_spans(source, parent_range.clone(), &mut spans);
 
             let mut replacements = collect_comrak_projection_replacements(source, &spans);
             replacements.sort_by_key(|replacement| {
@@ -780,12 +780,41 @@ fn collect_comrak_inline_span_nodes<'a>(
     spans: &mut Vec<MarkdownInlineSpan>,
 ) {
     if let Some(span) = comrak_inline_span_from_node(source, parent_start, line_starts, node) {
+        spans.extend(comrak_synthetic_nested_inline_spans(source, &span));
         spans.push(span);
     }
 
     for child in node.children() {
         collect_comrak_inline_span_nodes(source, parent_start, line_starts, child, spans);
     }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn comrak_synthetic_nested_inline_spans(
+    source: &str,
+    span: &MarkdownInlineSpan,
+) -> Vec<MarkdownInlineSpan> {
+    if span.kind != MarkdownInlineKind::Strikethrough {
+        return Vec::new();
+    }
+    let Some(text) = source.get(span.source_range.clone()) else {
+        return Vec::new();
+    };
+    if !text.starts_with("~~") || !text.ends_with("~~") || text.len() < 4 {
+        return Vec::new();
+    }
+
+    let source_range = span.source_range.start + 1..span.source_range.end - 1;
+    let marker_ranges = delimiter_marker_ranges(source, source_range.clone(), &["~"]);
+    let content_ranges = inline_content_ranges(source_range.clone(), &marker_ranges);
+    vec![MarkdownInlineSpan {
+        kind: MarkdownInlineKind::Strikethrough,
+        source_range,
+        content_ranges,
+        marker_ranges,
+        url: None,
+        tagfilter_disallowed: false,
+    }]
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -806,7 +835,7 @@ fn comrak_inline_span_from_node<'a>(
         NodeValue::HtmlInline(_) => MarkdownInlineKind::InlineHtml,
         NodeValue::Escaped => MarkdownInlineKind::Escape,
         NodeValue::Math(math) if math.dollar_math => MarkdownInlineKind::InlineMath,
-        NodeValue::SoftBreak => MarkdownInlineKind::SoftBreak,
+        NodeValue::SoftBreak => return None,
         NodeValue::LineBreak => MarkdownInlineKind::HardBreak,
         _ => return None,
     };
@@ -822,7 +851,8 @@ fn comrak_inline_span_from_node<'a>(
     });
     let content_ranges = inline_content_ranges(source_range.clone(), &marker_ranges);
     let url = match &data.value {
-        NodeValue::Link(link) | NodeValue::Image(link) => Some(link.url.clone()),
+        NodeValue::Link(link) => comrak_link_url(source, source_range.clone(), link.url.clone()),
+        NodeValue::Image(link) => Some(link.url.clone()),
         _ => None,
     };
     let tagfilter_disallowed = kind == MarkdownInlineKind::InlineHtml
@@ -836,6 +866,18 @@ fn comrak_inline_span_from_node<'a>(
         url,
         tagfilter_disallowed,
     })
+}
+
+#[cfg(any(test, perf_enabled))]
+fn comrak_link_url(source: &str, source_range: Range<usize>, url: String) -> Option<String> {
+    if source
+        .get(source_range)
+        .is_some_and(|text| text.starts_with('<') && text.ends_with('>'))
+    {
+        None
+    } else {
+        Some(url)
+    }
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -865,16 +907,16 @@ fn comrak_inline_marker_ranges(
     match kind {
         MarkdownInlineKind::Emphasis => delimiter_marker_ranges(source, source_range, &["*", "_"]),
         MarkdownInlineKind::Strong => delimiter_marker_ranges(source, source_range, &["**", "__"]),
-        MarkdownInlineKind::Strikethrough => {
-            delimiter_marker_ranges(source, source_range, &["~~", "~"])
-        }
+        MarkdownInlineKind::Strikethrough => delimiter_marker_ranges(source, source_range, &["~"]),
         MarkdownInlineKind::InlineCode => code_marker_ranges(source, source_range),
         MarkdownInlineKind::InlineMath => math_marker_ranges(source, source_range),
         MarkdownInlineKind::Link => link_marker_ranges(source, source_range, false),
         MarkdownInlineKind::Image => link_marker_ranges(source, source_range, true),
-        MarkdownInlineKind::Escape => escape_marker_ranges(source, source_range),
-        MarkdownInlineKind::HardBreak | MarkdownInlineKind::SoftBreak => vec![source_range],
-        MarkdownInlineKind::InlineHtml | MarkdownInlineKind::Entity => Vec::new(),
+        MarkdownInlineKind::Escape
+        | MarkdownInlineKind::HardBreak
+        | MarkdownInlineKind::SoftBreak
+        | MarkdownInlineKind::InlineHtml
+        | MarkdownInlineKind::Entity => Vec::new(),
     }
 }
 
@@ -963,16 +1005,6 @@ fn link_marker_ranges(source: &str, source_range: Range<usize>, image: bool) -> 
         }
     }
     marker_ranges
-}
-
-#[cfg(any(test, perf_enabled))]
-fn escape_marker_ranges(source: &str, source_range: Range<usize>) -> Vec<Range<usize>> {
-    source
-        .get(source_range.clone())
-        .is_some_and(|text| text.starts_with('\\'))
-        .then_some(source_range.start..source_range.start + 1)
-        .into_iter()
-        .collect()
 }
 
 #[cfg(any(test, perf_enabled))]

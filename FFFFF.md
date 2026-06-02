@@ -238,3 +238,26 @@
           - tree_sitter_block_comrak_inline_semantics_diff: mismatch_fields=0
           - pulldown_block_tree_sitter_inline_semantics_diff: mismatch_fields=0
           - pulldown_block_comrak_inline_semantics_diff: mismatch_fields=0
+  - 2026-06-02:
+      - 已继续收敛 Comrak inline 兼容差异：
+          - Escape span 归一化到当前 tree-sitter 合同：marker_ranges 为空，content_ranges 覆盖整个 escape source range。
+          - SoftBreak 改为忽略 comrak AST 节点，继续复用现有源码扫描后补逻辑；HardBreak marker_ranges 归一化为空。
+          - Strikethrough 归一化到当前 tree-sitter marker 口径，并为 `~~text~~` 合成兼容用 nested Strikethrough span。
+          - Angle autolink / email autolink 的 comrak resolved URL 归一化为 `url=None`，匹配当前 tree-sitter span 合同。
+          - 新增 focused test 覆盖 escape / break / strikethrough / URL autolink / email autolink，断言 comrak inline 不 fallback。
+          - 新增中文 FUTURE_COMRAK.md，记录这些兼容层不是长期目标，未来纯 comrak 应删除或重新定义。
+      - release smoke 小样本结果：
+          - tree_sitter_block_tree_sitter_inline_semantics_diff: mismatch_fields=0
+          - tree_sitter_block_comrak_inline_semantics_diff: mismatch_fields=0
+          - pulldown_block_tree_sitter_inline_semantics_diff: mismatch_fields=0
+          - pulldown_block_comrak_inline_semantics_diff: mismatch_fields=0
+          - tree-sitter block + comrak inline fallback_count_per_iteration=0.000 / fallback_ratio=0.000
+          - pulldown block + comrak inline fallback_count_per_iteration=0.000 / fallback_ratio=0.000
+      - 已验证：
+          - cargo test -p markdown_wysiwyg comrak_inline_backend_matches_tree_sitter_escape_break_strikethrough_and_autolink_semantics --locked
+          - cargo test -p markdown_wysiwyg --locked
+          - cargo check -p markdown_wysiwyg --locked
+          - cargo check -p updraft_editor --locked
+          - cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+          - RUSTFLAGS='--cfg perf_enabled' cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+          - RUSTFLAGS='--cfg perf_enabled' MARKDOWN_SYNTAX_BENCH_BYTES=10240 MARKDOWN_SYNTAX_BENCH_ITERATIONS=1 cargo run --release --manifest-path tooling/markdown_syntax_bench/Cargo.toml
