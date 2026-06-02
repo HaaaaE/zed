@@ -220,3 +220,21 @@
           - cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
           - RUSTFLAGS='--cfg perf_enabled' cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
           - RUSTFLAGS='--cfg perf_enabled' MARKDOWN_SYNTAX_BENCH_BYTES=10240 MARKDOWN_SYNTAX_BENCH_ITERATIONS=1 cargo run --release --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+  - 2026-06-02:
+      - 已完成最终审计：
+          - 当前工作区干净，已提交实现和 benchmark/status 记录。
+          - FFFFF.md 中列出的架构拆分、backend selection、Comrak inline prototype、fallback/stats、benchmark 四组矩阵和验证项均已有当前代码或命令输出证据。
+          - 未切换生产默认 backend；生产路径仍为 tree-sitter inline。
+          - 未读取其他 Markdown 文件；仅更新 FFFFF.md。
+      - 重新验证通过：
+          - cargo check -p markdown_wysiwyg --locked
+          - cargo test -p markdown_wysiwyg --locked
+          - cargo check -p updraft_editor --locked
+          - cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+          - RUSTFLAGS='--cfg perf_enabled' cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+          - RUSTFLAGS='--cfg perf_enabled' MARKDOWN_SYNTAX_BENCH_BYTES=10240 MARKDOWN_SYNTAX_BENCH_ITERATIONS=1 cargo run --release --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+      - release smoke 当前输出确认：
+          - tree_sitter_block_tree_sitter_inline_semantics_diff: mismatch_fields=0
+          - tree_sitter_block_comrak_inline_semantics_diff: mismatch_fields=0
+          - pulldown_block_tree_sitter_inline_semantics_diff: mismatch_fields=0
+          - pulldown_block_comrak_inline_semantics_diff: mismatch_fields=0
