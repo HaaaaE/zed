@@ -321,38 +321,83 @@ fn pulldown_inline_parents(
 }
 
 #[cfg(any(test, perf_enabled))]
+fn profile_pulldown_block() -> bool {
+    std::env::var_os("MARKDOWN_SYNTAX_BENCH_PROFILE_PULLDOWN_BLOCK").is_some()
+}
+
+#[cfg(any(test, perf_enabled))]
+fn time_profiled<T>(profile: bool, f: impl FnOnce() -> T) -> (T, std::time::Duration) {
+    if profile {
+        let start = std::time::Instant::now();
+        let result = f();
+        (result, start.elapsed())
+    } else {
+        (f(), std::time::Duration::ZERO)
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn duration_ms(duration: std::time::Duration) -> f64 {
+    duration.as_secs_f64() * 1000.0
+}
+
+#[cfg(any(test, perf_enabled))]
 fn collect_pulldown_structure_blocks(
     source: &str,
     line_starts: &[usize],
 ) -> Vec<MarkdownStructureBlock> {
+    let profile = profile_pulldown_block();
+    let total_start = profile.then(std::time::Instant::now);
     let mut blocks = Vec::new();
-    for (event, range) in Parser::new_ext(source, Options::all()).into_offset_iter() {
-        match event {
-            Event::Start(tag) => {
-                if let Some(block) = pulldown_structure_block_from_start_tag(
-                    source,
-                    line_starts,
-                    tag,
-                    range,
-                    blocks.len(),
-                ) {
-                    blocks.push(block);
+    let (_, events_elapsed) = time_profiled(profile, || {
+        for (event, range) in Parser::new_ext(source, Options::all()).into_offset_iter() {
+            match event {
+                Event::Start(tag) => {
+                    if let Some(block) = pulldown_structure_block_from_start_tag(
+                        source,
+                        line_starts,
+                        tag,
+                        range,
+                        blocks.len(),
+                    ) {
+                        blocks.push(block);
+                    }
                 }
+                Event::Rule => {
+                    blocks.push(structure_thematic_break_block_from_range(
+                        line_starts,
+                        pulldown_node_id(blocks.len()),
+                        range,
+                    ));
+                }
+                _ => {}
             }
-            Event::Rule => {
-                blocks.push(structure_thematic_break_block_from_range(
-                    line_starts,
-                    pulldown_node_id(blocks.len()),
-                    range,
-                ));
-            }
-            _ => {}
         }
+    });
+    let (_, ref_defs_elapsed) = time_profiled(profile, || {
+        add_pulldown_link_reference_definition_blocks(source, line_starts, &mut blocks);
+    });
+    let (_, sort1_elapsed) = time_profiled(profile, || {
+        blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
+    });
+    let (_, synthesize_elapsed) = time_profiled(profile, || {
+        synthesize_pulldown_paragraph_blocks(source, line_starts, &mut blocks);
+    });
+    let (_, sort2_elapsed) = time_profiled(profile, || {
+        blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
+    });
+    if let Some(total_start) = total_start {
+        eprintln!(
+            "pulldown_block_profile total={:.3}ms events={:.3}ms ref_defs={:.3}ms sort1={:.3}ms synthesize={:.3}ms sort2={:.3}ms blocks={}",
+            duration_ms(total_start.elapsed()),
+            duration_ms(events_elapsed),
+            duration_ms(ref_defs_elapsed),
+            duration_ms(sort1_elapsed),
+            duration_ms(synthesize_elapsed),
+            duration_ms(sort2_elapsed),
+            blocks.len(),
+        );
     }
-    add_pulldown_link_reference_definition_blocks(source, line_starts, &mut blocks);
-    blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
-    synthesize_pulldown_paragraph_blocks(source, line_starts, &mut blocks);
-    blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
     blocks
 }
 
@@ -362,28 +407,45 @@ fn add_pulldown_link_reference_definition_blocks(
     line_starts: &[usize],
     blocks: &mut Vec<MarkdownStructureBlock>,
 ) {
-    let definition_ranges = pulldown_link_reference_definition_ranges(source, line_starts, blocks);
-    blocks.retain(|block| {
-        block.kind != MarkdownBlockKind::Paragraph
-            || !definition_ranges
-                .iter()
-                .any(|range| ranges_overlap(&block.source_range, range))
+    let profile = profile_pulldown_block();
+    let (definition_ranges, scan_elapsed) = time_profiled(profile, || {
+        pulldown_link_reference_definition_ranges(source, line_starts, blocks)
+    });
+    let definition_count = definition_ranges.len();
+    let (_, retain_elapsed) = time_profiled(profile, || {
+        blocks.retain(|block| {
+            block.kind != MarkdownBlockKind::Paragraph
+                || !definition_ranges
+                    .iter()
+                    .any(|range| ranges_overlap(&block.source_range, range))
+        });
     });
 
     let first_id = blocks.len();
-    blocks.extend(
-        definition_ranges
-            .into_iter()
-            .enumerate()
-            .map(|(index, range)| {
-                structure_link_reference_definition_block_from_range(
-                    source,
-                    line_starts,
-                    pulldown_node_id(first_id + index),
-                    range,
-                )
-            }),
-    );
+    let (_, extend_elapsed) = time_profiled(profile, || {
+        blocks.extend(
+            definition_ranges
+                .into_iter()
+                .enumerate()
+                .map(|(index, range)| {
+                    structure_link_reference_definition_block_from_range(
+                        source,
+                        line_starts,
+                        pulldown_node_id(first_id + index),
+                        range,
+                    )
+                }),
+        );
+    });
+    if profile {
+        eprintln!(
+            "pulldown_ref_profile scan={:.3}ms retain={:.3}ms extend={:.3}ms definitions={}",
+            duration_ms(scan_elapsed),
+            duration_ms(retain_elapsed),
+            duration_ms(extend_elapsed),
+            definition_count,
+        );
+    }
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -716,40 +778,64 @@ fn synthesize_pulldown_paragraph_blocks(
     line_starts: &[usize],
     blocks: &mut Vec<MarkdownStructureBlock>,
 ) {
-    extend_blockquote_paragraphs_to_next_child_marker(source, line_starts, blocks);
+    let profile = profile_pulldown_block();
+    let total_start = profile.then(std::time::Instant::now);
+    let (_, extend1_elapsed) = time_profiled(profile, || {
+        extend_blockquote_paragraphs_to_next_child_marker(source, line_starts, blocks);
+    });
 
     let mut synthesized = Vec::new();
-    for item in blocks.iter() {
-        if !matches!(
-            item.kind,
-            MarkdownBlockKind::ListItem | MarkdownBlockKind::TaskListItem { .. }
-        ) {
-            continue;
+    let (_, list_synthesize_elapsed) = time_profiled(profile, || {
+        for item in blocks.iter() {
+            if !matches!(
+                item.kind,
+                MarkdownBlockKind::ListItem | MarkdownBlockKind::TaskListItem { .. }
+            ) {
+                continue;
+            }
+
+            let paragraph_start = item.content_range.start;
+            let paragraph_end =
+                pulldown_list_item_paragraph_end(source, blocks, item, paragraph_start);
+            if paragraph_start >= paragraph_end
+                || source[paragraph_start..paragraph_end].trim().is_empty()
+                || blocks.iter().any(|block| {
+                    block.kind == MarkdownBlockKind::Paragraph
+                        && ranges_overlap(&block.source_range, &(paragraph_start..paragraph_end))
+                })
+            {
+                continue;
+            }
+
+            synthesized.push(structure_paragraph_block_from_range(
+                source,
+                line_starts,
+                pulldown_node_id(blocks.len() + synthesized.len()),
+                paragraph_start..paragraph_end,
+            ));
         }
+    });
 
-        let paragraph_start = item.content_range.start;
-        let paragraph_end = pulldown_list_item_paragraph_end(source, blocks, item, paragraph_start);
-        if paragraph_start >= paragraph_end
-            || source[paragraph_start..paragraph_end].trim().is_empty()
-            || blocks.iter().any(|block| {
-                block.kind == MarkdownBlockKind::Paragraph
-                    && ranges_overlap(&block.source_range, &(paragraph_start..paragraph_end))
-            })
-        {
-            continue;
-        }
-
-        synthesized.push(structure_paragraph_block_from_range(
-            source,
-            line_starts,
-            pulldown_node_id(blocks.len() + synthesized.len()),
-            paragraph_start..paragraph_end,
-        ));
-    }
-
+    let synthesized_count = synthesized.len();
     blocks.extend(synthesized);
-    extend_blockquote_paragraphs_to_next_child_marker(source, line_starts, blocks);
-    extend_blockquote_child_blocks_to_quoted_gaps(source, line_starts, blocks);
+    let (_, extend2_elapsed) = time_profiled(profile, || {
+        extend_blockquote_paragraphs_to_next_child_marker(source, line_starts, blocks);
+    });
+    let (_, gap_extend_elapsed) = time_profiled(profile, || {
+        extend_blockquote_child_blocks_to_quoted_gaps(source, line_starts, blocks);
+    });
+    if let Some(total_start) = total_start {
+        eprintln!(
+            "pulldown_synthesize_profile total={:.3}ms extend1={:.3}ms list_synthesize={:.3}ms extend2={:.3}ms gap_extend={:.3}ms blocks={} synthesized={}",
+            duration_ms(total_start.elapsed()),
+            duration_ms(extend1_elapsed),
+            duration_ms(list_synthesize_elapsed),
+            duration_ms(extend2_elapsed),
+            duration_ms(gap_extend_elapsed),
+            blocks.len(),
+            synthesized_count,
+        );
+    }
 }
 
 #[cfg(any(test, perf_enabled))]
