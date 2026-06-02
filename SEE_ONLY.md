@@ -133,6 +133,9 @@ Verification commands:
 - No per-inline-parent `parse_document`.
 - No tree-sitter included ranges.
 - No backend comparator in product path.
+- Preserve end-to-end perf comparability for the same user scenarios: cold document parse/open, edit-triggered refresh, rendered/source row build, projection/query work.
+- Old parser-internal metrics may be deleted or renamed; do not preserve `tree_sitter_*`, `pulldown_*`, inline range build, inline parse, or fallback stats for compatibility.
+- If the benchmark harness is rewritten, keep a production workload mode that can run the same input documents and commands on old/new commits and report total elapsed time for those user scenarios.
 - Source scans must be linear or local-to-node-range only.
 - Preserve prefix maximum indexes for range overlap queries.
 - Add/keep parser stats that can prove:
