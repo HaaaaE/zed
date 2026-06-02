@@ -399,6 +399,11 @@ impl SyntaxStatsAccumulator {
         self.totals.table_collect_ns += stats.table_collect_ns;
         self.totals.inline_collect_ns += stats.inline_collect_ns;
         self.totals.projection_collect_ns += stats.projection_collect_ns;
+        self.totals.inline_backend_kind = stats.inline_backend_kind;
+        self.totals.inline_backend_parent_count += stats.inline_backend_parent_count;
+        self.totals.inline_backend_fallback_count += stats.inline_backend_fallback_count;
+        self.totals.comrak_sourcepos_mapping_ns += stats.comrak_sourcepos_mapping_ns;
+        self.totals.comrak_marker_scan_ns += stats.comrak_marker_scan_ns;
     }
 
     fn mean_ns_as_ms(&self, ns: u128) -> f64 {
@@ -407,6 +412,23 @@ impl SyntaxStatsAccumulator {
 
     fn parse_calls_per_iteration(&self) -> f64 {
         self.totals.parse_calls as f64 / self.samples as f64
+    }
+
+    fn inline_backend_parent_count_per_iteration(&self) -> f64 {
+        self.totals.inline_backend_parent_count as f64 / self.samples as f64
+    }
+
+    fn inline_backend_fallback_count_per_iteration(&self) -> f64 {
+        self.totals.inline_backend_fallback_count as f64 / self.samples as f64
+    }
+
+    fn inline_backend_fallback_ratio(&self) -> f64 {
+        if self.totals.inline_backend_parent_count == 0 {
+            0.0
+        } else {
+            self.totals.inline_backend_fallback_count as f64
+                / self.totals.inline_backend_parent_count as f64
+        }
     }
 }
 
@@ -517,6 +539,15 @@ fn print_syntax_stats(label: &str, total: MeasurementSummary, stats: &SyntaxStat
         stats.mean_ns_as_ms(stats.totals.structure_build_ns),
     );
     println!(
+        "{label}_inline_backend_detail: kind={:?} parent_count_per_iteration={:.3} fallback_count_per_iteration={:.3} fallback_ratio={:.3} comrak_sourcepos_mapping_mean={:.3}ms comrak_marker_scan_mean={:.3}ms",
+        stats.totals.inline_backend_kind,
+        stats.inline_backend_parent_count_per_iteration(),
+        stats.inline_backend_fallback_count_per_iteration(),
+        stats.inline_backend_fallback_ratio(),
+        stats.mean_ns_as_ms(stats.totals.comrak_sourcepos_mapping_ns),
+        stats.mean_ns_as_ms(stats.totals.comrak_marker_scan_ns),
+    );
+    println!(
         "{label}_assembler_detail: line_start_collect_mean={:.3}ms block_collect_mean={:.3}ms table_collect_mean={:.3}ms inline_collect_mean={:.3}ms projection_collect_mean={:.3}ms unattributed_assembler_mean={assembler_unattributed_ms:.3}ms",
         stats.mean_ns_as_ms(stats.totals.line_start_collect_ns),
         stats.mean_ns_as_ms(stats.totals.block_collect_ns),
@@ -578,10 +609,38 @@ fn line_range(starts: &[usize], source_len: usize, row: usize) -> Range<usize> {
 struct PulldownEvent;
 
 #[cfg(perf_enabled)]
-fn pulldown_adapter_syntax_data(source: &str) -> PulldownAssembly {
+fn tree_sitter_tree_sitter_syntax_data(source: &str) -> PulldownAssembly {
+    let tree = MarkdownSyntaxTree::parse(source);
+    PulldownAssembly {
+        data: BenchmarkSyntaxData::from_production(tree.syntax_data()),
+    }
+}
+
+#[cfg(perf_enabled)]
+fn tree_sitter_comrak_syntax_data(source: &str) -> PulldownAssembly {
+    PulldownAssembly {
+        data: BenchmarkSyntaxData::from_production(
+            &MarkdownSyntaxData::parse_with_tree_sitter_block_and_comrak_inline_for_benchmarks(
+                source,
+            ),
+        ),
+    }
+}
+
+#[cfg(perf_enabled)]
+fn pulldown_tree_sitter_syntax_data(source: &str) -> PulldownAssembly {
     PulldownAssembly {
         data: BenchmarkSyntaxData::from_production(
             &MarkdownSyntaxData::parse_with_pulldown_for_benchmarks(source),
+        ),
+    }
+}
+
+#[cfg(perf_enabled)]
+fn pulldown_comrak_syntax_data(source: &str) -> PulldownAssembly {
+    PulldownAssembly {
+        data: BenchmarkSyntaxData::from_production(
+            &MarkdownSyntaxData::parse_with_pulldown_block_and_comrak_inline_for_benchmarks(source),
         ),
     }
 }
@@ -809,66 +868,149 @@ fn main() {
     let production_baseline = BenchmarkSyntaxData::from_production(
         markdown_wysiwyg::MarkdownSyntaxTree::parse(&source).syntax_data(),
     );
-    let initial_pulldown_assembly = pulldown_adapter_syntax_data(&source);
-    let initial_diff =
-        SyntaxDiffSummary::compare(&production_baseline, &initial_pulldown_assembly.data);
-    initial_diff.print("pulldown_structure_semantics_diff");
-    initial_diff.print_first_mismatches(&production_baseline, &initial_pulldown_assembly.data);
 
     measure("pulldown_cmark_parse_events", iterations, || {
         pulldown_parser_checksum(black_box(&source))
     });
 
     #[cfg(perf_enabled)]
-    let (tree_sitter_timing, tree_sitter_stats) = measure_with_syntax_stats(
-        "markdown_wysiwyg_tree_sitter_syntax_data",
-        iterations,
-        || {
-            let tree = markdown_wysiwyg::MarkdownSyntaxTree::parse(black_box(&source));
-            tree.syntax_data().checksum_for_benchmarks()
-        },
-    );
+    {
+        let tree_sitter_tree_sitter_assembly = tree_sitter_tree_sitter_syntax_data(&source);
+        let tree_sitter_comrak_assembly = tree_sitter_comrak_syntax_data(&source);
+        let pulldown_tree_sitter_assembly = pulldown_tree_sitter_syntax_data(&source);
+        let pulldown_comrak_assembly = pulldown_comrak_syntax_data(&source);
+
+        let tree_sitter_tree_sitter_diff = SyntaxDiffSummary::compare(
+            &production_baseline,
+            &tree_sitter_tree_sitter_assembly.data,
+        );
+        tree_sitter_tree_sitter_diff.print("tree_sitter_block_tree_sitter_inline_semantics_diff");
+
+        let tree_sitter_comrak_diff =
+            SyntaxDiffSummary::compare(&production_baseline, &tree_sitter_comrak_assembly.data);
+        tree_sitter_comrak_diff.print("tree_sitter_block_comrak_inline_semantics_diff");
+        tree_sitter_comrak_diff
+            .print_first_mismatches(&production_baseline, &tree_sitter_comrak_assembly.data);
+
+        let pulldown_tree_sitter_diff =
+            SyntaxDiffSummary::compare(&production_baseline, &pulldown_tree_sitter_assembly.data);
+        pulldown_tree_sitter_diff.print("pulldown_block_tree_sitter_inline_semantics_diff");
+        pulldown_tree_sitter_diff
+            .print_first_mismatches(&production_baseline, &pulldown_tree_sitter_assembly.data);
+
+        let pulldown_comrak_diff =
+            SyntaxDiffSummary::compare(&production_baseline, &pulldown_comrak_assembly.data);
+        pulldown_comrak_diff.print("pulldown_block_comrak_inline_semantics_diff");
+        pulldown_comrak_diff
+            .print_first_mismatches(&production_baseline, &pulldown_comrak_assembly.data);
+
+        let (tree_sitter_tree_sitter_timing, tree_sitter_tree_sitter_stats) =
+            measure_with_syntax_stats(
+                "tree_sitter_block_tree_sitter_inline_syntax_data",
+                iterations,
+                || {
+                    let assembly = tree_sitter_tree_sitter_syntax_data(black_box(&source));
+                    SyntaxDiffSummary::compare(black_box(&production_baseline), &assembly.data)
+                        .checksum()
+                },
+            );
+        let (tree_sitter_comrak_timing, tree_sitter_comrak_stats) = measure_with_syntax_stats(
+            "tree_sitter_block_comrak_inline_syntax_data",
+            iterations,
+            || {
+                let assembly = tree_sitter_comrak_syntax_data(black_box(&source));
+                SyntaxDiffSummary::compare(black_box(&production_baseline), &assembly.data)
+                    .checksum()
+            },
+        );
+        let (pulldown_tree_sitter_timing, pulldown_tree_sitter_stats) = measure_with_syntax_stats(
+            "pulldown_block_tree_sitter_inline_syntax_data",
+            iterations,
+            || {
+                let assembly = pulldown_tree_sitter_syntax_data(black_box(&source));
+                SyntaxDiffSummary::compare(black_box(&production_baseline), &assembly.data)
+                    .checksum()
+            },
+        );
+        let (pulldown_comrak_timing, pulldown_comrak_stats) = measure_with_syntax_stats(
+            "pulldown_block_comrak_inline_syntax_data",
+            iterations,
+            || {
+                let assembly = pulldown_comrak_syntax_data(black_box(&source));
+                SyntaxDiffSummary::compare(black_box(&production_baseline), &assembly.data)
+                    .checksum()
+            },
+        );
+
+        print_relative_measurement(
+            "tree_sitter_block_comrak_inline_relative_to_tree_sitter_block_tree_sitter_inline",
+            tree_sitter_comrak_timing,
+            tree_sitter_tree_sitter_timing,
+        );
+        print_relative_measurement(
+            "pulldown_block_tree_sitter_inline_relative_to_tree_sitter_block_tree_sitter_inline",
+            pulldown_tree_sitter_timing,
+            tree_sitter_tree_sitter_timing,
+        );
+        print_relative_measurement(
+            "pulldown_block_comrak_inline_relative_to_tree_sitter_block_tree_sitter_inline",
+            pulldown_comrak_timing,
+            tree_sitter_tree_sitter_timing,
+        );
+        print_relative_measurement(
+            "pulldown_block_comrak_inline_relative_to_pulldown_block_tree_sitter_inline",
+            pulldown_comrak_timing,
+            pulldown_tree_sitter_timing,
+        );
+
+        print_syntax_stats(
+            "tree_sitter_block_tree_sitter_inline_syntax_data",
+            tree_sitter_tree_sitter_timing,
+            &tree_sitter_tree_sitter_stats,
+        );
+        print_syntax_stats(
+            "tree_sitter_block_comrak_inline_syntax_data",
+            tree_sitter_comrak_timing,
+            &tree_sitter_comrak_stats,
+        );
+        print_syntax_stats(
+            "pulldown_block_tree_sitter_inline_syntax_data",
+            pulldown_tree_sitter_timing,
+            &pulldown_tree_sitter_stats,
+        );
+        print_syntax_stats(
+            "pulldown_block_comrak_inline_syntax_data",
+            pulldown_comrak_timing,
+            &pulldown_comrak_stats,
+        );
+    }
 
     #[cfg(not(perf_enabled))]
-    let tree_sitter_timing = measure(
-        "markdown_wysiwyg_tree_sitter_syntax_data",
-        iterations,
-        || {
-            let tree = markdown_wysiwyg::MarkdownSyntaxTree::parse(black_box(&source));
-            tree.syntax_data().checksum_for_benchmarks()
-        },
-    );
+    {
+        let initial_pulldown_assembly = pulldown_adapter_syntax_data(&source);
+        let initial_diff =
+            SyntaxDiffSummary::compare(&production_baseline, &initial_pulldown_assembly.data);
+        initial_diff.print("pulldown_structure_semantics_diff");
+        initial_diff.print_first_mismatches(&production_baseline, &initial_pulldown_assembly.data);
 
-    #[cfg(perf_enabled)]
-    let (pulldown_timing, pulldown_stats) =
-        measure_with_syntax_stats("pulldown_semantics_adapter", iterations, || {
+        let tree_sitter_timing = measure(
+            "markdown_wysiwyg_tree_sitter_syntax_data",
+            iterations,
+            || {
+                let tree = markdown_wysiwyg::MarkdownSyntaxTree::parse(black_box(&source));
+                tree.syntax_data().checksum_for_benchmarks()
+            },
+        );
+
+        let pulldown_timing = measure("pulldown_semantics_adapter", iterations, || {
             let assembly = pulldown_adapter_syntax_data(black_box(&source));
             SyntaxDiffSummary::compare(black_box(&production_baseline), &assembly.data).checksum()
         });
 
-    #[cfg(not(perf_enabled))]
-    let pulldown_timing = measure("pulldown_semantics_adapter", iterations, || {
-        let assembly = pulldown_adapter_syntax_data(black_box(&source));
-        SyntaxDiffSummary::compare(black_box(&production_baseline), &assembly.data).checksum()
-    });
-
-    print_relative_measurement(
-        "pulldown_semantics_adapter_relative_to_tree_sitter",
-        pulldown_timing,
-        tree_sitter_timing,
-    );
-
-    #[cfg(perf_enabled)]
-    {
-        print_syntax_stats(
-            "markdown_wysiwyg_tree_sitter_syntax_data",
-            tree_sitter_timing,
-            &tree_sitter_stats,
-        );
-        print_syntax_stats(
-            "pulldown_semantics_adapter",
+        print_relative_measurement(
+            "pulldown_semantics_adapter_relative_to_tree_sitter",
             pulldown_timing,
-            &pulldown_stats,
+            tree_sitter_timing,
         );
     }
 }

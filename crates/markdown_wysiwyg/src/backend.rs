@@ -27,8 +27,9 @@ use super::{
 
 #[cfg(any(test, perf_enabled))]
 use super::{
-    MarkdownInlineBackendStatsKind, parser::InlineBackendKind, record_inline_backend_stats,
-    record_timed_block_parse, record_timed_inline_parent_scan,
+    MarkdownInlineBackendStatsKind,
+    parser::{InlineBackendKind, parse_markdown_with_inline_backend},
+    record_inline_backend_stats, record_timed_block_parse, record_timed_inline_parent_scan,
 };
 
 #[cfg(any(test, perf_enabled))]
@@ -89,6 +90,29 @@ impl TreeSitterMarkdownBackend {
             old_range,
             new_range,
         )
+    }
+
+    #[cfg(any(test, perf_enabled))]
+    pub(super) fn parse_syntax_data_with_inline_backend(
+        source: &str,
+        inline_backend: InlineBackendKind,
+    ) -> MarkdownSyntaxData {
+        let (parser_state, structure) = record_timed_backend_prepare(|| {
+            let (parser_state, inline_semantics) = record_timed_parse(|| {
+                parse_markdown_with_inline_backend(source, None, None, inline_backend)
+            });
+            let structure = record_timed_structure_build(|| {
+                MarkdownStructure::from_parts(
+                    blocks::collect_structure_blocks(source, parser_state.block_tree().root_node()),
+                    inline_semantics,
+                )
+            });
+            (parser_state, structure)
+        });
+        let _ = parser_state;
+        record_timed_collect_syntax_data(|| {
+            MarkdownSemanticsAssembler::assemble(source, &structure)
+        })
     }
 }
 

@@ -40,6 +40,8 @@ thread_local! {
             inline_backend_kind: MarkdownInlineBackendStatsKind::TreeSitter,
             inline_backend_parent_count: 0,
             inline_backend_fallback_count: 0,
+            comrak_sourcepos_mapping_ns: 0,
+            comrak_marker_scan_ns: 0,
         }) };
 }
 
@@ -64,6 +66,8 @@ pub struct MarkdownSyntaxStats {
     pub inline_backend_kind: MarkdownInlineBackendStatsKind,
     pub inline_backend_parent_count: usize,
     pub inline_backend_fallback_count: usize,
+    pub comrak_sourcepos_mapping_ns: u128,
+    pub comrak_marker_scan_ns: u128,
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -158,6 +162,22 @@ impl MarkdownSyntaxData {
     #[cfg(any(test, perf_enabled))]
     pub fn parse_with_pulldown_for_benchmarks(source: &str) -> Self {
         backend::PulldownMarkdownBackend::parse_syntax_data(source)
+    }
+
+    #[cfg(any(test, perf_enabled))]
+    pub fn parse_with_tree_sitter_block_and_comrak_inline_for_benchmarks(source: &str) -> Self {
+        backend::TreeSitterMarkdownBackend::parse_syntax_data_with_inline_backend(
+            source,
+            parser::InlineBackendKind::Comrak,
+        )
+    }
+
+    #[cfg(any(test, perf_enabled))]
+    pub fn parse_with_pulldown_block_and_comrak_inline_for_benchmarks(source: &str) -> Self {
+        backend::PulldownMarkdownBackend::parse_syntax_data_with_inline_backend(
+            source,
+            parser::InlineBackendKind::Comrak,
+        )
     }
 
     pub fn source_len(&self) -> usize {
@@ -631,6 +651,34 @@ pub(crate) fn record_timed_inline_parse<T>(run: impl FnOnce() -> T) -> T {
 
 #[cfg(not(any(test, perf_enabled)))]
 pub(crate) fn record_timed_inline_parse<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
+#[allow(dead_code)]
+pub(crate) fn record_timed_comrak_sourcepos_mapping<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.comrak_sourcepos_mapping_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+#[allow(dead_code)]
+pub(crate) fn record_timed_comrak_sourcepos_mapping<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
+#[allow(dead_code)]
+pub(crate) fn record_timed_comrak_marker_scan<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.comrak_marker_scan_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+#[allow(dead_code)]
+pub(crate) fn record_timed_comrak_marker_scan<T>(run: impl FnOnce() -> T) -> T {
     run()
 }
 

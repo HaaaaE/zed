@@ -17,6 +17,8 @@ use super::{
     },
     structure::{MarkdownInlineSemantics, MarkdownStructure},
 };
+#[cfg(any(test, perf_enabled))]
+use super::{record_timed_comrak_marker_scan, record_timed_comrak_sourcepos_mapping};
 
 impl MarkdownSyntaxTree {
     pub fn inline_spans(&self) -> &[MarkdownInlineSpan] {
@@ -808,13 +810,16 @@ fn comrak_inline_span_from_node<'a>(
         NodeValue::LineBreak => MarkdownInlineKind::HardBreak,
         _ => return None,
     };
-    let source_range =
-        source_range_from_comrak_sourcepos(parent_start, line_starts, data.sourcepos)?;
+    let source_range = record_timed_comrak_sourcepos_mapping(|| {
+        source_range_from_comrak_sourcepos(parent_start, line_starts, data.sourcepos)
+    })?;
     if source_range.is_empty() || source_range.end > source.len() {
         return None;
     }
 
-    let marker_ranges = comrak_inline_marker_ranges(source, kind, source_range.clone());
+    let marker_ranges = record_timed_comrak_marker_scan(|| {
+        comrak_inline_marker_ranges(source, kind, source_range.clone())
+    });
     let content_ranges = inline_content_ranges(source_range.clone(), &marker_ranges);
     let url = match &data.value {
         NodeValue::Link(link) | NodeValue::Image(link) => Some(link.url.clone()),

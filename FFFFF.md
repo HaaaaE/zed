@@ -192,3 +192,31 @@
       - 已验证：
           - cargo check -p markdown_wysiwyg --locked
           - cargo test -p markdown_wysiwyg --locked
+  - 2026-06-02:
+      - 已完成 benchmark 四组矩阵和更细 stats 输出：
+          - tree-sitter block + tree-sitter inline
+          - tree-sitter block + comrak inline
+          - pulldown block + tree-sitter inline
+          - pulldown block + comrak inline
+      - benchmark stats 现在输出：
+          - inline backend kind
+          - inline parse mean
+          - comrak sourcepos mapping mean
+          - comrak marker scan mean
+          - inline backend parent count / fallback count / fallback ratio
+      - tree-sitter block + comrak inline benchmark 路径已使用真实 ComrakInlineBackend 尝试，再逐 parent fallback 到 tree-sitter semantics。
+      - pulldown block + comrak inline benchmark 路径也走相同 comrak inline + fallback 口径。
+      - release smoke 小样本结果：
+          - tree_sitter_block_tree_sitter_inline_semantics_diff: mismatch_fields=0
+          - tree_sitter_block_comrak_inline_semantics_diff: mismatch_fields=0
+          - pulldown_block_tree_sitter_inline_semantics_diff: mismatch_fields=0
+          - pulldown_block_comrak_inline_semantics_diff: mismatch_fields=0
+          - tree-sitter block + comrak inline fallback_ratio=0.100
+          - pulldown block + comrak inline fallback_ratio=0.108
+      - 已验证：
+          - cargo check -p markdown_wysiwyg --locked
+          - cargo test -p markdown_wysiwyg --locked
+          - cargo check -p updraft_editor --locked
+          - cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+          - RUSTFLAGS='--cfg perf_enabled' cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+          - RUSTFLAGS='--cfg perf_enabled' MARKDOWN_SYNTAX_BENCH_BYTES=10240 MARKDOWN_SYNTAX_BENCH_ITERATIONS=1 cargo run --release --manifest-path tooling/markdown_syntax_bench/Cargo.toml

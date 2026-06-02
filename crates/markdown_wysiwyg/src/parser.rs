@@ -9,7 +9,9 @@ use super::{
 };
 
 #[cfg(any(test, perf_enabled))]
-use super::source::point_for_offset;
+use super::{
+    MarkdownInlineBackendStatsKind, record_inline_backend_stats, source::point_for_offset,
+};
 
 thread_local! {
     static BLOCK_PARSER: RefCell<Parser> = RefCell::new(markdown_block_parser());
@@ -114,8 +116,61 @@ fn parse_inline(
         }
         #[cfg(any(test, perf_enabled))]
         InlineBackendKind::Comrak => {
-            parse_tree_sitter_inline(source, block_tree, old_tree, changed_range)
+            parse_comrak_inline(source, block_tree, old_tree, changed_range)
         }
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn parse_comrak_inline(
+    source: &str,
+    block_tree: &Tree,
+    old_tree: Option<&MarkdownParseTree>,
+    changed_range: Option<&Range<usize>>,
+) -> InlineParseOutput {
+    let tree_sitter_output = parse_tree_sitter_inline(source, block_tree, old_tree, changed_range);
+    let InlineParseOutput {
+        semantics: tree_sitter_semantics,
+        cache,
+    } = tree_sitter_output;
+    let MarkdownInlineCache::TreeSitter {
+        inline_trees,
+        inline_tree_by_parent_id,
+    } = cache
+    else {
+        return InlineParseOutput {
+            semantics: tree_sitter_semantics,
+            cache: MarkdownInlineCache::None,
+        };
+    };
+
+    let comrak_semantics =
+        inline::collect_comrak_inline_semantics_for_inline_trees(source, &inline_trees);
+    let mut fallback_count = 0;
+    let semantics = tree_sitter_semantics
+        .into_iter()
+        .zip(comrak_semantics)
+        .map(|(tree_sitter, comrak)| {
+            if comrak == tree_sitter {
+                comrak
+            } else {
+                fallback_count += 1;
+                tree_sitter
+            }
+        })
+        .collect();
+    record_inline_backend_stats(
+        MarkdownInlineBackendStatsKind::Comrak,
+        inline_trees.len(),
+        fallback_count,
+    );
+
+    InlineParseOutput {
+        semantics,
+        cache: MarkdownInlineCache::TreeSitter {
+            inline_trees,
+            inline_tree_by_parent_id,
+        },
     }
 }
 
