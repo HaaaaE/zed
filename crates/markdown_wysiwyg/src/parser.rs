@@ -183,12 +183,14 @@ pub(super) fn parse_inline_trees_for_ranges(
                 continue;
             }
 
-            let ranges = [TreeSitterRange {
-                start_byte: parent_range.start,
-                start_point: point_for_offset(&line_starts, parent_range.start),
-                end_byte: parent_range.end,
-                end_point: point_for_offset(&line_starts, parent_range.end),
-            }];
+            let ranges = record_timed_inline_range_build(|| {
+                [TreeSitterRange {
+                    start_byte: parent_range.start,
+                    start_point: point_for_offset(&line_starts, parent_range.start),
+                    end_byte: parent_range.end,
+                    end_point: point_for_offset(&line_starts, parent_range.end),
+                }]
+            });
             let inline_tree = record_timed_inline_parse(|| {
                 inline_parser
                     .set_included_ranges(&ranges)

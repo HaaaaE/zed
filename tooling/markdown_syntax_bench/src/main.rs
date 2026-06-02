@@ -9,6 +9,8 @@ use markdown_wysiwyg::{
     MarkdownBlock, MarkdownInlineSpan, MarkdownProjectionReplacement, MarkdownSyntaxData,
     MarkdownTable, ProjectionMarkerDependency,
 };
+#[cfg(perf_enabled)]
+use markdown_wysiwyg::{MarkdownSyntaxStats, MarkdownSyntaxTree};
 #[cfg(not(perf_enabled))]
 use pulldown_cmark::{Event, Tag};
 use pulldown_cmark::{Options, Parser};
@@ -371,6 +373,43 @@ struct MeasurementSummary {
     median_ms: f64,
 }
 
+#[cfg(perf_enabled)]
+#[derive(Default)]
+struct SyntaxStatsAccumulator {
+    samples: usize,
+    totals: MarkdownSyntaxStats,
+}
+
+#[cfg(perf_enabled)]
+impl SyntaxStatsAccumulator {
+    fn add(&mut self, stats: MarkdownSyntaxStats) {
+        self.samples += 1;
+        self.totals.parse_calls += stats.parse_calls;
+        self.totals.parse_ns += stats.parse_ns;
+        self.totals.backend_prepare_ns += stats.backend_prepare_ns;
+        self.totals.block_parse_ns += stats.block_parse_ns;
+        self.totals.inline_parent_scan_ns += stats.inline_parent_scan_ns;
+        self.totals.inline_reuse_index_ns += stats.inline_reuse_index_ns;
+        self.totals.inline_range_build_ns += stats.inline_range_build_ns;
+        self.totals.inline_parse_ns += stats.inline_parse_ns;
+        self.totals.structure_build_ns += stats.structure_build_ns;
+        self.totals.syntax_data_collect_ns += stats.syntax_data_collect_ns;
+        self.totals.line_start_collect_ns += stats.line_start_collect_ns;
+        self.totals.block_collect_ns += stats.block_collect_ns;
+        self.totals.table_collect_ns += stats.table_collect_ns;
+        self.totals.inline_collect_ns += stats.inline_collect_ns;
+        self.totals.projection_collect_ns += stats.projection_collect_ns;
+    }
+
+    fn mean_ns_as_ms(&self, ns: u128) -> f64 {
+        ns as f64 / self.samples as f64 / 1_000_000.0
+    }
+
+    fn parse_calls_per_iteration(&self) -> f64 {
+        self.totals.parse_calls as f64 / self.samples as f64
+    }
+}
+
 fn measure(name: &str, iterations: usize, mut run: impl FnMut() -> usize) -> MeasurementSummary {
     let warmup = black_box(run());
     let mut samples = Vec::with_capacity(iterations);
@@ -395,6 +434,42 @@ fn measure(name: &str, iterations: usize, mut run: impl FnMut() -> usize) -> Mea
     }
 }
 
+#[cfg(perf_enabled)]
+fn measure_with_syntax_stats(
+    name: &str,
+    iterations: usize,
+    mut run: impl FnMut() -> usize,
+) -> (MeasurementSummary, SyntaxStatsAccumulator) {
+    MarkdownSyntaxTree::reset_stats_for_benchmarks();
+    let warmup = black_box(run());
+    let mut samples = Vec::with_capacity(iterations);
+    let mut stats = SyntaxStatsAccumulator::default();
+    let mut checksum = warmup;
+    for _ in 0..iterations {
+        MarkdownSyntaxTree::reset_stats_for_benchmarks();
+        let start = Instant::now();
+        checksum = checksum.wrapping_add(black_box(run()));
+        samples.push(start.elapsed());
+        stats.add(MarkdownSyntaxTree::stats_for_benchmarks());
+    }
+    samples.sort();
+    let total = samples.iter().copied().sum::<Duration>();
+    let mean = total.as_secs_f64() * 1000.0 / samples.len() as f64;
+    let median = samples[samples.len() / 2].as_secs_f64() * 1000.0;
+    let min = samples[0].as_secs_f64() * 1000.0;
+    let max = samples[samples.len() - 1].as_secs_f64() * 1000.0;
+    println!(
+        "{name}: mean={mean:.3}ms median={median:.3}ms min={min:.3}ms max={max:.3}ms checksum={checksum}"
+    );
+    (
+        MeasurementSummary {
+            mean_ms: mean,
+            median_ms: median,
+        },
+        stats,
+    )
+}
+
 fn print_relative_measurement(
     label: &str,
     candidate: MeasurementSummary,
@@ -406,6 +481,48 @@ fn print_relative_measurement(
         candidate.median_ms / baseline.median_ms,
         baseline.mean_ms / candidate.mean_ms,
         baseline.median_ms / candidate.median_ms,
+    );
+}
+
+#[cfg(perf_enabled)]
+fn print_syntax_stats(label: &str, total: MeasurementSummary, stats: &SyntaxStatsAccumulator) {
+    let backend_prepare_ms = stats.mean_ns_as_ms(stats.totals.backend_prepare_ns);
+    let syntax_data_collect_ms = stats.mean_ns_as_ms(stats.totals.syntax_data_collect_ns);
+    let benchmark_overhead_ms =
+        (total.mean_ms - backend_prepare_ms - syntax_data_collect_ms).max(0.0);
+    let assembler_known_detail_ms = stats.mean_ns_as_ms(
+        stats
+            .totals
+            .line_start_collect_ns
+            .saturating_add(stats.totals.block_collect_ns)
+            .saturating_add(stats.totals.table_collect_ns)
+            .saturating_add(stats.totals.inline_collect_ns)
+            .saturating_add(stats.totals.projection_collect_ns),
+    );
+    let assembler_unattributed_ms = (syntax_data_collect_ms - assembler_known_detail_ms).max(0.0);
+
+    println!(
+        "{label}_parent_breakdown: total_mean={:.3}ms backend_prepare_mean={backend_prepare_ms:.3}ms syntax_data_collect_mean={syntax_data_collect_ms:.3}ms benchmark_overhead_mean={benchmark_overhead_ms:.3}ms parse_calls_per_iteration={:.3}",
+        total.mean_ms,
+        stats.parse_calls_per_iteration(),
+    );
+    println!(
+        "{label}_backend_detail: parse_wrapper_mean={:.3}ms block_parse_or_collect_mean={:.3}ms inline_parent_scan_mean={:.3}ms inline_reuse_index_mean={:.3}ms inline_range_build_mean={:.3}ms inline_parse_mean={:.3}ms structure_build_mean={:.3}ms",
+        stats.mean_ns_as_ms(stats.totals.parse_ns),
+        stats.mean_ns_as_ms(stats.totals.block_parse_ns),
+        stats.mean_ns_as_ms(stats.totals.inline_parent_scan_ns),
+        stats.mean_ns_as_ms(stats.totals.inline_reuse_index_ns),
+        stats.mean_ns_as_ms(stats.totals.inline_range_build_ns),
+        stats.mean_ns_as_ms(stats.totals.inline_parse_ns),
+        stats.mean_ns_as_ms(stats.totals.structure_build_ns),
+    );
+    println!(
+        "{label}_assembler_detail: line_start_collect_mean={:.3}ms block_collect_mean={:.3}ms table_collect_mean={:.3}ms inline_collect_mean={:.3}ms projection_collect_mean={:.3}ms unattributed_assembler_mean={assembler_unattributed_ms:.3}ms",
+        stats.mean_ns_as_ms(stats.totals.line_start_collect_ns),
+        stats.mean_ns_as_ms(stats.totals.block_collect_ns),
+        stats.mean_ns_as_ms(stats.totals.table_collect_ns),
+        stats.mean_ns_as_ms(stats.totals.inline_collect_ns),
+        stats.mean_ns_as_ms(stats.totals.projection_collect_ns),
     );
 }
 
@@ -702,6 +819,17 @@ fn main() {
         pulldown_parser_checksum(black_box(&source))
     });
 
+    #[cfg(perf_enabled)]
+    let (tree_sitter_timing, tree_sitter_stats) = measure_with_syntax_stats(
+        "markdown_wysiwyg_tree_sitter_syntax_data",
+        iterations,
+        || {
+            let tree = markdown_wysiwyg::MarkdownSyntaxTree::parse(black_box(&source));
+            tree.syntax_data().checksum_for_benchmarks()
+        },
+    );
+
+    #[cfg(not(perf_enabled))]
     let tree_sitter_timing = measure(
         "markdown_wysiwyg_tree_sitter_syntax_data",
         iterations,
@@ -711,6 +839,14 @@ fn main() {
         },
     );
 
+    #[cfg(perf_enabled)]
+    let (pulldown_timing, pulldown_stats) =
+        measure_with_syntax_stats("pulldown_semantics_adapter", iterations, || {
+            let assembly = pulldown_adapter_syntax_data(black_box(&source));
+            SyntaxDiffSummary::compare(black_box(&production_baseline), &assembly.data).checksum()
+        });
+
+    #[cfg(not(perf_enabled))]
     let pulldown_timing = measure("pulldown_semantics_adapter", iterations, || {
         let assembly = pulldown_adapter_syntax_data(black_box(&source));
         SyntaxDiffSummary::compare(black_box(&production_baseline), &assembly.data).checksum()
@@ -721,4 +857,18 @@ fn main() {
         pulldown_timing,
         tree_sitter_timing,
     );
+
+    #[cfg(perf_enabled)]
+    {
+        print_syntax_stats(
+            "markdown_wysiwyg_tree_sitter_syntax_data",
+            tree_sitter_timing,
+            &tree_sitter_stats,
+        );
+        print_syntax_stats(
+            "pulldown_semantics_adapter",
+            pulldown_timing,
+            &pulldown_stats,
+        );
+    }
 }

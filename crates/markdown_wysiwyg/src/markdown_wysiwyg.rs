@@ -24,11 +24,14 @@ thread_local! {
         const { Cell::new(MarkdownSyntaxStats {
             parse_calls: 0,
             parse_ns: 0,
+            backend_prepare_ns: 0,
             block_parse_ns: 0,
             inline_parent_scan_ns: 0,
             inline_reuse_index_ns: 0,
             inline_range_build_ns: 0,
             inline_parse_ns: 0,
+            structure_build_ns: 0,
+            syntax_data_collect_ns: 0,
             line_start_collect_ns: 0,
             block_collect_ns: 0,
             table_collect_ns: 0,
@@ -42,11 +45,14 @@ thread_local! {
 pub struct MarkdownSyntaxStats {
     pub parse_calls: usize,
     pub parse_ns: u128,
+    pub backend_prepare_ns: u128,
     pub block_parse_ns: u128,
     pub inline_parent_scan_ns: u128,
     pub inline_reuse_index_ns: u128,
     pub inline_range_build_ns: u128,
     pub inline_parse_ns: u128,
+    pub structure_build_ns: u128,
+    pub syntax_data_collect_ns: u128,
     pub line_start_collect_ns: u128,
     pub block_collect_ns: u128,
     pub table_collect_ns: u128,
@@ -399,11 +405,21 @@ impl MarkdownSyntaxTree {
 
     #[cfg(any(test, perf_enabled))]
     pub fn reset_stats_for_tests() {
+        Self::reset_stats_for_benchmarks();
+    }
+
+    #[cfg(any(test, perf_enabled))]
+    pub fn reset_stats_for_benchmarks() {
         MARKDOWN_SYNTAX_STATS.with(|stats| stats.set(MarkdownSyntaxStats::default()));
     }
 
     #[cfg(any(test, perf_enabled))]
     pub fn stats_for_tests() -> MarkdownSyntaxStats {
+        Self::stats_for_benchmarks()
+    }
+
+    #[cfg(any(test, perf_enabled))]
+    pub fn stats_for_benchmarks() -> MarkdownSyntaxStats {
         MARKDOWN_SYNTAX_STATS.with(Cell::get)
     }
 
@@ -533,6 +549,18 @@ fn record_timed_parse<T>(run: impl FnOnce() -> T) -> T {
 }
 
 #[cfg(any(test, perf_enabled))]
+pub(crate) fn record_timed_backend_prepare<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.backend_prepare_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+pub(crate) fn record_timed_backend_prepare<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
 pub(crate) fn record_timed_block_parse<T>(run: impl FnOnce() -> T) -> T {
     record_timed(run, |stats, elapsed| {
         stats.block_parse_ns += elapsed;
@@ -589,6 +617,30 @@ pub(crate) fn record_timed_inline_parse<T>(run: impl FnOnce() -> T) -> T {
 
 #[cfg(not(any(test, perf_enabled)))]
 pub(crate) fn record_timed_inline_parse<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(crate) fn record_timed_structure_build<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.structure_build_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+pub(crate) fn record_timed_structure_build<T>(run: impl FnOnce() -> T) -> T {
+    run()
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(crate) fn record_timed_syntax_data_collect<T>(run: impl FnOnce() -> T) -> T {
+    record_timed(run, |stats, elapsed| {
+        stats.syntax_data_collect_ns += elapsed;
+    })
+}
+
+#[cfg(not(any(test, perf_enabled)))]
+pub(crate) fn record_timed_syntax_data_collect<T>(run: impl FnOnce() -> T) -> T {
     run()
 }
 

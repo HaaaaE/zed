@@ -20,9 +20,13 @@ use super::{
 };
 use super::{
     MarkdownParseTree, MarkdownSyntaxData, MarkdownSyntaxTree,
-    assembler::MarkdownSemanticsAssembler, parser::parse_markdown, record_timed_parse,
+    assembler::MarkdownSemanticsAssembler, parser::parse_markdown, record_timed_backend_prepare,
+    record_timed_parse, record_timed_structure_build, record_timed_syntax_data_collect,
     structure::MarkdownStructure,
 };
+
+#[cfg(any(test, perf_enabled))]
+use super::{record_timed_block_parse, record_timed_inline_parent_scan};
 
 #[cfg(any(test, perf_enabled))]
 use super::parser::parse_inline_trees_for_ranges;
@@ -86,8 +90,14 @@ impl MarkdownBackend for TreeSitterMarkdownBackend {
         old_tree: Option<&MarkdownParseTree>,
         changed_range: Option<&Range<usize>>,
     ) -> MarkdownBackendOutput {
-        let parser_state = record_timed_parse(|| parse_markdown(source, old_tree, changed_range));
-        let structure = MarkdownStructure::from_parse_tree(source, &parser_state);
+        let (parser_state, structure) = record_timed_backend_prepare(|| {
+            let parser_state =
+                record_timed_parse(|| parse_markdown(source, old_tree, changed_range));
+            let structure = record_timed_structure_build(|| {
+                MarkdownStructure::from_parse_tree(source, &parser_state)
+            });
+            (parser_state, structure)
+        });
         let data = record_timed_collect_syntax_data(|| {
             MarkdownSemanticsAssembler::assemble(source, &structure)
         });
@@ -106,9 +116,14 @@ impl MarkdownBackend for TreeSitterMarkdownBackend {
         old_range: Range<usize>,
         new_range: Range<usize>,
     ) -> MarkdownBackendOutput {
-        let parser_state =
-            record_timed_parse(|| parse_markdown(source, Some(edited_tree), Some(&new_range)));
-        let structure = MarkdownStructure::from_parse_tree(source, &parser_state);
+        let (parser_state, structure) = record_timed_backend_prepare(|| {
+            let parser_state =
+                record_timed_parse(|| parse_markdown(source, Some(edited_tree), Some(&new_range)));
+            let structure = record_timed_structure_build(|| {
+                MarkdownStructure::from_parse_tree(source, &parser_state)
+            });
+            (parser_state, structure)
+        });
         let data = record_timed_collect_syntax_data(|| {
             MarkdownSemanticsAssembler::assemble_incremental(
                 source, previous, &structure, &old_range, &new_range,
@@ -126,7 +141,7 @@ impl MarkdownBackend for TreeSitterMarkdownBackend {
 #[cfg(any(test, perf_enabled))]
 impl PulldownMarkdownBackend {
     pub(super) fn parse_syntax_data(source: &str) -> MarkdownSyntaxData {
-        let structure = pulldown_structure(source);
+        let structure = record_timed_backend_prepare(|| pulldown_structure(source));
         record_timed_collect_syntax_data(|| {
             MarkdownSemanticsAssembler::assemble(source, &structure)
         })
@@ -134,7 +149,8 @@ impl PulldownMarkdownBackend {
 
     #[cfg(test)]
     pub(super) fn parse_syntax_tree(source: &str) -> MarkdownSyntaxTree {
-        let (structure, parser_state) = pulldown_structure_and_parser_state(source);
+        let (structure, parser_state) =
+            record_timed_backend_prepare(|| pulldown_structure_and_parser_state(source));
         let data = record_timed_collect_syntax_data(|| {
             MarkdownSemanticsAssembler::assemble(source, &structure)
         });
@@ -149,7 +165,8 @@ impl PulldownMarkdownBackend {
         old_range: Range<usize>,
         new_range: Range<usize>,
     ) -> MarkdownSyntaxTree {
-        let (structure, parser_state) = pulldown_structure_and_parser_state(source);
+        let (structure, parser_state) =
+            record_timed_backend_prepare(|| pulldown_structure_and_parser_state(source));
         let data = record_timed_collect_syntax_data(|| {
             MarkdownSemanticsAssembler::assemble_incremental(
                 source, previous, &structure, &old_range, &new_range,
@@ -163,21 +180,29 @@ impl PulldownMarkdownBackend {
 #[cfg(any(test, perf_enabled))]
 fn pulldown_structure(source: &str) -> MarkdownStructure {
     let source_line_starts = line_starts(source);
-    let blocks = collect_pulldown_structure_blocks(source, &source_line_starts);
+    let blocks = record_timed_block_parse(|| {
+        collect_pulldown_structure_blocks(source, &source_line_starts)
+    });
     let inline_trees = parse_inline_trees_for_ranges(
         source,
-        pulldown_inline_parent_ranges(source, &source_line_starts, &blocks),
+        record_timed_inline_parent_scan(|| {
+            pulldown_inline_parent_ranges(source, &source_line_starts, &blocks)
+        }),
     );
-    MarkdownStructure::from_parts(blocks, inline_trees)
+    record_timed_structure_build(|| MarkdownStructure::from_parts(blocks, inline_trees))
 }
 
 #[cfg(test)]
 fn pulldown_structure_and_parser_state(source: &str) -> (MarkdownStructure, MarkdownParseTree) {
     let source_line_starts = line_starts(source);
-    let blocks = collect_pulldown_structure_blocks(source, &source_line_starts);
+    let blocks = record_timed_block_parse(|| {
+        collect_pulldown_structure_blocks(source, &source_line_starts)
+    });
     let inline_trees = parse_inline_trees_for_ranges(
         source,
-        pulldown_inline_parent_ranges(source, &source_line_starts, &blocks),
+        record_timed_inline_parent_scan(|| {
+            pulldown_inline_parent_ranges(source, &source_line_starts, &blocks)
+        }),
     );
     let inline_tree_by_parent_id = inline_trees
         .iter()
@@ -191,7 +216,7 @@ fn pulldown_structure_and_parser_state(source: &str) -> (MarkdownStructure, Mark
     };
 
     (
-        MarkdownStructure::from_parts(blocks, inline_trees),
+        record_timed_structure_build(|| MarkdownStructure::from_parts(blocks, inline_trees)),
         parser_state,
     )
 }
@@ -943,5 +968,5 @@ fn pulldown_node_id(index: usize) -> MarkdownNodeId {
 }
 
 fn record_timed_collect_syntax_data<T>(run: impl FnOnce() -> T) -> T {
-    run()
+    record_timed_syntax_data_collect(run)
 }
