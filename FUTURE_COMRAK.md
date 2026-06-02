@@ -90,6 +90,27 @@
 - 明确 email autolink 应暴露 `mailto:` URL 还是原始邮箱地址。
 - 更新消费者和测试，让它们依赖明确的 autolink URL 合同。
 
+### Reference Link / Image
+
+当前兼容行为：
+
+- 对 `[full][ref]`、`[ref][]`、`[shortcut]` 和 reference-style image，adapter 会在 comrak AST 之外做局部源码扫描。
+- 扫描不读取全文 reference definitions，也不判断 reference 是否真实存在。
+- 产出的 Link/Image span 按当前 tree-sitter 口径处理：`url=None`，marker/content ranges 按源码形状恢复。
+
+原因：
+
+- 当前 tree-sitter inline 输出是语法形状合同：看起来像 reference link/image 就暴露对应 span。
+- comrak 的自然语义需要 reference definition 才会把 reference link 解析成真实 Link。
+- 在迁移阶段，为了保持 projection/marker hiding 行为不变，先让 comrak path 兼容 tree-sitter 的 syntactic 形状。
+
+未来 comrak-native 方向：
+
+- 删除这层 reference link/image 局部扫描。
+- 让 comrak 的 reference resolution 成为 canonical：不存在 definition 的 reference 不应强行暴露成 Link/Image。
+- 对 resolved reference link/image 明确定义是否保留 comrak URL，以及 URL/title 如何进入 `MarkdownInlineSemantics`。
+- 更新测试，让它们断言 comrak-native reference 语义，而不是 tree-sitter 的 syntactic approximation。
+
 ### Entity Span
 
 当前兼容行为：
@@ -150,4 +171,3 @@
 - 正常解析不再依赖 tree-sitter inline parser。
 - 上面列出的兼容 shim 被删除，或替换成明确的 comrak-native semantics。
 - 测试断言用户可见的编辑器/projection 行为和清晰的语义合同，而不是 tree-sitter 的实现细节。
-
