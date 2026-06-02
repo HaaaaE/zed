@@ -169,3 +169,16 @@
       - 已验证：
           - cargo check -p markdown_wysiwyg --locked
           - cargo test -p markdown_wysiwyg --locked
+  - 2026-06-02:
+      - 已推进第三步 ComrakInlineBackend 初版：
+          - 新增 comrak = 0.52.0，保持 default-features = false。
+          - cfg(test/perf_enabled) 下 Comrak inline backend selection 不再复用 tree-sitter semantics。
+          - 新增 comrak AST/sourcepos 到 MarkdownInlineSemantics 的转换入口。
+          - comrak options 已设置 strikethrough / autolink / math_dollars / tagfilter / escaped_char_spans / sourcepos_chars=false。
+          - 已映射核心 inline 节点：Emph、Strong、Strikethrough、Code、Link、Image、HtmlInline、Escaped、Math(dollar)、SoftBreak、LineBreak。
+          - 已通过源码扫描补齐 entity spans 和 escape/entity projection replacements。
+          - 已用源码扫描恢复常见 emphasis / strong / strikethrough / code / math / inline link / image / escape marker ranges。
+          - 当前仍未完成完整语义合同和 fallback；reference link、复杂 marker 口径、完整 semantic diff、stats/fallback 仍在后续步骤。
+      - 已验证：
+          - cargo check -p markdown_wysiwyg --locked
+          - cargo test -p markdown_wysiwyg --locked

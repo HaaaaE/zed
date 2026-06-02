@@ -13,6 +13,7 @@ path = "src/markdown_wysiwyg.rs"
 doctest = false
 
 [dependencies]
+comrak.workspace = true
 entities.workspace = true
 pulldown-cmark.workspace = true
 tree-sitter.workspace = true

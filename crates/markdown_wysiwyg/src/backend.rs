@@ -30,7 +30,10 @@ use super::{parser::InlineBackendKind, record_timed_block_parse, record_timed_in
 
 #[cfg(any(test, perf_enabled))]
 use super::{
-    inline::collect_inline_semantics_for_inline_trees, parser::parse_inline_trees_for_ranges,
+    inline::{
+        collect_comrak_inline_semantics_for_inline_trees, collect_inline_semantics_for_inline_trees,
+    },
+    parser::parse_inline_trees_for_ranges,
 };
 
 pub(super) struct MarkdownBackendOutput {
@@ -284,7 +287,7 @@ fn pulldown_inline_semantics_from_trees(
             collect_inline_semantics_for_inline_trees(source, inline_trees)
         }
         InlineBackendKind::Comrak => {
-            collect_inline_semantics_for_inline_trees(source, inline_trees)
+            collect_comrak_inline_semantics_for_inline_trees(source, inline_trees)
         }
     }
 }

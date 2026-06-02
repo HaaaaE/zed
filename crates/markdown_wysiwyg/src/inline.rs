@@ -1,5 +1,11 @@
 use std::{collections::HashMap, ops::Range, sync::OnceLock};
 
+#[cfg(any(test, perf_enabled))]
+use comrak::{
+    Arena, Options,
+    nodes::{Node as ComrakNode, NodeValue, Sourcepos},
+    parse_document,
+};
 use tree_sitter::Node;
 
 use super::{
@@ -51,6 +57,48 @@ pub(super) fn collect_inline_semantics_for_inline_trees(
         })
         .inspect(|semantics| {
             debug_assert_ne!(semantics.parent_id, 0);
+        })
+        .collect()
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(super) fn collect_comrak_inline_semantics_for_inline_trees(
+    source: &str,
+    inline_trees: &[MarkdownInlineTree],
+) -> Vec<MarkdownInlineSemantics> {
+    inline_trees
+        .iter()
+        .map(|inline_tree| {
+            let parent_range = inline_tree.parent_range.clone();
+            let mut spans = collect_comrak_inline_spans(source, parent_range.clone());
+            spans.extend(scan_entity_spans(source, parent_range.clone()));
+            collect_soft_break_spans(source, parent_range.clone(), &mut spans);
+            spans.sort_by_key(|span| (span.source_range.start, span.source_range.end));
+            spans.dedup_by_key(|span| {
+                (
+                    span.kind,
+                    span.source_range.start,
+                    span.source_range.end,
+                    span.url.clone(),
+                )
+            });
+
+            let mut replacements = collect_comrak_projection_replacements(source, &spans);
+            replacements.sort_by_key(|replacement| {
+                (
+                    replacement.source_range.start,
+                    replacement.source_range.end,
+                    replacement.owner_source_range.start,
+                    replacement.owner_source_range.end,
+                )
+            });
+
+            MarkdownInlineSemantics {
+                parent_id: inline_tree.parent_id,
+                parent_range,
+                spans,
+                replacements,
+            }
         })
         .collect()
 }
@@ -690,4 +738,287 @@ fn inline_content_ranges(
         content_ranges.push(start..source_range.end);
     }
     content_ranges
+}
+
+#[cfg(any(test, perf_enabled))]
+fn collect_comrak_inline_spans(
+    source: &str,
+    parent_range: Range<usize>,
+) -> Vec<MarkdownInlineSpan> {
+    let Some(parent_source) = source.get(parent_range.clone()) else {
+        return Vec::new();
+    };
+    let arena = Arena::new();
+    let options = comrak_inline_options();
+    let root = parse_document(&arena, parent_source, &options);
+    let line_starts = super::source::line_starts(parent_source);
+    let mut spans = Vec::new();
+    collect_comrak_inline_span_nodes(source, parent_range.start, &line_starts, root, &mut spans);
+    spans
+}
+
+#[cfg(any(test, perf_enabled))]
+fn comrak_inline_options() -> Options<'static> {
+    let mut options = Options::default();
+    options.extension.strikethrough = true;
+    options.extension.autolink = true;
+    options.extension.math_dollars = true;
+    options.extension.tagfilter = true;
+    options.parse.escaped_char_spans = true;
+    options.parse.sourcepos_chars = false;
+    options
+}
+
+#[cfg(any(test, perf_enabled))]
+fn collect_comrak_inline_span_nodes<'a>(
+    source: &str,
+    parent_start: usize,
+    line_starts: &[usize],
+    node: ComrakNode<'a>,
+    spans: &mut Vec<MarkdownInlineSpan>,
+) {
+    if let Some(span) = comrak_inline_span_from_node(source, parent_start, line_starts, node) {
+        spans.push(span);
+    }
+
+    for child in node.children() {
+        collect_comrak_inline_span_nodes(source, parent_start, line_starts, child, spans);
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn comrak_inline_span_from_node<'a>(
+    source: &str,
+    parent_start: usize,
+    line_starts: &[usize],
+    node: ComrakNode<'a>,
+) -> Option<MarkdownInlineSpan> {
+    let data = node.data();
+    let kind = match &data.value {
+        NodeValue::Emph => MarkdownInlineKind::Emphasis,
+        NodeValue::Strong => MarkdownInlineKind::Strong,
+        NodeValue::Strikethrough => MarkdownInlineKind::Strikethrough,
+        NodeValue::Code(_) => MarkdownInlineKind::InlineCode,
+        NodeValue::Link(_) => MarkdownInlineKind::Link,
+        NodeValue::Image(_) => MarkdownInlineKind::Image,
+        NodeValue::HtmlInline(_) => MarkdownInlineKind::InlineHtml,
+        NodeValue::Escaped => MarkdownInlineKind::Escape,
+        NodeValue::Math(math) if math.dollar_math => MarkdownInlineKind::InlineMath,
+        NodeValue::SoftBreak => MarkdownInlineKind::SoftBreak,
+        NodeValue::LineBreak => MarkdownInlineKind::HardBreak,
+        _ => return None,
+    };
+    let source_range =
+        source_range_from_comrak_sourcepos(parent_start, line_starts, data.sourcepos)?;
+    if source_range.is_empty() || source_range.end > source.len() {
+        return None;
+    }
+
+    let marker_ranges = comrak_inline_marker_ranges(source, kind, source_range.clone());
+    let content_ranges = inline_content_ranges(source_range.clone(), &marker_ranges);
+    let url = match &data.value {
+        NodeValue::Link(link) | NodeValue::Image(link) => Some(link.url.clone()),
+        _ => None,
+    };
+    let tagfilter_disallowed = kind == MarkdownInlineKind::InlineHtml
+        && raw_html_tagfilter_disallowed(source, source_range.clone());
+
+    Some(MarkdownInlineSpan {
+        kind,
+        source_range,
+        content_ranges,
+        marker_ranges,
+        url,
+        tagfilter_disallowed,
+    })
+}
+
+#[cfg(any(test, perf_enabled))]
+fn source_range_from_comrak_sourcepos(
+    parent_start: usize,
+    line_starts: &[usize],
+    sourcepos: Sourcepos,
+) -> Option<Range<usize>> {
+    if sourcepos.start.line == 0 || sourcepos.end.line == 0 {
+        return None;
+    }
+    let start_line = sourcepos.start.line.checked_sub(1)?;
+    let end_line = sourcepos.end.line.checked_sub(1)?;
+    let start_column = sourcepos.start.column.checked_sub(1)?;
+    let end_column = sourcepos.end.column;
+    let start = parent_start + line_starts.get(start_line).copied()? + start_column;
+    let end = parent_start + line_starts.get(end_line).copied()? + end_column;
+    (start <= end).then_some(start..end)
+}
+
+#[cfg(any(test, perf_enabled))]
+fn comrak_inline_marker_ranges(
+    source: &str,
+    kind: MarkdownInlineKind,
+    source_range: Range<usize>,
+) -> Vec<Range<usize>> {
+    match kind {
+        MarkdownInlineKind::Emphasis => delimiter_marker_ranges(source, source_range, &["*", "_"]),
+        MarkdownInlineKind::Strong => delimiter_marker_ranges(source, source_range, &["**", "__"]),
+        MarkdownInlineKind::Strikethrough => {
+            delimiter_marker_ranges(source, source_range, &["~~", "~"])
+        }
+        MarkdownInlineKind::InlineCode => code_marker_ranges(source, source_range),
+        MarkdownInlineKind::InlineMath => math_marker_ranges(source, source_range),
+        MarkdownInlineKind::Link => link_marker_ranges(source, source_range, false),
+        MarkdownInlineKind::Image => link_marker_ranges(source, source_range, true),
+        MarkdownInlineKind::Escape => escape_marker_ranges(source, source_range),
+        MarkdownInlineKind::HardBreak | MarkdownInlineKind::SoftBreak => vec![source_range],
+        MarkdownInlineKind::InlineHtml | MarkdownInlineKind::Entity => Vec::new(),
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn delimiter_marker_ranges(
+    source: &str,
+    source_range: Range<usize>,
+    delimiters: &[&str],
+) -> Vec<Range<usize>> {
+    let Some(text) = source.get(source_range.clone()) else {
+        return Vec::new();
+    };
+    for delimiter in delimiters {
+        if text.starts_with(delimiter)
+            && text.ends_with(delimiter)
+            && text.len() >= delimiter.len() * 2
+        {
+            let start = source_range.start;
+            let end = source_range.end;
+            return (0..delimiter.len())
+                .map(|index| start + index..start + index + 1)
+                .chain((0..delimiter.len()).map(|index| {
+                    let marker_start = end - delimiter.len() + index;
+                    marker_start..marker_start + 1
+                }))
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
+#[cfg(any(test, perf_enabled))]
+fn code_marker_ranges(source: &str, source_range: Range<usize>) -> Vec<Range<usize>> {
+    let Some(text) = source.get(source_range.clone()) else {
+        return Vec::new();
+    };
+    let marker_len = text.bytes().take_while(|byte| *byte == b'`').count();
+    if marker_len == 0 || !text.ends_with(&"`".repeat(marker_len)) || text.len() < marker_len * 2 {
+        return Vec::new();
+    }
+    vec![
+        source_range.start..source_range.start + marker_len,
+        source_range.end - marker_len..source_range.end,
+    ]
+}
+
+#[cfg(any(test, perf_enabled))]
+fn math_marker_ranges(source: &str, source_range: Range<usize>) -> Vec<Range<usize>> {
+    let Some(text) = source.get(source_range.clone()) else {
+        return Vec::new();
+    };
+    let marker_len = if text.starts_with("$$") && text.ends_with("$$") {
+        2
+    } else if text.starts_with('$') && text.ends_with('$') {
+        1
+    } else {
+        return Vec::new();
+    };
+    vec![
+        source_range.start..source_range.start + marker_len,
+        source_range.end - marker_len..source_range.end,
+    ]
+}
+
+#[cfg(any(test, perf_enabled))]
+fn link_marker_ranges(source: &str, source_range: Range<usize>, image: bool) -> Vec<Range<usize>> {
+    let Some(text) = source.get(source_range.clone()) else {
+        return Vec::new();
+    };
+    let mut marker_ranges = Vec::new();
+    if image && text.starts_with("![") {
+        marker_ranges.push(source_range.start..source_range.start + 1);
+        marker_ranges.push(source_range.start + 1..source_range.start + 2);
+    } else if !image && text.starts_with('[') {
+        marker_ranges.push(source_range.start..source_range.start + 1);
+    }
+    if let Some(label_end) = text.find("](") {
+        let close_label = source_range.start + label_end;
+        marker_ranges.push(close_label..close_label + 1);
+        marker_ranges.push(close_label + 1..close_label + 2);
+        if close_label + 2 < source_range.end.saturating_sub(1) {
+            marker_ranges.push(close_label + 2..source_range.end - 1);
+        }
+        if source_range.end > 0 && text.ends_with(')') {
+            marker_ranges.push(source_range.end - 1..source_range.end);
+        }
+    }
+    marker_ranges
+}
+
+#[cfg(any(test, perf_enabled))]
+fn escape_marker_ranges(source: &str, source_range: Range<usize>) -> Vec<Range<usize>> {
+    source
+        .get(source_range.clone())
+        .is_some_and(|text| text.starts_with('\\'))
+        .then_some(source_range.start..source_range.start + 1)
+        .into_iter()
+        .collect()
+}
+
+#[cfg(any(test, perf_enabled))]
+fn scan_entity_spans(source: &str, parent_range: Range<usize>) -> Vec<MarkdownInlineSpan> {
+    let mut spans = Vec::new();
+    let mut cursor = parent_range.start;
+    while cursor < parent_range.end {
+        let Some(relative_start) = source[cursor..parent_range.end].find('&') else {
+            break;
+        };
+        let start = cursor + relative_start;
+        let Some(relative_end) = source[start..parent_range.end].find(';') else {
+            break;
+        };
+        let end = start + relative_end + 1;
+        if decode_markdown_entity(&source[start..end]).is_some() {
+            spans.push(MarkdownInlineSpan {
+                kind: MarkdownInlineKind::Entity,
+                source_range: start..end,
+                content_ranges: vec![start..end],
+                marker_ranges: Vec::new(),
+                url: None,
+                tagfilter_disallowed: false,
+            });
+        }
+        cursor = end;
+    }
+    spans
+}
+
+#[cfg(any(test, perf_enabled))]
+fn collect_comrak_projection_replacements(
+    source: &str,
+    spans: &[MarkdownInlineSpan],
+) -> Vec<MarkdownProjectionReplacement> {
+    spans
+        .iter()
+        .filter_map(|span| match span.kind {
+            MarkdownInlineKind::Escape => Some(MarkdownProjectionReplacement {
+                source_range: span.source_range.clone(),
+                owner_source_range: span.source_range.clone(),
+                display_text: source
+                    .get(span.source_range.start + 1..span.source_range.end)?
+                    .to_string(),
+            }),
+            MarkdownInlineKind::Entity => Some(MarkdownProjectionReplacement {
+                source_range: span.source_range.clone(),
+                owner_source_range: span.source_range.clone(),
+                display_text: decode_markdown_entity(source.get(span.source_range.clone())?)?,
+            }),
+            _ => None,
+        })
+        .collect()
 }
