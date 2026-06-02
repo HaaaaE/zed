@@ -5,8 +5,7 @@ use tree_sitter::{Node, Parser, Range as TreeSitterRange, Tree};
 use super::{
     MarkdownInlineTree, MarkdownParseTree, record_timed_block_parse,
     record_timed_inline_parent_scan, record_timed_inline_parse, record_timed_inline_range_build,
-    record_timed_inline_reuse_index,
-    source::ranges_touch,
+    record_timed_inline_reuse_index, source::ranges_touch,
 };
 
 #[cfg(any(test, perf_enabled))]

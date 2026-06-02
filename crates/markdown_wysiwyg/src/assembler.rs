@@ -28,7 +28,7 @@ impl MarkdownSemanticsAssembler {
             collect_structure_tables(source, &line_starts, structure)
         });
         let inline_spans =
-            record_timed_inline_collect(|| collect_structure_inline_spans(source, structure));
+            record_timed_inline_collect(|| collect_structure_inline_spans(structure));
         let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
         let (
             projection_replacements,
@@ -82,7 +82,7 @@ impl MarkdownSemanticsAssembler {
             collect_structure_tables(source, &line_starts, structure)
         });
         let inline_spans = record_timed_inline_collect(|| {
-            collect_incremental_inline_spans(source, previous, structure, old_range, new_range)
+            collect_incremental_inline_spans(previous, structure, old_range, new_range)
         });
         let inline_span_prefix_maximum_ends = inline_span_prefix_maximum_ends(&inline_spans);
         let (

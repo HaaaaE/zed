@@ -29,7 +29,9 @@ use super::{
 use super::{record_timed_block_parse, record_timed_inline_parent_scan};
 
 #[cfg(any(test, perf_enabled))]
-use super::parser::parse_inline_trees_for_ranges;
+use super::{
+    inline::collect_inline_semantics_for_inline_trees, parser::parse_inline_trees_for_ranges,
+};
 
 pub(super) struct MarkdownBackendOutput {
     pub(super) structure: MarkdownStructure,
@@ -180,24 +182,23 @@ impl PulldownMarkdownBackend {
 #[cfg(any(test, perf_enabled))]
 fn pulldown_structure(source: &str) -> MarkdownStructure {
     let source_line_starts = line_starts(source);
-    let blocks = record_timed_block_parse(|| {
-        collect_pulldown_structure_blocks(source, &source_line_starts)
-    });
+    let blocks =
+        record_timed_block_parse(|| collect_pulldown_structure_blocks(source, &source_line_starts));
     let inline_trees = parse_inline_trees_for_ranges(
         source,
         record_timed_inline_parent_scan(|| {
             pulldown_inline_parent_ranges(source, &source_line_starts, &blocks)
         }),
     );
-    record_timed_structure_build(|| MarkdownStructure::from_parts(blocks, inline_trees))
+    let inline_semantics = collect_inline_semantics_for_inline_trees(source, &inline_trees);
+    record_timed_structure_build(|| MarkdownStructure::from_parts(blocks, inline_semantics))
 }
 
 #[cfg(test)]
 fn pulldown_structure_and_parser_state(source: &str) -> (MarkdownStructure, MarkdownParseTree) {
     let source_line_starts = line_starts(source);
-    let blocks = record_timed_block_parse(|| {
-        collect_pulldown_structure_blocks(source, &source_line_starts)
-    });
+    let blocks =
+        record_timed_block_parse(|| collect_pulldown_structure_blocks(source, &source_line_starts));
     let inline_trees = parse_inline_trees_for_ranges(
         source,
         record_timed_inline_parent_scan(|| {
@@ -216,7 +217,12 @@ fn pulldown_structure_and_parser_state(source: &str) -> (MarkdownStructure, Mark
     };
 
     (
-        record_timed_structure_build(|| MarkdownStructure::from_parts(blocks, inline_trees)),
+        record_timed_structure_build(|| {
+            MarkdownStructure::from_parts(
+                blocks,
+                collect_inline_semantics_for_inline_trees(source, &inline_trees),
+            )
+        }),
         parser_state,
     )
 }
@@ -948,7 +954,10 @@ fn paragraph_end_before_blank_line(source: &str, mut cursor: usize, limit: usize
         let line_end = source[cursor..limit]
             .find('\n')
             .map_or(limit, |newline| cursor + newline + 1);
-        if source[trim_line_end(source, cursor..line_end)].trim().is_empty() {
+        if source[trim_line_end(source, cursor..line_end)]
+            .trim()
+            .is_empty()
+        {
             return cursor;
         }
         if let Some(prefix) = quoted_line_prefix(source, cursor..line_end) {

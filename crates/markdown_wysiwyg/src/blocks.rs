@@ -425,8 +425,9 @@ pub(super) fn structure_heading_block_from_range(
     id: MarkdownNodeId,
     source_range: Range<usize>,
 ) -> Option<MarkdownStructureBlock> {
-    structure_atx_heading_block_from_range(source, line_starts, id, source_range.clone())
-        .or_else(|| structure_setext_heading_block_from_range(source, line_starts, id, source_range))
+    structure_atx_heading_block_from_range(source, line_starts, id, source_range.clone()).or_else(
+        || structure_setext_heading_block_from_range(source, line_starts, id, source_range),
+    )
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -1034,10 +1035,7 @@ fn blockquote_content_start_for_line(source: &str, line_range: Range<usize>) -> 
 }
 
 #[cfg(any(test, perf_enabled))]
-pub(super) fn row_range_for_byte_range(
-    line_starts: &[usize],
-    range: Range<usize>,
-) -> Range<usize> {
+pub(super) fn row_range_for_byte_range(line_starts: &[usize], range: Range<usize>) -> Range<usize> {
     let start = line_starts.partition_point(|line_start| *line_start <= range.start) - 1;
     let end_offset = range
         .end

@@ -1,11 +1,22 @@
 use std::ops::Range;
 
-use super::{MarkdownBlockKind, MarkdownInlineTree, MarkdownNodeId, MarkdownParseTree, blocks};
+use super::{
+    MarkdownBlockKind, MarkdownInlineSpan, MarkdownNodeId, MarkdownParseTree,
+    MarkdownProjectionReplacement, blocks, inline,
+};
 
 #[derive(Clone, Debug)]
 pub(super) struct MarkdownStructure {
-    inline_trees: Vec<MarkdownInlineTree>,
+    inline_semantics: Vec<MarkdownInlineSemantics>,
     blocks: Vec<MarkdownStructureBlock>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct MarkdownInlineSemantics {
+    pub(super) parent_id: usize,
+    pub(super) parent_range: Range<usize>,
+    pub(super) spans: Vec<MarkdownInlineSpan>,
+    pub(super) replacements: Vec<MarkdownProjectionReplacement>,
 }
 
 #[derive(Clone, Debug)]
@@ -23,22 +34,22 @@ impl MarkdownStructure {
     pub(super) fn from_parse_tree(source: &str, parser_state: &MarkdownParseTree) -> Self {
         Self::from_parts(
             blocks::collect_structure_blocks(source, parser_state.block_tree().root_node()),
-            parser_state.inline_trees().to_vec(),
+            inline::collect_inline_semantics_for_inline_trees(source, parser_state.inline_trees()),
         )
     }
 
     pub(super) fn from_parts(
         blocks: Vec<MarkdownStructureBlock>,
-        inline_trees: Vec<MarkdownInlineTree>,
+        inline_semantics: Vec<MarkdownInlineSemantics>,
     ) -> Self {
         Self {
-            inline_trees,
+            inline_semantics,
             blocks,
         }
     }
 
-    pub(super) fn inline_trees(&self) -> &[MarkdownInlineTree] {
-        &self.inline_trees
+    pub(super) fn inline_semantics(&self) -> &[MarkdownInlineSemantics] {
+        &self.inline_semantics
     }
 
     pub(super) fn blocks(&self) -> &[MarkdownStructureBlock] {

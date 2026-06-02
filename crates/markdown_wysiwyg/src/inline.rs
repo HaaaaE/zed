@@ -9,7 +9,7 @@ use super::{
         old_range_for_clean_new_range, range_contains, ranges_overlap, ranges_touch,
         shift_clean_old_range_to_new,
     },
-    structure::MarkdownStructure,
+    structure::{MarkdownInlineSemantics, MarkdownStructure},
 };
 
 impl MarkdownSyntaxTree {
@@ -37,20 +37,37 @@ impl MarkdownSyntaxTree {
     }
 }
 
-pub(super) fn collect_structure_inline_spans(
+pub(super) fn collect_inline_semantics_for_inline_trees(
     source: &str,
+    inline_trees: &[MarkdownInlineTree],
+) -> Vec<MarkdownInlineSemantics> {
+    inline_trees
+        .iter()
+        .map(|inline_tree| MarkdownInlineSemantics {
+            parent_id: inline_tree.parent_id,
+            parent_range: inline_tree.parent_range.clone(),
+            spans: collect_inline_spans_for_inline_tree(source, inline_tree),
+            replacements: collect_projection_replacements_for_inline_tree(source, inline_tree),
+        })
+        .inspect(|semantics| {
+            debug_assert_ne!(semantics.parent_id, 0);
+        })
+        .collect()
+}
+
+pub(super) fn collect_structure_inline_spans(
     structure: &MarkdownStructure,
 ) -> Vec<MarkdownInlineSpan> {
-    let mut spans = Vec::new();
-    for inline_tree in structure.inline_trees() {
-        spans.extend(collect_inline_spans_for_inline_tree(source, inline_tree));
-    }
+    let mut spans = structure
+        .inline_semantics()
+        .iter()
+        .flat_map(|semantics| semantics.spans.iter().cloned())
+        .collect::<Vec<_>>();
     spans.sort_by_key(|span| (span.source_range.start, span.source_range.end));
     spans
 }
 
 pub(super) fn collect_incremental_inline_spans(
-    source: &str,
     previous: &MarkdownSyntaxTree,
     structure: &MarkdownStructure,
     old_range: &Range<usize>,
@@ -63,22 +80,22 @@ pub(super) fn collect_incremental_inline_spans(
         .iter()
         .map(|inline_tree| (inline_tree.parent_range.clone(), ()))
         .collect::<HashMap<_, _>>();
-    for inline_tree in structure.inline_trees() {
-        let new_parent_range = &inline_tree.parent_range;
+    for semantics in structure.inline_semantics() {
+        let new_parent_range = &semantics.parent_range;
         if ranges_touch(new_parent_range, new_range) {
-            spans.extend(collect_inline_spans_for_inline_tree(source, inline_tree));
+            spans.extend(semantics.spans.iter().cloned());
             continue;
         }
 
         let old_parent_range =
             old_range_for_clean_new_range(new_parent_range, new_range, old_range);
         if ranges_touch(&old_parent_range, old_range) {
-            spans.extend(collect_inline_spans_for_inline_tree(source, inline_tree));
+            spans.extend(semantics.spans.iter().cloned());
             continue;
         }
 
         if !previous_inline_parent_ranges.contains_key(&old_parent_range) {
-            spans.extend(collect_inline_spans_for_inline_tree(source, inline_tree));
+            spans.extend(semantics.spans.iter().cloned());
             continue;
         }
 
@@ -186,12 +203,12 @@ pub(super) fn collect_structure_projection_replacements(
     blocks: &[MarkdownBlock],
 ) -> Vec<MarkdownProjectionReplacement> {
     let mut replacements = collect_projection_replacements_for_blocks(source, blocks);
-    for inline_tree in structure.inline_trees() {
-        replacements.extend(collect_projection_replacements_for_inline_tree(
-            source,
-            inline_tree,
-        ));
-    }
+    replacements.extend(
+        structure
+            .inline_semantics()
+            .iter()
+            .flat_map(|semantics| semantics.replacements.iter().cloned()),
+    );
     replacements.sort_by_key(|replacement| {
         (
             replacement.source_range.start,
@@ -218,31 +235,22 @@ pub(super) fn collect_incremental_projection_replacements(
         .iter()
         .map(|inline_tree| (inline_tree.parent_range.clone(), ()))
         .collect::<HashMap<_, _>>();
-    for inline_tree in structure.inline_trees() {
-        let new_parent_range = &inline_tree.parent_range;
+    for semantics in structure.inline_semantics() {
+        let new_parent_range = &semantics.parent_range;
         if ranges_touch(new_parent_range, new_range) {
-            replacements.extend(collect_projection_replacements_for_inline_tree(
-                source,
-                inline_tree,
-            ));
+            replacements.extend(semantics.replacements.iter().cloned());
             continue;
         }
 
         let old_parent_range =
             old_range_for_clean_new_range(new_parent_range, new_range, old_range);
         if ranges_touch(&old_parent_range, old_range) {
-            replacements.extend(collect_projection_replacements_for_inline_tree(
-                source,
-                inline_tree,
-            ));
+            replacements.extend(semantics.replacements.iter().cloned());
             continue;
         }
 
         if !previous_inline_parent_ranges.contains_key(&old_parent_range) {
-            replacements.extend(collect_projection_replacements_for_inline_tree(
-                source,
-                inline_tree,
-            ));
+            replacements.extend(semantics.replacements.iter().cloned());
             continue;
         }
 

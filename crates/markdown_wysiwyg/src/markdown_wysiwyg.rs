@@ -792,14 +792,15 @@ mod tests {
 
     fn maybe_row_for_source_substring(source: &str, substring: &str) -> Option<usize> {
         let offset = source.find(substring)?;
-        Some(source[..offset].bytes().filter(|byte| *byte == b'\n').count())
+        Some(
+            source[..offset]
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count(),
+        )
     }
 
-    fn maybe_source_range_between(
-        source: &str,
-        start: &str,
-        end: &str,
-    ) -> Option<Range<usize>> {
+    fn maybe_source_range_between(source: &str, start: &str, end: &str) -> Option<Range<usize>> {
         let start = source.find(start)?;
         let end = source.find(end)?;
         (start < end).then_some(start..end)
@@ -855,12 +856,7 @@ mod tests {
                 ranges.push(start..end);
             }
         }
-        ranges.extend(
-            tables
-                .iter()
-                .flat_map(table_rows)
-                .map(|row| row..row + 1),
-        );
+        ranges.extend(tables.iter().flat_map(table_rows).map(|row| row..row + 1));
         ranges.sort_by_key(|range| (range.start, range.end));
         ranges.dedup();
         ranges
@@ -1168,7 +1164,7 @@ mod tests {
         assert!(
             data.blocks()
                 .iter()
-            .any(|block| block.kind == MarkdownBlockKind::ThematicBreak)
+                .any(|block| block.kind == MarkdownBlockKind::ThematicBreak)
         );
     }
 
@@ -1541,15 +1537,8 @@ mod tests {
                 "--- | :---: | ---:\n",
                 "1 | **2** | 3\n",
             ),
-            concat!(
-                "| a |  | c |\n",
-                "| - | - | - |\n",
-                "|  | **b** |  |\n",
-            ),
-            concat!(
-                "| a | b |\n",
-                "| not a delimiter |\n",
-            ),
+            concat!("| a |  | c |\n", "| - | - | - |\n", "|  | **b** |  |\n",),
+            concat!("| a | b |\n", "| not a delimiter |\n",),
         ];
 
         for source in cases {
@@ -1632,7 +1621,10 @@ mod tests {
         let tree_sitter = MarkdownSyntaxTree::parse(&source);
         let pulldown = PulldownMarkdownBackend::parse_syntax_data(&source);
 
-        assert_eq!(pulldown.line_starts(), tree_sitter.syntax_data().line_starts());
+        assert_eq!(
+            pulldown.line_starts(),
+            tree_sitter.syntax_data().line_starts()
+        );
         assert_eq!(
             pulldown
                 .blocks()
@@ -2042,14 +2034,16 @@ mod tests {
                 "*",
             ),
             (
-                source.find("> 1. quoted ordered").unwrap()
-                    ..source.find("- parent item").unwrap(),
+                source.find("> 1. quoted ordered").unwrap()..source.find("- parent item").unwrap(),
                 "",
             ),
             (
                 source.find("- parent item").unwrap()
                     ..source.find("\n\n1. numbered parent").unwrap(),
-                concat!("- parent item\n", "  paragraph continuation with **inline**\n"),
+                concat!(
+                    "- parent item\n",
+                    "  paragraph continuation with **inline**\n"
+                ),
             ),
             (
                 source.find("1. numbered parent").unwrap()..source.find("\n\n| head").unwrap(),
@@ -2394,8 +2388,7 @@ mod tests {
                 "*",
             ),
             (
-                source.find(">   1. nested ordered").unwrap()
-                    ..source.find("\n\n- parent").unwrap(),
+                source.find(">   1. nested ordered").unwrap()..source.find("\n\n- parent").unwrap(),
                 "",
             ),
             (
