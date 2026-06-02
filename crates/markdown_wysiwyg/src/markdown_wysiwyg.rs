@@ -1264,8 +1264,13 @@ mod tests {
     }
 
     #[test]
-    fn comrak_inline_backend_records_fallbacks_for_mismatched_semantics() {
-        let source = "Reference [link][ref]\n\n[ref]: https://example.com\n";
+    fn comrak_inline_backend_matches_tree_sitter_reference_link_semantics() {
+        let source = concat!(
+            "Reference [full][ref] [ref][] [shortcut]\n",
+            "\n",
+            "[ref]: https://example.com\n",
+            "[shortcut]: https://example.com\n",
+        );
         let tree_sitter = PulldownMarkdownBackend::parse_syntax_data_with_inline_backend(
             source,
             InlineBackendKind::TreeSitter,
@@ -1280,11 +1285,19 @@ mod tests {
 
         assert_eq!(comrak.inline_spans(), tree_sitter.inline_spans());
         assert_eq!(
+            comrak.projection_replacements(),
+            tree_sitter.projection_replacements()
+        );
+        assert_eq!(
+            comrak.projection_marker_dependencies(),
+            tree_sitter.projection_marker_dependencies()
+        );
+        assert_eq!(
             stats.inline_backend_kind,
             MarkdownInlineBackendStatsKind::Comrak
         );
         assert!(stats.inline_backend_parent_count > 0);
-        assert!(stats.inline_backend_fallback_count > 0);
+        assert_eq!(stats.inline_backend_fallback_count, 0);
     }
 
     #[test]

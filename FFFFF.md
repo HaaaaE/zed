@@ -277,3 +277,25 @@
           - cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
           - RUSTFLAGS='--cfg perf_enabled' cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
           - RUSTFLAGS='--cfg perf_enabled' MARKDOWN_SYNTAX_BENCH_BYTES=10240 MARKDOWN_SYNTAX_BENCH_ITERATIONS=1 cargo run --release --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+  - 2026-06-02:
+      - 修复 Comrak inline reference link fallback：
+          - 没有引入全文 reference definition map，也没有让 comrak resolve reference。
+          - 按当前 tree-sitter 合同，对 `[full][ref]`、`[ref][]`、`[shortcut]` 和 reference-style image 做局部源码形状扫描。
+          - 产出的 Link/Image span 维持当前兼容口径：`url=None`，marker/content ranges 按 tree-sitter 形状归一。
+          - focused test 从“reference link 会 fallback”改为“三种 reference link 形态不 fallback”。
+      - release smoke 小样本结果：
+          - tree_sitter_block_tree_sitter_inline_semantics_diff: mismatch_fields=0
+          - tree_sitter_block_comrak_inline_semantics_diff: mismatch_fields=0
+          - pulldown_block_tree_sitter_inline_semantics_diff: mismatch_fields=0
+          - pulldown_block_comrak_inline_semantics_diff: mismatch_fields=0
+          - tree-sitter block + comrak inline fallback_count_per_iteration=0.000 / fallback_ratio=0.000
+          - pulldown block + comrak inline fallback_count_per_iteration=0.000 / fallback_ratio=0.000
+      - 已验证：
+          - cargo fmt --check
+          - cargo test -p markdown_wysiwyg comrak_inline_backend_matches_tree_sitter_reference_link_semantics --locked
+          - cargo test -p markdown_wysiwyg --locked
+          - cargo check -p markdown_wysiwyg --locked
+          - cargo check -p updraft_editor --locked
+          - cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+          - RUSTFLAGS='--cfg perf_enabled' cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+          - RUSTFLAGS='--cfg perf_enabled' MARKDOWN_SYNTAX_BENCH_BYTES=10240 MARKDOWN_SYNTAX_BENCH_ITERATIONS=1 cargo run --release --manifest-path tooling/markdown_syntax_bench/Cargo.toml

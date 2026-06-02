@@ -73,6 +73,11 @@ pub(super) fn collect_comrak_inline_semantics_for_inline_trees(
         .map(|inline_tree| {
             let parent_range = inline_tree.parent_range.clone();
             let mut spans = collect_comrak_inline_spans(source, parent_range.clone());
+            spans.extend(scan_reference_link_spans(
+                source,
+                parent_range.clone(),
+                &spans,
+            ));
             spans.extend(scan_entity_spans(source, parent_range.clone()));
             spans.sort_by_key(|span| (span.source_range.start, span.source_range.end));
             spans.dedup_by_key(|span| {
@@ -1005,6 +1010,124 @@ fn link_marker_ranges(source: &str, source_range: Range<usize>, image: bool) -> 
         }
     }
     marker_ranges
+}
+
+#[cfg(any(test, perf_enabled))]
+fn scan_reference_link_spans(
+    source: &str,
+    parent_range: Range<usize>,
+    existing_spans: &[MarkdownInlineSpan],
+) -> Vec<MarkdownInlineSpan> {
+    let Some(text) = source.get(parent_range.clone()) else {
+        return Vec::new();
+    };
+    let mut spans = Vec::new();
+    let mut cursor = 0;
+    while cursor < text.len() {
+        let Some(relative_start) = text[cursor..].find('[') else {
+            break;
+        };
+        let label_open = cursor + relative_start;
+        let image = label_open > 0 && text.as_bytes().get(label_open - 1) == Some(&b'!');
+        let source_start = parent_range.start + label_open - usize::from(image);
+        let Some((source_end, marker_ranges)) =
+            reference_link_source_end_and_markers(source, parent_range.start, label_open, image)
+        else {
+            cursor = label_open + 1;
+            continue;
+        };
+        let source_range = source_start..source_end;
+        if reference_link_scan_blocked(existing_spans, &source_range) {
+            cursor = source_end.saturating_sub(parent_range.start);
+            continue;
+        }
+        let content_ranges = inline_content_ranges(source_range.clone(), &marker_ranges);
+        spans.push(MarkdownInlineSpan {
+            kind: if image {
+                MarkdownInlineKind::Image
+            } else {
+                MarkdownInlineKind::Link
+            },
+            source_range,
+            content_ranges,
+            marker_ranges,
+            url: None,
+            tagfilter_disallowed: false,
+        });
+        cursor = source_end.saturating_sub(parent_range.start);
+    }
+    spans
+}
+
+#[cfg(any(test, perf_enabled))]
+fn reference_link_source_end_and_markers(
+    source: &str,
+    parent_start: usize,
+    label_open: usize,
+    image: bool,
+) -> Option<(usize, Vec<Range<usize>>)> {
+    let text = source.get(parent_start..)?;
+    let label_close = text
+        .get(label_open + 1..)?
+        .find(']')
+        .map(|offset| label_open + 1 + offset)?;
+    let after_label = text.get(label_close + 1..)?;
+    if after_label.starts_with('(') {
+        return None;
+    }
+
+    let source_start = parent_start + label_open - usize::from(image);
+    let close_label = parent_start + label_close;
+    let mut marker_ranges = Vec::new();
+    if image {
+        marker_ranges.push(source_start..source_start + 1);
+        marker_ranges.push(source_start + 1..source_start + 2);
+    } else {
+        marker_ranges.push(source_start..source_start + 1);
+    }
+    marker_ranges.push(close_label..close_label + 1);
+
+    let source_end = if after_label.starts_with('[') {
+        let reference_label_open = label_close + 1;
+        let reference_label_close = text
+            .get(reference_label_open + 1..)?
+            .find(']')
+            .map(|offset| reference_label_open + 1 + offset)?;
+        if reference_label_close == reference_label_open + 1 {
+            marker_ranges
+                .push(parent_start + reference_label_open..parent_start + reference_label_open + 1);
+            marker_ranges.push(
+                parent_start + reference_label_close..parent_start + reference_label_close + 1,
+            );
+        } else {
+            marker_ranges.push(
+                parent_start + reference_label_open..parent_start + reference_label_close + 1,
+            );
+        }
+        parent_start + reference_label_close + 1
+    } else {
+        parent_start + label_close + 1
+    };
+
+    Some((source_end, marker_ranges))
+}
+
+#[cfg(any(test, perf_enabled))]
+fn reference_link_scan_blocked(
+    existing_spans: &[MarkdownInlineSpan],
+    source_range: &Range<usize>,
+) -> bool {
+    existing_spans.iter().any(|span| {
+        matches!(
+            span.kind,
+            MarkdownInlineKind::InlineCode
+                | MarkdownInlineKind::InlineMath
+                | MarkdownInlineKind::InlineHtml
+                | MarkdownInlineKind::Escape
+                | MarkdownInlineKind::Link
+                | MarkdownInlineKind::Image
+        ) && ranges_overlap(&span.source_range, source_range)
+    })
 }
 
 #[cfg(any(test, perf_enabled))]
