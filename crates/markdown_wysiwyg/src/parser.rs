@@ -10,7 +10,8 @@ use super::{
 
 #[cfg(any(test, perf_enabled))]
 use super::{
-    MarkdownInlineBackendStatsKind, record_inline_backend_stats, source::point_for_offset,
+    MarkdownInlineBackendStatsKind, MarkdownInlineParent, record_inline_backend_stats,
+    source::point_for_offset,
 };
 
 thread_local! {
@@ -55,14 +56,7 @@ pub(super) fn parse_markdown_with_inline_backend(
     changed_range: Option<&Range<usize>>,
     inline_backend: InlineBackendKind,
 ) -> (MarkdownParseTree, Vec<MarkdownInlineSemantics>) {
-    let block_tree = record_timed_block_parse(|| {
-        BLOCK_PARSER.with(|parser| {
-            parser
-                .borrow_mut()
-                .parse(source, old_tree.map(|tree| &tree.block_tree))
-                .expect("tree-sitter markdown block parser was cancelled")
-        })
-    });
+    let block_tree = parse_markdown_block_tree(source, old_tree);
 
     let InlineParseOutput { semantics, cache } =
         parse_inline(source, &block_tree, old_tree, changed_range, inline_backend);
@@ -80,6 +74,20 @@ pub(super) fn parse_markdown_with_inline_backend(
         inline_tree_by_parent_id,
     };
     (parser_state, semantics)
+}
+
+pub(super) fn parse_markdown_block_tree(
+    source: &str,
+    old_tree: Option<&MarkdownParseTree>,
+) -> Tree {
+    record_timed_block_parse(|| {
+        BLOCK_PARSER.with(|parser| {
+            parser
+                .borrow_mut()
+                .parse(source, old_tree.map(|tree| &tree.block_tree))
+                .expect("tree-sitter markdown block parser was cancelled")
+        })
+    })
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -115,62 +123,32 @@ fn parse_inline(
             parse_tree_sitter_inline(source, block_tree, old_tree, changed_range)
         }
         #[cfg(any(test, perf_enabled))]
-        InlineBackendKind::Comrak => {
-            parse_comrak_inline(source, block_tree, old_tree, changed_range)
-        }
+        InlineBackendKind::Comrak => parse_comrak_inline(source, block_tree),
     }
 }
 
 #[cfg(any(test, perf_enabled))]
-fn parse_comrak_inline(
-    source: &str,
-    block_tree: &Tree,
-    old_tree: Option<&MarkdownParseTree>,
-    changed_range: Option<&Range<usize>>,
-) -> InlineParseOutput {
-    let tree_sitter_output = parse_tree_sitter_inline(source, block_tree, old_tree, changed_range);
-    let InlineParseOutput {
-        semantics: tree_sitter_semantics,
-        cache,
-    } = tree_sitter_output;
-    let MarkdownInlineCache::TreeSitter {
-        inline_trees,
-        inline_tree_by_parent_id,
-    } = cache
-    else {
-        return InlineParseOutput {
-            semantics: tree_sitter_semantics,
-            cache: MarkdownInlineCache::None,
-        };
-    };
-
-    let comrak_semantics =
-        inline::collect_comrak_inline_semantics_for_inline_trees(source, &inline_trees);
-    let mut fallback_count = 0;
-    let semantics = tree_sitter_semantics
-        .into_iter()
-        .zip(comrak_semantics)
-        .map(|(tree_sitter, comrak)| {
-            if comrak == tree_sitter {
-                comrak
-            } else {
-                fallback_count += 1;
-                tree_sitter
-            }
-        })
-        .collect();
+fn parse_comrak_inline(source: &str, block_tree: &Tree) -> InlineParseOutput {
+    let inline_parents = record_timed_inline_parent_scan(|| {
+        inline_parent_nodes(block_tree)
+            .into_iter()
+            .map(|parent_node| MarkdownInlineParent {
+                parent_id: parent_node.id(),
+                parent_range: parent_node.byte_range(),
+            })
+            .collect::<Vec<_>>()
+    });
+    let semantics =
+        inline::collect_comrak_inline_semantics_for_inline_parents(source, &inline_parents);
     record_inline_backend_stats(
         MarkdownInlineBackendStatsKind::Comrak,
-        inline_trees.len(),
-        fallback_count,
+        inline_parents.len(),
+        0,
     );
 
     InlineParseOutput {
         semantics,
-        cache: MarkdownInlineCache::TreeSitter {
-            inline_trees,
-            inline_tree_by_parent_id,
-        },
+        cache: MarkdownInlineCache::None,
     }
 }
 

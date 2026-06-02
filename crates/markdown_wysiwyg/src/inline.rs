@@ -8,6 +8,8 @@ use comrak::{
 };
 use tree_sitter::Node;
 
+#[cfg(any(test, perf_enabled))]
+use super::MarkdownInlineParent;
 use super::{
     MarkdownBlock, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineTree,
     MarkdownProjectionReplacement, MarkdownSyntaxTree, ProjectionMarkerDependency,
@@ -64,14 +66,14 @@ pub(super) fn collect_inline_semantics_for_inline_trees(
 }
 
 #[cfg(any(test, perf_enabled))]
-pub(super) fn collect_comrak_inline_semantics_for_inline_trees(
+pub(super) fn collect_comrak_inline_semantics_for_inline_parents(
     source: &str,
-    inline_trees: &[MarkdownInlineTree],
+    inline_parents: &[MarkdownInlineParent],
 ) -> Vec<MarkdownInlineSemantics> {
-    inline_trees
+    inline_parents
         .iter()
-        .map(|inline_tree| {
-            let parent_range = inline_tree.parent_range.clone();
+        .map(|inline_parent| {
+            let parent_range = inline_parent.parent_range.clone();
             let mut spans = collect_comrak_inline_spans(source, parent_range.clone());
             spans.extend(scan_reference_link_spans(
                 source,
@@ -101,7 +103,7 @@ pub(super) fn collect_comrak_inline_semantics_for_inline_trees(
             });
 
             MarkdownInlineSemantics {
-                parent_id: inline_tree.parent_id,
+                parent_id: inline_parent.parent_id,
                 parent_range,
                 spans,
                 replacements,

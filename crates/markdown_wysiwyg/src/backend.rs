@@ -5,7 +5,7 @@ use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 
 #[cfg(any(test, perf_enabled))]
 use super::{
-    MarkdownBlockKind, MarkdownNodeId,
+    MarkdownBlockKind, MarkdownInlineParent, MarkdownNodeId,
     blocks::{
         row_range_for_byte_range, structure_block_quote_block_from_range,
         structure_fenced_code_block_from_range, structure_heading_block_from_range,
@@ -32,10 +32,14 @@ use super::{
     record_inline_backend_stats, record_timed_block_parse, record_timed_inline_parent_scan,
 };
 
+#[cfg(test)]
+use super::parser::parse_markdown_block_tree;
+
 #[cfg(any(test, perf_enabled))]
 use super::{
     inline::{
-        collect_comrak_inline_semantics_for_inline_trees, collect_inline_semantics_for_inline_trees,
+        collect_comrak_inline_semantics_for_inline_parents,
+        collect_inline_semantics_for_inline_trees,
     },
     parser::parse_inline_trees_for_ranges,
 };
@@ -254,9 +258,8 @@ fn pulldown_structure(source: &str, inline_backend: InlineBackendKind) -> Markdo
     let source_line_starts = line_starts(source);
     let blocks =
         record_timed_block_parse(|| collect_pulldown_structure_blocks(source, &source_line_starts));
-    let inline_trees = parse_pulldown_inline_trees(source, &source_line_starts, &blocks);
     let inline_semantics =
-        pulldown_inline_semantics_from_trees(source, &inline_trees, inline_backend);
+        pulldown_inline_semantics(source, &source_line_starts, &blocks, inline_backend).0;
     record_timed_structure_build(|| MarkdownStructure::from_parts(blocks, inline_semantics))
 }
 
@@ -268,17 +271,15 @@ fn pulldown_structure_and_parser_state(
     let source_line_starts = line_starts(source);
     let blocks =
         record_timed_block_parse(|| collect_pulldown_structure_blocks(source, &source_line_starts));
-    let inline_trees = parse_pulldown_inline_trees(source, &source_line_starts, &blocks);
-    let inline_semantics =
-        pulldown_inline_semantics_from_trees(source, &inline_trees, inline_backend);
+    let (inline_semantics, inline_trees) =
+        pulldown_inline_semantics(source, &source_line_starts, &blocks, inline_backend);
     let inline_tree_by_parent_id = inline_trees
         .iter()
         .enumerate()
         .map(|(index, inline_tree)| (inline_tree.parent_id, index))
         .collect();
-    let (tree_sitter_parser_state, _) = parse_markdown(source, None, None);
     let parser_state = MarkdownParseTree {
-        block_tree: tree_sitter_parser_state.block_tree,
+        block_tree: parse_markdown_block_tree(source, None),
         inline_trees: inline_trees.clone(),
         inline_tree_by_parent_id,
     };
@@ -290,60 +291,70 @@ fn pulldown_structure_and_parser_state(
 }
 
 #[cfg(any(test, perf_enabled))]
-fn parse_pulldown_inline_trees(
+fn pulldown_inline_semantics(
     source: &str,
     source_line_starts: &[usize],
     blocks: &[MarkdownStructureBlock],
-) -> Vec<super::MarkdownInlineTree> {
-    parse_inline_trees_for_ranges(
-        source,
-        record_timed_inline_parent_scan(|| {
-            pulldown_inline_parent_ranges(source, source_line_starts, blocks)
-        }),
-    )
-}
-
-#[cfg(any(test, perf_enabled))]
-fn pulldown_inline_semantics_from_trees(
-    source: &str,
-    inline_trees: &[super::MarkdownInlineTree],
     inline_backend: InlineBackendKind,
-) -> Vec<super::structure::MarkdownInlineSemantics> {
+) -> (
+    Vec<super::structure::MarkdownInlineSemantics>,
+    Vec<super::MarkdownInlineTree>,
+) {
     match inline_backend {
         InlineBackendKind::TreeSitter => {
+            let inline_trees = parse_pulldown_inline_trees(source, source_line_starts, blocks);
             record_inline_backend_stats(
                 MarkdownInlineBackendStatsKind::TreeSitter,
                 inline_trees.len(),
                 0,
             );
-            collect_inline_semantics_for_inline_trees(source, inline_trees)
+            (
+                collect_inline_semantics_for_inline_trees(source, &inline_trees),
+                inline_trees,
+            )
         }
         InlineBackendKind::Comrak => {
-            let tree_sitter_semantics =
-                collect_inline_semantics_for_inline_trees(source, inline_trees);
-            let comrak_semantics =
-                collect_comrak_inline_semantics_for_inline_trees(source, inline_trees);
-            let mut fallback_count = 0;
-            let semantics = tree_sitter_semantics
-                .into_iter()
-                .zip(comrak_semantics)
-                .map(|(tree_sitter, comrak)| {
-                    if comrak == tree_sitter {
-                        comrak
-                    } else {
-                        fallback_count += 1;
-                        tree_sitter
-                    }
-                })
-                .collect();
+            let inline_parents = pulldown_inline_parents(source, source_line_starts, blocks);
+            let semantics =
+                collect_comrak_inline_semantics_for_inline_parents(source, &inline_parents);
             record_inline_backend_stats(
                 MarkdownInlineBackendStatsKind::Comrak,
-                inline_trees.len(),
-                fallback_count,
+                inline_parents.len(),
+                0,
             );
-            semantics
+            (semantics, Vec::new())
         }
     }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn parse_pulldown_inline_trees(
+    source: &str,
+    source_line_starts: &[usize],
+    blocks: &[MarkdownStructureBlock],
+) -> Vec<super::MarkdownInlineTree> {
+    let parent_ranges = record_timed_inline_parent_scan(|| {
+        pulldown_inline_parent_ranges(source, source_line_starts, blocks)
+    });
+    parse_inline_trees_for_ranges(source, parent_ranges)
+}
+
+#[cfg(any(test, perf_enabled))]
+fn pulldown_inline_parents(
+    source: &str,
+    source_line_starts: &[usize],
+    blocks: &[MarkdownStructureBlock],
+) -> Vec<MarkdownInlineParent> {
+    record_timed_inline_parent_scan(|| {
+        pulldown_inline_parent_ranges(source, source_line_starts, blocks)
+            .into_iter()
+            .enumerate()
+            .map(|(index, parent_range)| MarkdownInlineParent {
+                parent_id: 1 << 61 | index,
+                parent_range,
+            })
+            .collect()
+    })
 }
 
 #[cfg(any(test, perf_enabled))]

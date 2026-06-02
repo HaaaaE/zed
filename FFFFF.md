@@ -70,7 +70,7 @@
       - AST 节点转 MarkdownInlineSpan / MarkdownProjectionReplacement。
       - marker ranges 不依赖 comrak 提供，统一从原始 source 的 span range 内扫描恢复。
 
-  - 第四步增加 fallback：
+  - 第四步曾增加 fallback（后续已从 Comrak inline 正常路径移除，见最新状态记录）：
       - 如果 comrak 对某个 parent range 无法生成完整语义，回退 tree-sitter inline backend。
       - stats 记录 fallback count / ratio，不能静默掩盖问题。
 
@@ -164,7 +164,7 @@
           - parse_markdown 现在返回 MarkdownParseTree cache 和 Vec<MarkdownInlineSemantics>。
           - TreeSitter inline backend 继续保留 inline_trees / inline_tree_by_parent_id cache。
           - pulldown benchmark/test 路径新增 inline backend 选择入口。
-          - cfg(test/perf_enabled) 下 Comrak 分支已接入选择点；当前阶段仍复用 tree-sitter inline semantics，留待第三步实现真实 ComrakInlineBackend。
+          - cfg(test/perf_enabled) 下 Comrak 分支已接入选择点；当时阶段仍复用 tree-sitter inline semantics，留待第三步实现真实 ComrakInlineBackend。
           - 新增测试覆盖 pulldown + Comrak inline backend selection 入口。
       - 已验证：
           - cargo check -p markdown_wysiwyg --locked
@@ -178,15 +178,15 @@
           - 已映射核心 inline 节点：Emph、Strong、Strikethrough、Code、Link、Image、HtmlInline、Escaped、Math(dollar)、SoftBreak、LineBreak。
           - 已通过源码扫描补齐 entity spans 和 escape/entity projection replacements。
           - 已用源码扫描恢复常见 emphasis / strong / strikethrough / code / math / inline link / image / escape marker ranges。
-          - 当前仍未完成完整语义合同和 fallback；reference link、复杂 marker 口径、完整 semantic diff、stats/fallback 仍在后续步骤。
+          - 当时仍未完成完整语义合同和 fallback；reference link、复杂 marker 口径、完整 semantic diff、stats/fallback 仍在后续步骤。
       - 已验证：
           - cargo check -p markdown_wysiwyg --locked
           - cargo test -p markdown_wysiwyg --locked
   - 2026-06-02:
-      - 已推进第四步 fallback/stats 框架：
+      - 当时推进第四步 fallback/stats 框架：
           - MarkdownSyntaxStats 新增 inline_backend_kind、inline_backend_parent_count、inline_backend_fallback_count。
-          - Comrak inline backend 会逐 parent 与 tree-sitter semantics baseline 比较。
-          - Comrak semantics 与 tree-sitter 不等价时，该 parent 回退 tree-sitter semantics。
+          - Comrak inline backend 当时会逐 parent 与 tree-sitter semantics baseline 比较。
+          - Comrak semantics 与 tree-sitter 不等价时，该 parent 当时回退 tree-sitter semantics。
           - fallback count 会记录到 stats，不再静默掩盖差异。
           - 新增测试覆盖 reference link 触发 fallback，并断言输出保持 tree-sitter 等价且 fallback count > 0。
       - 已验证：
@@ -204,8 +204,8 @@
           - comrak sourcepos mapping mean
           - comrak marker scan mean
           - inline backend parent count / fallback count / fallback ratio
-      - tree-sitter block + comrak inline benchmark 路径已使用真实 ComrakInlineBackend 尝试，再逐 parent fallback 到 tree-sitter semantics。
-      - pulldown block + comrak inline benchmark 路径也走相同 comrak inline + fallback 口径。
+      - tree-sitter block + comrak inline benchmark 路径当时使用真实 ComrakInlineBackend 尝试，再逐 parent fallback 到 tree-sitter semantics。
+      - pulldown block + comrak inline benchmark 路径当时也走相同 comrak inline + fallback 口径。
       - release smoke 小样本结果：
           - tree_sitter_block_tree_sitter_inline_semantics_diff: mismatch_fields=0
           - tree_sitter_block_comrak_inline_semantics_diff: mismatch_fields=0
@@ -292,6 +292,28 @@
           - pulldown block + comrak inline fallback_count_per_iteration=0.000 / fallback_ratio=0.000
       - 已验证：
           - cargo fmt --check
+          - cargo test -p markdown_wysiwyg comrak_inline_backend_matches_tree_sitter_reference_link_semantics --locked
+          - cargo test -p markdown_wysiwyg --locked
+          - cargo check -p markdown_wysiwyg --locked
+          - cargo check -p updraft_editor --locked
+          - cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+          - RUSTFLAGS='--cfg perf_enabled' cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+          - RUSTFLAGS='--cfg perf_enabled' MARKDOWN_SYNTAX_BENCH_BYTES=10240 MARKDOWN_SYNTAX_BENCH_ITERATIONS=1 cargo run --release --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+  - 2026-06-02:
+      - 移除 Comrak inline 路径里的 tree-sitter inline 依赖：
+          - tree-sitter block + comrak inline：只从 block tree 收集 inline parent range，然后直接跑 comrak inline。
+          - pulldown block + comrak inline：只从 pulldown blocks/table cells 收集 inline parent range，然后直接跑 comrak inline。
+          - 不再在 Comrak inline path 里生成 tree-sitter inline trees，不再用 tree-sitter inline semantics 做 baseline/fallback。
+          - 新增 `MarkdownInlineParent` 作为 comrak 的轻量 parent 输入，避免复用 `MarkdownInlineTree` 触发 inline parser。
+          - 新增测试断言两条 Comrak inline path 的 `inline_parse_ns == 0`。
+      - release smoke 小样本结果：
+          - tree_sitter_block_comrak_inline_syntax_data_backend_detail: inline_range_build_mean=0.000ms / inline_parse_mean=0.000ms
+          - pulldown_block_comrak_inline_syntax_data_backend_detail: inline_range_build_mean=0.000ms / inline_parse_mean=0.000ms
+          - tree-sitter block + comrak inline fallback_count_per_iteration=0.000 / fallback_ratio=0.000
+          - pulldown block + comrak inline fallback_count_per_iteration=0.000 / fallback_ratio=0.000
+      - 已验证：
+          - cargo fmt --check
+          - cargo test -p markdown_wysiwyg comrak_inline_backend_does_not_parse_tree_sitter_inline --locked
           - cargo test -p markdown_wysiwyg comrak_inline_backend_matches_tree_sitter_reference_link_semantics --locked
           - cargo test -p markdown_wysiwyg --locked
           - cargo check -p markdown_wysiwyg --locked

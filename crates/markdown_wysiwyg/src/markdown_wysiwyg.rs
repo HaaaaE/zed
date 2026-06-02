@@ -112,6 +112,12 @@ pub struct MarkdownInlineTree {
     tree: Tree,
 }
 
+#[derive(Clone, Debug)]
+pub struct MarkdownInlineParent {
+    pub parent_id: usize,
+    pub parent_range: Range<usize>,
+}
+
 impl fmt::Debug for MarkdownSyntaxTree {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MarkdownSyntaxTree")
@@ -1261,6 +1267,43 @@ mod tests {
             comrak.projection_replacements(),
             tree_sitter.projection_replacements()
         );
+    }
+
+    #[test]
+    fn comrak_inline_backend_does_not_parse_tree_sitter_inline() {
+        let source = "Paragraph **strong** [link](https://example.com) `code`\n";
+
+        MarkdownSyntaxTree::reset_stats_for_tests();
+        let tree_sitter_block = TreeSitterMarkdownBackend::parse_syntax_data_with_inline_backend(
+            source,
+            InlineBackendKind::Comrak,
+        );
+        let stats = MarkdownSyntaxTree::stats_for_tests();
+
+        assert_eq!(tree_sitter_block.source_len(), source.len());
+        assert_eq!(
+            stats.inline_backend_kind,
+            MarkdownInlineBackendStatsKind::Comrak
+        );
+        assert!(stats.inline_backend_parent_count > 0);
+        assert_eq!(stats.inline_backend_fallback_count, 0);
+        assert_eq!(stats.inline_parse_ns, 0);
+
+        MarkdownSyntaxTree::reset_stats_for_tests();
+        let pulldown_block = PulldownMarkdownBackend::parse_syntax_data_with_inline_backend(
+            source,
+            InlineBackendKind::Comrak,
+        );
+        let stats = MarkdownSyntaxTree::stats_for_tests();
+
+        assert_eq!(pulldown_block.source_len(), source.len());
+        assert_eq!(
+            stats.inline_backend_kind,
+            MarkdownInlineBackendStatsKind::Comrak
+        );
+        assert!(stats.inline_backend_parent_count > 0);
+        assert_eq!(stats.inline_backend_fallback_count, 0);
+        assert_eq!(stats.inline_parse_ns, 0);
     }
 
     #[test]

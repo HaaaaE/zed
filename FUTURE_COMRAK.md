@@ -8,7 +8,8 @@
 
 - tree-sitter inline semantics 仍然是兼容性基准。
 - comrak inline 输出必须先匹配当前 `MarkdownInlineSemantics` 形状，才能安全替换 tree-sitter。
-- per-parent diff/fallback 用来证明切换 parser 不会静默改变 projection 行为。
+- comrak inline path 不再运行 tree-sitter inline parser，也不再 per-parent fallback。
+- 测试和 benchmark 仍可在 parser 外层比较 tree-sitter/comrak syntax data，用来证明切换 parser 不会静默改变 projection 行为。
 
 这不代表 tree-sitter 当前形状就是长期理想合同。现在有几处兼容规则是在保留历史实现细节，目的是让迁移先做到行为不变。
 
@@ -143,23 +144,24 @@
 - 只为了 UI/projection 需求保留 marker 扫描。
 - 一旦 comrak 成为 canonical parser，就停止把扫描结果塑造成 tree-sitter 的历史怪癖。
 
-## Fallback 层
+## Comparator / 诊断层
 
 当前兼容行为：
 
-- comrak inline 会逐 parent 和 tree-sitter inline semantics 比较。
-- 不匹配的 parent fallback 到 tree-sitter semantics。
-- benchmark stats 输出 parent count、fallback count、fallback ratio。
+- Comrak inline 正常路径直接返回 comrak semantics。
+- Comrak inline 不运行 tree-sitter inline parser，不生成 tree-sitter inline trees，也不做 per-parent fallback。
+- benchmark 仍比较四组 syntax data 输出，用外层 semantic diff 观察 tree-sitter/comrak 差异。
+- stats 仍输出 parent count、fallback count、fallback ratio；当前 Comrak inline 的 fallback count 应保持为 0。
 
 原因：
 
-- 这样迁移过程可度量，也能避免静默回归。
+- 这样可以证明 Comrak inline 已独立于 tree-sitter inline parser。
+- 外层 semantic diff 仍保留迁移过程的可观测性，避免静默回归。
 
 未来 comrak-native 方向：
 
-- 等兼容差异都被理解并有测试覆盖后，从 comrak path 中移除 tree-sitter baseline parse。
-- 从生产/perf 路径移除 per-parent semantic diff/fallback。
-- 如果后续清理仍有用，可以保留 test-only comparator 或显式诊断工具。
+- 移除或重命名 fallback 统计字段，避免把已经删除的回退路径误认为仍存在。
+- 如果后续清理仍有用，可以保留 benchmark/test-only comparator 或显式诊断工具。
 
 ## 目标终态
 
