@@ -321,83 +321,38 @@ fn pulldown_inline_parents(
 }
 
 #[cfg(any(test, perf_enabled))]
-fn profile_pulldown_block() -> bool {
-    std::env::var_os("MARKDOWN_SYNTAX_BENCH_PROFILE_PULLDOWN_BLOCK").is_some()
-}
-
-#[cfg(any(test, perf_enabled))]
-fn time_profiled<T>(profile: bool, f: impl FnOnce() -> T) -> (T, std::time::Duration) {
-    if profile {
-        let start = std::time::Instant::now();
-        let result = f();
-        (result, start.elapsed())
-    } else {
-        (f(), std::time::Duration::ZERO)
-    }
-}
-
-#[cfg(any(test, perf_enabled))]
-fn duration_ms(duration: std::time::Duration) -> f64 {
-    duration.as_secs_f64() * 1000.0
-}
-
-#[cfg(any(test, perf_enabled))]
 fn collect_pulldown_structure_blocks(
     source: &str,
     line_starts: &[usize],
 ) -> Vec<MarkdownStructureBlock> {
-    let profile = profile_pulldown_block();
-    let total_start = profile.then(std::time::Instant::now);
     let mut blocks = Vec::new();
-    let (_, events_elapsed) = time_profiled(profile, || {
-        for (event, range) in Parser::new_ext(source, Options::all()).into_offset_iter() {
-            match event {
-                Event::Start(tag) => {
-                    if let Some(block) = pulldown_structure_block_from_start_tag(
-                        source,
-                        line_starts,
-                        tag,
-                        range,
-                        blocks.len(),
-                    ) {
-                        blocks.push(block);
-                    }
+    for (event, range) in Parser::new_ext(source, Options::all()).into_offset_iter() {
+        match event {
+            Event::Start(tag) => {
+                if let Some(block) = pulldown_structure_block_from_start_tag(
+                    source,
+                    line_starts,
+                    tag,
+                    range,
+                    blocks.len(),
+                ) {
+                    blocks.push(block);
                 }
-                Event::Rule => {
-                    blocks.push(structure_thematic_break_block_from_range(
-                        line_starts,
-                        pulldown_node_id(blocks.len()),
-                        range,
-                    ));
-                }
-                _ => {}
             }
+            Event::Rule => {
+                blocks.push(structure_thematic_break_block_from_range(
+                    line_starts,
+                    pulldown_node_id(blocks.len()),
+                    range,
+                ));
+            }
+            _ => {}
         }
-    });
-    let (_, ref_defs_elapsed) = time_profiled(profile, || {
-        add_pulldown_link_reference_definition_blocks(source, line_starts, &mut blocks);
-    });
-    let (_, sort1_elapsed) = time_profiled(profile, || {
-        blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
-    });
-    let (_, synthesize_elapsed) = time_profiled(profile, || {
-        synthesize_pulldown_paragraph_blocks(source, line_starts, &mut blocks);
-    });
-    let (_, sort2_elapsed) = time_profiled(profile, || {
-        blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
-    });
-    if let Some(total_start) = total_start {
-        eprintln!(
-            "pulldown_block_profile total={:.3}ms events={:.3}ms ref_defs={:.3}ms sort1={:.3}ms synthesize={:.3}ms sort2={:.3}ms blocks={}",
-            duration_ms(total_start.elapsed()),
-            duration_ms(events_elapsed),
-            duration_ms(ref_defs_elapsed),
-            duration_ms(sort1_elapsed),
-            duration_ms(synthesize_elapsed),
-            duration_ms(sort2_elapsed),
-            blocks.len(),
-        );
     }
+    add_pulldown_link_reference_definition_blocks(source, line_starts, &mut blocks);
+    blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
+    synthesize_pulldown_paragraph_blocks(source, line_starts, &mut blocks);
+    blocks.sort_by_key(|block| (block.source_range.start, block.source_range.end));
     blocks
 }
 
@@ -407,45 +362,28 @@ fn add_pulldown_link_reference_definition_blocks(
     line_starts: &[usize],
     blocks: &mut Vec<MarkdownStructureBlock>,
 ) {
-    let profile = profile_pulldown_block();
-    let (definition_ranges, scan_elapsed) = time_profiled(profile, || {
-        pulldown_link_reference_definition_ranges(source, line_starts, blocks)
-    });
-    let definition_count = definition_ranges.len();
-    let (_, retain_elapsed) = time_profiled(profile, || {
-        blocks.retain(|block| {
-            block.kind != MarkdownBlockKind::Paragraph
-                || !definition_ranges
-                    .iter()
-                    .any(|range| ranges_overlap(&block.source_range, range))
-        });
+    let definition_ranges = pulldown_link_reference_definition_ranges(source, line_starts, blocks);
+    blocks.retain(|block| {
+        block.kind != MarkdownBlockKind::Paragraph
+            || !definition_ranges
+                .iter()
+                .any(|range| ranges_overlap(&block.source_range, range))
     });
 
     let first_id = blocks.len();
-    let (_, extend_elapsed) = time_profiled(profile, || {
-        blocks.extend(
-            definition_ranges
-                .into_iter()
-                .enumerate()
-                .map(|(index, range)| {
-                    structure_link_reference_definition_block_from_range(
-                        source,
-                        line_starts,
-                        pulldown_node_id(first_id + index),
-                        range,
-                    )
-                }),
-        );
-    });
-    if profile {
-        eprintln!(
-            "pulldown_ref_profile scan={:.3}ms retain={:.3}ms extend={:.3}ms definitions={}",
-            duration_ms(scan_elapsed),
-            duration_ms(retain_elapsed),
-            duration_ms(extend_elapsed),
-            definition_count,
-        );
-    }
+    blocks.extend(
+        definition_ranges
+            .into_iter()
+            .enumerate()
+            .map(|(index, range)| {
+                structure_link_reference_definition_block_from_range(
+                    source,
+                    line_starts,
+                    pulldown_node_id(first_id + index),
+                    range,
+                )
+            }),
+    );
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -778,64 +716,38 @@ fn synthesize_pulldown_paragraph_blocks(
     line_starts: &[usize],
     blocks: &mut Vec<MarkdownStructureBlock>,
 ) {
-    let profile = profile_pulldown_block();
-    let total_start = profile.then(std::time::Instant::now);
-    let (_, extend1_elapsed) = time_profiled(profile, || {
-        extend_blockquote_paragraphs_to_next_child_marker(source, line_starts, blocks);
-    });
+    extend_blockquote_paragraphs_to_next_child_marker(source, line_starts, blocks);
 
     let mut synthesized = Vec::new();
-    let (_, list_synthesize_elapsed) = time_profiled(profile, || {
-        for item in blocks.iter() {
-            if !matches!(
-                item.kind,
-                MarkdownBlockKind::ListItem | MarkdownBlockKind::TaskListItem { .. }
-            ) {
-                continue;
-            }
-
-            let paragraph_start = item.content_range.start;
-            let paragraph_end =
-                pulldown_list_item_paragraph_end(source, blocks, item, paragraph_start);
-            if paragraph_start >= paragraph_end
-                || source[paragraph_start..paragraph_end].trim().is_empty()
-                || blocks.iter().any(|block| {
-                    block.kind == MarkdownBlockKind::Paragraph
-                        && ranges_overlap(&block.source_range, &(paragraph_start..paragraph_end))
-                })
-            {
-                continue;
-            }
-
-            synthesized.push(structure_paragraph_block_from_range(
-                source,
-                line_starts,
-                pulldown_node_id(blocks.len() + synthesized.len()),
-                paragraph_start..paragraph_end,
-            ));
+    let list_index = PulldownBlockIndex::new(source, blocks);
+    for item in blocks.iter() {
+        if !matches!(
+            item.kind,
+            MarkdownBlockKind::ListItem | MarkdownBlockKind::TaskListItem { .. }
+        ) {
+            continue;
         }
-    });
 
-    let synthesized_count = synthesized.len();
-    blocks.extend(synthesized);
-    let (_, extend2_elapsed) = time_profiled(profile, || {
-        extend_blockquote_paragraphs_to_next_child_marker(source, line_starts, blocks);
-    });
-    let (_, gap_extend_elapsed) = time_profiled(profile, || {
-        extend_blockquote_child_blocks_to_quoted_gaps(source, line_starts, blocks);
-    });
-    if let Some(total_start) = total_start {
-        eprintln!(
-            "pulldown_synthesize_profile total={:.3}ms extend1={:.3}ms list_synthesize={:.3}ms extend2={:.3}ms gap_extend={:.3}ms blocks={} synthesized={}",
-            duration_ms(total_start.elapsed()),
-            duration_ms(extend1_elapsed),
-            duration_ms(list_synthesize_elapsed),
-            duration_ms(extend2_elapsed),
-            duration_ms(gap_extend_elapsed),
-            blocks.len(),
-            synthesized_count,
-        );
+        let paragraph_start = item.content_range.start;
+        let paragraph_end = list_index.list_item_paragraph_end(source, item, paragraph_start);
+        if paragraph_start >= paragraph_end
+            || source[paragraph_start..paragraph_end].trim().is_empty()
+            || list_index.paragraph_overlaps(&(paragraph_start..paragraph_end))
+        {
+            continue;
+        }
+
+        synthesized.push(structure_paragraph_block_from_range(
+            source,
+            line_starts,
+            pulldown_node_id(blocks.len() + synthesized.len()),
+            paragraph_start..paragraph_end,
+        ));
     }
+
+    blocks.extend(synthesized);
+    extend_blockquote_paragraphs_to_next_child_marker(source, line_starts, blocks);
+    extend_blockquote_child_blocks_to_quoted_gaps(source, line_starts, blocks);
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -844,12 +756,12 @@ fn extend_blockquote_child_blocks_to_quoted_gaps(
     line_starts: &[usize],
     blocks: &mut [MarkdownStructureBlock],
 ) {
-    let original_blocks = blocks.to_vec();
+    let index = PulldownBlockIndex::new(source, blocks);
     for block in blocks {
         if matches!(
             block.kind,
             MarkdownBlockKind::BlockQuote | MarkdownBlockKind::FencedCodeBlock
-        ) || !block_is_inside_blockquote(&original_blocks, &block.source_range)
+        ) || !index.is_inside_blockquote(&block.source_range)
         {
             continue;
         }
@@ -858,11 +770,7 @@ fn extend_blockquote_child_blocks_to_quoted_gaps(
             quoted_gap_extension_end(source, line_starts, &block.source_range, block.kind).or_else(
                 || {
                     block_extends_quoted_child_marker(block.kind).then(|| {
-                        next_blockquote_child_marker_start_after_range(
-                            source,
-                            &original_blocks,
-                            &block.source_range,
-                        )
+                        index.next_blockquote_child_marker_start_after_range(&block.source_range)
                     })?
                 },
             )
@@ -889,15 +797,6 @@ fn block_extends_quoted_child_marker(kind: MarkdownBlockKind) -> bool {
             | MarkdownBlockKind::ListItem
             | MarkdownBlockKind::TaskListItem { .. }
     )
-}
-
-#[cfg(any(test, perf_enabled))]
-fn block_is_inside_blockquote(blocks: &[MarkdownStructureBlock], range: &Range<usize>) -> bool {
-    blocks.iter().any(|block| {
-        block.kind == MarkdownBlockKind::BlockQuote
-            && block.source_range.start <= range.start
-            && block.source_range.end >= range.end
-    })
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -1008,22 +907,127 @@ fn quoted_line_prefix(source: &str, line_range: Range<usize>) -> Option<QuotedLi
 }
 
 #[cfg(any(test, perf_enabled))]
+struct PulldownIndexedBlock {
+    kind: MarkdownBlockKind,
+    start: usize,
+    marker_start: usize,
+}
+
+#[cfg(any(test, perf_enabled))]
+struct PulldownBlockIndex {
+    blocks: Vec<PulldownIndexedBlock>,
+    blockquotes: Vec<Range<usize>>,
+    paragraph_ranges: Vec<Range<usize>>,
+    paragraph_end_limiters: Vec<usize>,
+}
+
+#[cfg(any(test, perf_enabled))]
+impl PulldownBlockIndex {
+    fn new(source: &str, blocks: &[MarkdownStructureBlock]) -> Self {
+        let mut indexed_blocks = Vec::with_capacity(blocks.len());
+        let mut blockquotes = Vec::new();
+        let mut paragraph_ranges = Vec::new();
+        let mut paragraph_end_limiters = Vec::new();
+
+        for block in blocks {
+            indexed_blocks.push(PulldownIndexedBlock {
+                kind: block.kind,
+                start: block.source_range.start,
+                marker_start: blockquote_child_marker_start(source, block),
+            });
+
+            match block.kind {
+                MarkdownBlockKind::BlockQuote => {
+                    blockquotes.push(block.source_range.clone());
+                    paragraph_end_limiters.push(block.source_range.start);
+                }
+                MarkdownBlockKind::Paragraph => {
+                    paragraph_ranges.push(block.source_range.clone());
+                }
+                MarkdownBlockKind::OrderedList
+                | MarkdownBlockKind::UnorderedList
+                | MarkdownBlockKind::FencedCodeBlock
+                | MarkdownBlockKind::IndentedCodeBlock => {
+                    paragraph_end_limiters.push(block.source_range.start);
+                }
+                _ => {}
+            }
+        }
+
+        Self {
+            blocks: indexed_blocks,
+            blockquotes,
+            paragraph_ranges,
+            paragraph_end_limiters,
+        }
+    }
+
+    fn is_inside_blockquote(&self, range: &Range<usize>) -> bool {
+        self.containing_blockquote(range).is_some()
+    }
+
+    fn next_blockquote_child_marker_start_after_range(
+        &self,
+        range: &Range<usize>,
+    ) -> Option<usize> {
+        let blockquote = self.containing_blockquote(range)?;
+        let first_candidate = self.blocks.partition_point(|block| block.start < range.end);
+
+        self.blocks[first_candidate..]
+            .iter()
+            .take_while(|block| block.start <= blockquote.end)
+            .find(|block| block.kind != MarkdownBlockKind::Paragraph)
+            .map(|block| block.marker_start)
+    }
+
+    fn list_item_paragraph_end(
+        &self,
+        source: &str,
+        item: &MarkdownStructureBlock,
+        paragraph_start: usize,
+    ) -> usize {
+        self.paragraph_end_limiters
+            .iter()
+            .copied()
+            .find(|start| *start > paragraph_start && *start < item.source_range.end)
+            .unwrap_or_else(|| {
+                paragraph_end_before_blank_line(source, paragraph_start, item.source_range.end)
+            })
+    }
+
+    fn paragraph_overlaps(&self, range: &Range<usize>) -> bool {
+        let first_candidate = self
+            .paragraph_ranges
+            .partition_point(|paragraph| paragraph.end <= range.start);
+        self.paragraph_ranges[first_candidate..]
+            .iter()
+            .take_while(|paragraph| paragraph.start < range.end)
+            .any(|paragraph| ranges_overlap(paragraph, range))
+    }
+
+    fn containing_blockquote(&self, range: &Range<usize>) -> Option<&Range<usize>> {
+        self.blockquotes
+            .iter()
+            .take_while(|blockquote| blockquote.start <= range.start)
+            .find(|blockquote| blockquote.end >= range.end)
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
 fn extend_blockquote_paragraphs_to_next_child_marker(
     source: &str,
     line_starts: &[usize],
     blocks: &mut [MarkdownStructureBlock],
 ) {
-    let original_blocks = blocks.to_vec();
+    let index = PulldownBlockIndex::new(source, blocks);
     for block in blocks {
         if block.kind != MarkdownBlockKind::Paragraph {
             continue;
         }
 
-        let Some(next_child_start) = next_blockquote_child_marker_start_after_range(
-            source,
-            &original_blocks,
-            &block.source_range,
-        ) else {
+        let Some(next_child_start) =
+            index.next_blockquote_child_marker_start_after_range(&block.source_range)
+        else {
             continue;
         };
         if next_child_start <= block.source_range.end
@@ -1038,29 +1042,6 @@ fn extend_blockquote_paragraphs_to_next_child_marker(
         block.content_range = block.source_range.clone();
         block.row_range = row_range_for_byte_range(line_starts, block.source_range.clone());
     }
-}
-
-#[cfg(any(test, perf_enabled))]
-fn next_blockquote_child_marker_start_after_range(
-    source: &str,
-    blocks: &[MarkdownStructureBlock],
-    range: &Range<usize>,
-) -> Option<usize> {
-    let blockquote = blocks.iter().find(|block| {
-        block.kind == MarkdownBlockKind::BlockQuote
-            && block.source_range.start <= range.start
-            && block.source_range.end >= range.end
-    })?;
-
-    blocks
-        .iter()
-        .filter(|block| {
-            block.source_range.start >= range.end
-                && block.source_range.start <= blockquote.source_range.end
-                && block.kind != MarkdownBlockKind::Paragraph
-        })
-        .min_by_key(|block| block.source_range.start)
-        .map(|block| blockquote_child_marker_start(source, block))
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -1098,33 +1079,6 @@ fn list_marker_start(source: &str, range: Range<usize>) -> Option<usize> {
 
     (cursor > digit_start && cursor < range.end && matches!(bytes[cursor], b'.' | b')'))
         .then_some(digit_start)
-}
-
-#[cfg(any(test, perf_enabled))]
-fn pulldown_list_item_paragraph_end(
-    source: &str,
-    blocks: &[MarkdownStructureBlock],
-    item: &MarkdownStructureBlock,
-    paragraph_start: usize,
-) -> usize {
-    blocks
-        .iter()
-        .filter(|block| {
-            matches!(
-                block.kind,
-                MarkdownBlockKind::BlockQuote
-                    | MarkdownBlockKind::OrderedList
-                    | MarkdownBlockKind::UnorderedList
-                    | MarkdownBlockKind::FencedCodeBlock
-                    | MarkdownBlockKind::IndentedCodeBlock
-            ) && block.source_range.start > paragraph_start
-                && block.source_range.start < item.source_range.end
-        })
-        .map(|block| block.source_range.start)
-        .min()
-        .unwrap_or_else(|| {
-            paragraph_end_before_blank_line(source, paragraph_start, item.source_range.end)
-        })
 }
 
 #[cfg(any(test, perf_enabled))]
