@@ -157,3 +157,15 @@
       - 已验证：
           - cargo check -p markdown_wysiwyg --locked
           - cargo test -p markdown_wysiwyg --locked
+  - 2026-06-02:
+      - 已完成第二步 backend 选择层：
+          - 新增 InlineBackendKind，生产默认仍为 TreeSitter。
+          - 新增 InlineParseOutput 和 MarkdownInlineCache，把 inline semantics 与 parser cache 分离。
+          - parse_markdown 现在返回 MarkdownParseTree cache 和 Vec<MarkdownInlineSemantics>。
+          - TreeSitter inline backend 继续保留 inline_trees / inline_tree_by_parent_id cache。
+          - pulldown benchmark/test 路径新增 inline backend 选择入口。
+          - cfg(test/perf_enabled) 下 Comrak 分支已接入选择点；当前阶段仍复用 tree-sitter inline semantics，留待第三步实现真实 ComrakInlineBackend。
+          - 新增测试覆盖 pulldown + Comrak inline backend selection 入口。
+      - 已验证：
+          - cargo check -p markdown_wysiwyg --locked
+          - cargo test -p markdown_wysiwyg --locked

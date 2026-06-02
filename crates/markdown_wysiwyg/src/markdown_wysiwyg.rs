@@ -707,6 +707,7 @@ fn record_timed_projection_collect<T>(run: impl FnOnce() -> T) -> T {
 #[cfg(test)]
 mod tests {
     use super::backend::PulldownMarkdownBackend;
+    use super::parser::InlineBackendKind;
     use super::source::{line_starts, trim_line_end};
     use super::*;
 
@@ -1165,6 +1166,25 @@ mod tests {
             data.blocks()
                 .iter()
                 .any(|block| block.kind == MarkdownBlockKind::ThematicBreak)
+        );
+    }
+
+    #[test]
+    fn pulldown_backend_accepts_comrak_inline_backend_selection() {
+        let source = "Paragraph **strong** [link](https://example.com) `code`\n";
+        let tree_sitter = PulldownMarkdownBackend::parse_syntax_data_with_inline_backend(
+            source,
+            InlineBackendKind::TreeSitter,
+        );
+        let comrak = PulldownMarkdownBackend::parse_syntax_data_with_inline_backend(
+            source,
+            InlineBackendKind::Comrak,
+        );
+
+        assert_eq!(comrak.inline_spans(), tree_sitter.inline_spans());
+        assert_eq!(
+            comrak.projection_replacements(),
+            tree_sitter.projection_replacements()
         );
     }
 

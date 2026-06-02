@@ -1,9 +1,6 @@
 use std::ops::Range;
 
-use super::{
-    MarkdownBlockKind, MarkdownInlineSpan, MarkdownNodeId, MarkdownParseTree,
-    MarkdownProjectionReplacement, blocks, inline,
-};
+use super::{MarkdownBlockKind, MarkdownInlineSpan, MarkdownNodeId, MarkdownProjectionReplacement};
 
 #[derive(Clone, Debug)]
 pub(super) struct MarkdownStructure {
@@ -31,13 +28,6 @@ pub(super) struct MarkdownStructureBlock {
 }
 
 impl MarkdownStructure {
-    pub(super) fn from_parse_tree(source: &str, parser_state: &MarkdownParseTree) -> Self {
-        Self::from_parts(
-            blocks::collect_structure_blocks(source, parser_state.block_tree().root_node()),
-            inline::collect_inline_semantics_for_inline_trees(source, parser_state.inline_trees()),
-        )
-    }
-
     pub(super) fn from_parts(
         blocks: Vec<MarkdownStructureBlock>,
         inline_semantics: Vec<MarkdownInlineSemantics>,

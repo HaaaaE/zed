@@ -3,9 +3,9 @@ use std::{cell::RefCell, collections::HashMap, ops::Range};
 use tree_sitter::{Node, Parser, Range as TreeSitterRange, Tree};
 
 use super::{
-    MarkdownInlineTree, MarkdownParseTree, record_timed_block_parse,
+    MarkdownInlineTree, MarkdownParseTree, inline, record_timed_block_parse,
     record_timed_inline_parent_scan, record_timed_inline_parse, record_timed_inline_range_build,
-    record_timed_inline_reuse_index, source::ranges_touch,
+    record_timed_inline_reuse_index, source::ranges_touch, structure::MarkdownInlineSemantics,
 };
 
 #[cfg(any(test, perf_enabled))]
@@ -38,7 +38,21 @@ pub(super) fn parse_markdown(
     source: &str,
     old_tree: Option<&MarkdownParseTree>,
     changed_range: Option<&Range<usize>>,
-) -> MarkdownParseTree {
+) -> (MarkdownParseTree, Vec<MarkdownInlineSemantics>) {
+    parse_markdown_with_inline_backend(
+        source,
+        old_tree,
+        changed_range,
+        InlineBackendKind::TreeSitter,
+    )
+}
+
+pub(super) fn parse_markdown_with_inline_backend(
+    source: &str,
+    old_tree: Option<&MarkdownParseTree>,
+    changed_range: Option<&Range<usize>>,
+    inline_backend: InlineBackendKind,
+) -> (MarkdownParseTree, Vec<MarkdownInlineSemantics>) {
     let block_tree = record_timed_block_parse(|| {
         BLOCK_PARSER.with(|parser| {
             parser
@@ -48,22 +62,69 @@ pub(super) fn parse_markdown(
         })
     });
 
-    let (inline_trees, inline_tree_by_parent_id) =
-        parse_inline_trees(source, &block_tree, old_tree, changed_range);
+    let InlineParseOutput { semantics, cache } =
+        parse_inline(source, &block_tree, old_tree, changed_range, inline_backend);
+    let (inline_trees, inline_tree_by_parent_id) = match cache {
+        MarkdownInlineCache::TreeSitter {
+            inline_trees,
+            inline_tree_by_parent_id,
+        } => (inline_trees, inline_tree_by_parent_id),
+        MarkdownInlineCache::None => (Vec::new(), HashMap::new()),
+    };
 
-    MarkdownParseTree {
+    let parser_state = MarkdownParseTree {
         block_tree,
         inline_trees,
         inline_tree_by_parent_id,
-    }
+    };
+    (parser_state, semantics)
 }
 
-fn parse_inline_trees(
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum InlineBackendKind {
+    TreeSitter,
+    #[cfg(any(test, perf_enabled))]
+    Comrak,
+}
+
+pub(super) struct InlineParseOutput {
+    pub(super) semantics: Vec<MarkdownInlineSemantics>,
+    pub(super) cache: MarkdownInlineCache,
+}
+
+pub(super) enum MarkdownInlineCache {
+    TreeSitter {
+        inline_trees: Vec<MarkdownInlineTree>,
+        inline_tree_by_parent_id: HashMap<usize, usize>,
+    },
+    #[allow(dead_code)]
+    None,
+}
+
+fn parse_inline(
     source: &str,
     block_tree: &Tree,
     old_tree: Option<&MarkdownParseTree>,
     changed_range: Option<&Range<usize>>,
-) -> (Vec<MarkdownInlineTree>, HashMap<usize, usize>) {
+    inline_backend: InlineBackendKind,
+) -> InlineParseOutput {
+    match inline_backend {
+        InlineBackendKind::TreeSitter => {
+            parse_tree_sitter_inline(source, block_tree, old_tree, changed_range)
+        }
+        #[cfg(any(test, perf_enabled))]
+        InlineBackendKind::Comrak => {
+            parse_tree_sitter_inline(source, block_tree, old_tree, changed_range)
+        }
+    }
+}
+
+fn parse_tree_sitter_inline(
+    source: &str,
+    block_tree: &Tree,
+    old_tree: Option<&MarkdownParseTree>,
+    changed_range: Option<&Range<usize>>,
+) -> InlineParseOutput {
     let dirty_ranges = inline_dirty_ranges(block_tree, old_tree, changed_range);
     let mut inline_trees = Vec::new();
 
@@ -163,8 +224,15 @@ fn parse_inline_trees(
         .enumerate()
         .map(|(index, inline_tree)| (inline_tree.parent_id, index))
         .collect();
+    let semantics = inline::collect_inline_semantics_for_inline_trees(source, &inline_trees);
 
-    (inline_trees, inline_tree_by_parent_id)
+    InlineParseOutput {
+        semantics,
+        cache: MarkdownInlineCache::TreeSitter {
+            inline_trees,
+            inline_tree_by_parent_id,
+        },
+    }
 }
 
 #[cfg(any(test, perf_enabled))]
