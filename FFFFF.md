@@ -261,3 +261,19 @@
           - cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
           - RUSTFLAGS='--cfg perf_enabled' cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
           - RUSTFLAGS='--cfg perf_enabled' MARKDOWN_SYNTAX_BENCH_BYTES=10240 MARKDOWN_SYNTAX_BENCH_ITERATIONS=1 cargo run --release --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+  - 2026-06-02:
+      - 修正 benchmark fixture 覆盖缺口：
+          - 之前 release smoke 的 `fallback=0` 只覆盖了 benchmark synthetic fixture 中已有的 inline 形态。
+          - 该 fixture 只有 reference definition，没有真实 reference link usage，因此没有覆盖当前已知的 reference link fallback 点。
+          - 已在 fixture 中加入 `[reference link][source-row-ref]`，现在跑分会显式暴露 reference link fallback，而不是误报全局 fallback=0。
+      - release smoke 小样本结果：
+          - tree_sitter_block_tree_sitter_inline_semantics_diff: mismatch_fields=0
+          - tree_sitter_block_comrak_inline_semantics_diff: mismatch_fields=0
+          - pulldown_block_tree_sitter_inline_semantics_diff: mismatch_fields=0
+          - pulldown_block_comrak_inline_semantics_diff: mismatch_fields=0
+          - tree-sitter block + comrak inline fallback_count_per_iteration=7.000 / fallback_ratio=0.024
+          - pulldown block + comrak inline fallback_count_per_iteration=7.000 / fallback_ratio=0.026
+      - 已验证：
+          - cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+          - RUSTFLAGS='--cfg perf_enabled' cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+          - RUSTFLAGS='--cfg perf_enabled' MARKDOWN_SYNTAX_BENCH_BYTES=10240 MARKDOWN_SYNTAX_BENCH_ITERATIONS=1 cargo run --release --manifest-path tooling/markdown_syntax_bench/Cargo.toml

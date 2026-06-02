@@ -343,6 +343,8 @@ fn source_row() {
 
 <div class="source-row">raw html</div>
 
+Reference source-row with [reference link][source-row-ref].
+
 [source-row-ref]: https://example.com/ref
 
 "#,
