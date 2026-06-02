@@ -1,4 +1,4 @@
-阅读约束：本文为准；除 FUTURE_COMRAK.md 可作辅助参考外，禁止阅读任何其他 .md 文件。
+阅读约束：本文为准；除 FUTURE_COMRAK.md 可作辅助参考外，禁止阅读任何其他 .md 文件；cargo fmt 格式化了任何东西都应接受，禁止回滚格式化结果；需要 commit 时直接凭记忆提交，因为只有你在改代码，只能调用一次 pwsh 完成 add+commit，禁止在需要 commit 时查看 diff；commit 完后只允许用一个 pwsh 命令检查是否成功：`git status --short; git log -1 --oneline`。
 
 # Comrak-Only Markdown Parser Refactor
 
