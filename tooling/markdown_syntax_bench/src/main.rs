@@ -365,7 +365,13 @@ fn line_starts(source: &str) -> Vec<usize> {
     starts
 }
 
-fn measure(name: &str, iterations: usize, mut run: impl FnMut() -> usize) {
+#[derive(Clone, Copy)]
+struct MeasurementSummary {
+    mean_ms: f64,
+    median_ms: f64,
+}
+
+fn measure(name: &str, iterations: usize, mut run: impl FnMut() -> usize) -> MeasurementSummary {
     let warmup = black_box(run());
     let mut samples = Vec::with_capacity(iterations);
     let mut checksum = warmup;
@@ -382,6 +388,24 @@ fn measure(name: &str, iterations: usize, mut run: impl FnMut() -> usize) {
     let max = samples[samples.len() - 1].as_secs_f64() * 1000.0;
     println!(
         "{name}: mean={mean:.3}ms median={median:.3}ms min={min:.3}ms max={max:.3}ms checksum={checksum}"
+    );
+    MeasurementSummary {
+        mean_ms: mean,
+        median_ms: median,
+    }
+}
+
+fn print_relative_measurement(
+    label: &str,
+    candidate: MeasurementSummary,
+    baseline: MeasurementSummary,
+) {
+    println!(
+        "{label}: mean_candidate_over_baseline={:.3}x median_candidate_over_baseline={:.3}x mean_baseline_over_candidate={:.3}x median_baseline_over_candidate={:.3}x",
+        candidate.mean_ms / baseline.mean_ms,
+        candidate.median_ms / baseline.median_ms,
+        baseline.mean_ms / candidate.mean_ms,
+        baseline.median_ms / candidate.median_ms,
     );
 }
 
@@ -615,12 +639,13 @@ impl SyntaxDiffSummary {
         );
     }
 
-    fn print_first_mismatches(
-        &self,
-        left: &BenchmarkSyntaxData,
-        right: &BenchmarkSyntaxData,
-    ) {
-        print_first_mismatch("line_starts", self.line_starts, &left.line_starts, &right.line_starts);
+    fn print_first_mismatches(&self, left: &BenchmarkSyntaxData, right: &BenchmarkSyntaxData) {
+        print_first_mismatch(
+            "line_starts",
+            self.line_starts,
+            &left.line_starts,
+            &right.line_starts,
+        );
         print_first_mismatch("blocks", self.blocks, &left.blocks, &right.blocks);
         print_first_mismatch("tables", self.tables, &left.tables, &right.tables);
         print_first_mismatch(
@@ -668,7 +693,8 @@ fn main() {
         markdown_wysiwyg::MarkdownSyntaxTree::parse(&source).syntax_data(),
     );
     let initial_pulldown_assembly = pulldown_adapter_syntax_data(&source);
-    let initial_diff = SyntaxDiffSummary::compare(&production_baseline, &initial_pulldown_assembly.data);
+    let initial_diff =
+        SyntaxDiffSummary::compare(&production_baseline, &initial_pulldown_assembly.data);
     initial_diff.print("pulldown_structure_semantics_diff");
     initial_diff.print_first_mismatches(&production_baseline, &initial_pulldown_assembly.data);
 
@@ -676,7 +702,7 @@ fn main() {
         pulldown_parser_checksum(black_box(&source))
     });
 
-    measure(
+    let tree_sitter_timing = measure(
         "markdown_wysiwyg_tree_sitter_syntax_data",
         iterations,
         || {
@@ -685,8 +711,14 @@ fn main() {
         },
     );
 
-    measure("pulldown_semantics_adapter", iterations, || {
+    let pulldown_timing = measure("pulldown_semantics_adapter", iterations, || {
         let assembly = pulldown_adapter_syntax_data(black_box(&source));
         SyntaxDiffSummary::compare(black_box(&production_baseline), &assembly.data).checksum()
     });
+
+    print_relative_measurement(
+        "pulldown_semantics_adapter_relative_to_tree_sitter",
+        pulldown_timing,
+        tree_sitter_timing,
+    );
 }
