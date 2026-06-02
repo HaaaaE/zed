@@ -231,7 +231,6 @@ fn structure_block_from_node(source: &str, node: Node<'_>) -> Option<MarkdownStr
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn structure_paragraph_block_from_range(
     source: &str,
     line_starts: &[usize],
@@ -249,7 +248,6 @@ pub(super) fn structure_paragraph_block_from_range(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn structure_link_reference_definition_block_from_range(
     source: &str,
     line_starts: &[usize],
@@ -267,7 +265,6 @@ pub(super) fn structure_link_reference_definition_block_from_range(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn structure_thematic_break_block_from_range(
     line_starts: &[usize],
     id: MarkdownNodeId,
@@ -284,7 +281,6 @@ pub(super) fn structure_thematic_break_block_from_range(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn structure_indented_code_block_from_range(
     source: &str,
     line_starts: &[usize],
@@ -302,7 +298,6 @@ pub(super) fn structure_indented_code_block_from_range(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn structure_html_block_from_range(
     source: &str,
     line_starts: &[usize],
@@ -320,7 +315,6 @@ pub(super) fn structure_html_block_from_range(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn structure_pipe_table_block_from_range(
     source: &str,
     line_starts: &[usize],
@@ -338,7 +332,6 @@ pub(super) fn structure_pipe_table_block_from_range(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn structure_block_quote_block_from_range(
     source: &str,
     line_starts: &[usize],
@@ -356,7 +349,6 @@ pub(super) fn structure_block_quote_block_from_range(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn structure_list_block_from_range(
     source: &str,
     line_starts: &[usize],
@@ -381,7 +373,6 @@ pub(super) fn structure_list_block_from_range(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn structure_list_item_block_from_range(
     source: &str,
     line_starts: &[usize],
@@ -418,7 +409,6 @@ pub(super) fn structure_list_item_block_from_range(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn structure_heading_block_from_range(
     source: &str,
     line_starts: &[usize],
@@ -430,7 +420,6 @@ pub(super) fn structure_heading_block_from_range(
     )
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn structure_fenced_code_block_from_range(
     source: &str,
     line_starts: &[usize],
@@ -583,7 +572,6 @@ fn structure_atx_heading_marker_range(
     Some((level as u8, marker_start..content_start, content_start))
 }
 
-#[cfg(any(test, perf_enabled))]
 fn structure_setext_heading_block_from_range(
     source: &str,
     line_starts: &[usize],
@@ -609,7 +597,6 @@ fn structure_setext_heading_block_from_range(
     })
 }
 
-#[cfg(any(test, perf_enabled))]
 fn structure_atx_heading_block_from_range(
     source: &str,
     line_starts: &[usize],
@@ -811,7 +798,6 @@ fn structure_pipe_table_marker_ranges(node: Node<'_>) -> Vec<Range<usize>> {
     marker_ranges
 }
 
-#[cfg(any(test, perf_enabled))]
 fn structure_pipe_table_marker_ranges_from_range(
     source: &str,
     source_range: &Range<usize>,
@@ -868,7 +854,6 @@ fn structure_fenced_code_content_range(source: &str, node: Node<'_>) -> Range<us
     content_range
 }
 
-#[cfg(any(test, perf_enabled))]
 fn structure_fenced_code_marker_ranges_from_range(
     source: &str,
     source_range: Range<usize>,
@@ -902,7 +887,6 @@ fn structure_fenced_code_marker_ranges_from_range(
     marker_ranges
 }
 
-#[cfg(any(test, perf_enabled))]
 fn structure_fenced_code_content_range_from_range(
     source: &str,
     source_range: Range<usize>,
@@ -934,7 +918,6 @@ fn structure_fenced_code_content_range_from_range(
     content_start.min(content_end)..content_end
 }
 
-#[cfg(any(test, perf_enabled))]
 fn first_line_range(source: &str, range: Range<usize>) -> Range<usize> {
     let end = source[range.clone()]
         .find('\n')
@@ -942,14 +925,12 @@ fn first_line_range(source: &str, range: Range<usize>) -> Range<usize> {
     range.start..end
 }
 
-#[cfg(any(test, perf_enabled))]
 fn line_end_after_line_start(source: &str, line_start: usize, source_end: usize) -> usize {
     source[line_start..source_end]
         .find('\n')
         .map_or(source_end, |offset| line_start + offset + 1)
 }
 
-#[cfg(any(test, perf_enabled))]
 fn line_end_with_newline(source: &str, line_end: usize, source_end: usize) -> usize {
     let bytes = source.as_bytes();
     if line_end < source_end && bytes[line_end] == b'\r' {
@@ -962,7 +943,6 @@ fn line_end_with_newline(source: &str, line_end: usize, source_end: usize) -> us
     source_end
 }
 
-#[cfg(any(test, perf_enabled))]
 fn fenced_code_delimiter_range(
     source: &str,
     line_range: Range<usize>,
@@ -985,7 +965,6 @@ fn fenced_code_delimiter_range(
     (cursor - delimiter_start >= 3).then_some((fence_byte, delimiter_start..cursor))
 }
 
-#[cfg(any(test, perf_enabled))]
 fn fenced_code_starts_after_blockquote_prefix(source: &str, offset: usize) -> bool {
     let line_start = source[..offset]
         .rfind('\n')
@@ -993,7 +972,6 @@ fn fenced_code_starts_after_blockquote_prefix(source: &str, offset: usize) -> bo
     blockquote_content_start_for_line(source, line_start..offset) == Some(offset)
 }
 
-#[cfg(any(test, perf_enabled))]
 fn fenced_code_closing_delimiter_range(
     source: &str,
     line_range: Range<usize>,
@@ -1007,7 +985,6 @@ fn fenced_code_closing_delimiter_range(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn blockquote_content_start_for_line(source: &str, line_range: Range<usize>) -> Option<usize> {
     let bytes = source.as_bytes();
     let line_range = trim_line_end(source, line_range);
@@ -1034,7 +1011,6 @@ fn blockquote_content_start_for_line(source: &str, line_range: Range<usize>) -> 
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn row_range_for_byte_range(line_starts: &[usize], range: Range<usize>) -> Range<usize> {
     let start = line_starts.partition_point(|line_start| *line_start <= range.start) - 1;
     let end_offset = range

@@ -10,7 +10,10 @@ use markdown_wysiwyg::{
     MarkdownTable, ProjectionMarkerDependency,
 };
 #[cfg(perf_enabled)]
-use markdown_wysiwyg::{MarkdownSyntaxStats, MarkdownSyntaxTree};
+use markdown_wysiwyg::{
+    MarkdownBackendSelection, MarkdownBlockBackendKind, MarkdownInlineBackendKind,
+    MarkdownSyntaxStats, MarkdownSyntaxTree,
+};
 #[cfg(not(perf_enabled))]
 use pulldown_cmark::{Event, Tag};
 use pulldown_cmark::{Options, Parser};
@@ -611,40 +614,54 @@ fn line_range(starts: &[usize], source_len: usize, row: usize) -> Range<usize> {
 struct PulldownEvent;
 
 #[cfg(perf_enabled)]
-fn tree_sitter_tree_sitter_syntax_data(source: &str) -> PulldownAssembly {
-    let tree = MarkdownSyntaxTree::parse(source);
+fn production_syntax_data(
+    source: &str,
+    block: MarkdownBlockBackendKind,
+    inline: MarkdownInlineBackendKind,
+) -> PulldownAssembly {
+    let tree = MarkdownSyntaxTree::parse_with_backends(
+        source,
+        MarkdownBackendSelection { block, inline },
+    );
     PulldownAssembly {
         data: BenchmarkSyntaxData::from_production(tree.syntax_data()),
     }
 }
 
 #[cfg(perf_enabled)]
+fn tree_sitter_tree_sitter_syntax_data(source: &str) -> PulldownAssembly {
+    production_syntax_data(
+        source,
+        MarkdownBlockBackendKind::TreeSitter,
+        MarkdownInlineBackendKind::TreeSitter,
+    )
+}
+
+#[cfg(perf_enabled)]
 fn tree_sitter_comrak_syntax_data(source: &str) -> PulldownAssembly {
-    PulldownAssembly {
-        data: BenchmarkSyntaxData::from_production(
-            &MarkdownSyntaxData::parse_with_tree_sitter_block_and_comrak_inline_for_benchmarks(
-                source,
-            ),
-        ),
-    }
+    production_syntax_data(
+        source,
+        MarkdownBlockBackendKind::TreeSitter,
+        MarkdownInlineBackendKind::Comrak,
+    )
 }
 
 #[cfg(perf_enabled)]
 fn pulldown_tree_sitter_syntax_data(source: &str) -> PulldownAssembly {
-    PulldownAssembly {
-        data: BenchmarkSyntaxData::from_production(
-            &MarkdownSyntaxData::parse_with_pulldown_for_benchmarks(source),
-        ),
-    }
+    production_syntax_data(
+        source,
+        MarkdownBlockBackendKind::Pulldown,
+        MarkdownInlineBackendKind::TreeSitter,
+    )
 }
 
 #[cfg(perf_enabled)]
 fn pulldown_comrak_syntax_data(source: &str) -> PulldownAssembly {
-    PulldownAssembly {
-        data: BenchmarkSyntaxData::from_production(
-            &MarkdownSyntaxData::parse_with_pulldown_block_and_comrak_inline_for_benchmarks(source),
-        ),
-    }
+    production_syntax_data(
+        source,
+        MarkdownBlockBackendKind::Pulldown,
+        MarkdownInlineBackendKind::Comrak,
+    )
 }
 
 #[cfg(not(perf_enabled))]
@@ -995,8 +1012,8 @@ fn main() {
         initial_diff.print("pulldown_structure_semantics_diff");
         initial_diff.print_first_mismatches(&production_baseline, &initial_pulldown_assembly.data);
 
-        let tree_sitter_timing = measure(
-            "markdown_wysiwyg_tree_sitter_syntax_data",
+        let production_timing = measure(
+            "markdown_wysiwyg_production_syntax_data",
             iterations,
             || {
                 let tree = markdown_wysiwyg::MarkdownSyntaxTree::parse(black_box(&source));
@@ -1010,9 +1027,9 @@ fn main() {
         });
 
         print_relative_measurement(
-            "pulldown_semantics_adapter_relative_to_tree_sitter",
+            "pulldown_semantics_adapter_relative_to_production",
             pulldown_timing,
-            tree_sitter_timing,
+            production_timing,
         );
     }
 }

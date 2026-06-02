@@ -5,13 +5,13 @@ use tree_sitter::{Node, Parser, Range as TreeSitterRange, Tree};
 use super::{
     MarkdownInlineParent, MarkdownInlineTree, MarkdownParseTree, inline, record_timed_block_parse,
     record_timed_inline_parent_scan, record_timed_inline_parse, record_timed_inline_range_build,
-    record_timed_inline_reuse_index, source::ranges_touch, structure::MarkdownInlineSemantics,
+    record_timed_inline_reuse_index,
+    source::{point_for_offset, ranges_touch},
+    structure::MarkdownInlineSemantics,
 };
 
 #[cfg(any(test, perf_enabled))]
-use super::{
-    MarkdownInlineBackendStatsKind, record_inline_backend_stats, source::point_for_offset,
-};
+use super::{MarkdownInlineBackendStatsKind, record_inline_backend_stats};
 
 thread_local! {
     static BLOCK_PARSER: RefCell<Parser> = RefCell::new(markdown_block_parser());
@@ -34,19 +34,6 @@ fn markdown_inline_parser() -> Parser {
         .set_language(&language)
         .expect("failed to load tree-sitter markdown inline grammar");
     parser
-}
-
-pub(super) fn parse_markdown(
-    source: &str,
-    old_tree: Option<&MarkdownParseTree>,
-    changed_range: Option<&Range<usize>>,
-) -> (MarkdownParseTree, Vec<MarkdownInlineSemantics>) {
-    parse_markdown_with_inline_backend(
-        source,
-        old_tree,
-        changed_range,
-        InlineBackendKind::TreeSitter,
-    )
 }
 
 pub(super) fn parse_markdown_with_inline_backend(
@@ -90,9 +77,8 @@ pub(super) fn parse_markdown_block_tree(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum InlineBackendKind {
+pub enum InlineBackendKind {
     TreeSitter,
-    #[cfg(any(test, perf_enabled))]
     Comrak,
 }
 
@@ -136,7 +122,6 @@ fn parse_inline(
                 dirty_ranges.as_deref(),
             )
         }
-        #[cfg(any(test, perf_enabled))]
         InlineBackendKind::Comrak => {
             let inline_parents = tree_sitter_inline_parents(block_tree, None)
                 .into_iter()
@@ -147,7 +132,6 @@ fn parse_inline(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn parse_inline_for_parents(
     source: &str,
     inline_parents: &[MarkdownInlineParent],
@@ -161,13 +145,13 @@ pub(super) fn parse_inline_for_parents(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn parse_comrak_inline_for_parents(
     source: &str,
     inline_parents: &[MarkdownInlineParent],
 ) -> InlineParseOutput {
     let semantics =
         inline::collect_comrak_inline_semantics_for_inline_parents(source, inline_parents);
+    #[cfg(any(test, perf_enabled))]
     record_inline_backend_stats(
         MarkdownInlineBackendStatsKind::Comrak,
         inline_parents.len(),
@@ -210,7 +194,6 @@ fn tree_sitter_inline_parents<'tree>(
     })
 }
 
-#[cfg(any(test, perf_enabled))]
 fn parse_tree_sitter_inline_for_parents(
     source: &str,
     inline_parents: &[MarkdownInlineParent],

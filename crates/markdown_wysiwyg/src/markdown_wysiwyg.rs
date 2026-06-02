@@ -14,7 +14,8 @@ mod source;
 mod structure;
 mod tables;
 
-use backend::{MarkdownBackendOutput, TreeSitterMarkdownBackend};
+use backend::{MarkdownBackendOutput, PulldownMarkdownBackend, TreeSitterMarkdownBackend};
+pub use parser::InlineBackendKind as MarkdownInlineBackendKind;
 use source::{edit_byte_range, line_starts_after_edit_range, point_for_offset};
 use structure::MarkdownStructureBlock;
 
@@ -80,8 +81,29 @@ pub enum MarkdownInlineBackendStatsKind {
 
 #[derive(Clone)]
 pub struct MarkdownSyntaxTree {
-    parser_state: MarkdownParseTree,
+    parser_state: MarkdownParserState,
     data: MarkdownSyntaxData,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MarkdownBackendSelection {
+    pub block: MarkdownBlockBackendKind,
+    pub inline: MarkdownInlineBackendKind,
+}
+
+impl Default for MarkdownBackendSelection {
+    fn default() -> Self {
+        Self {
+            block: MarkdownBlockBackendKind::Pulldown,
+            inline: MarkdownInlineBackendKind::Comrak,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MarkdownBlockBackendKind {
+    TreeSitter,
+    Pulldown,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -103,6 +125,17 @@ pub struct MarkdownParseTree {
     block_tree: Tree,
     inline_trees: Vec<MarkdownInlineTree>,
     inline_tree_by_parent_id: HashMap<usize, usize>,
+}
+
+#[derive(Clone, Debug)]
+enum MarkdownParserState {
+    TreeSitter {
+        tree: MarkdownParseTree,
+        selection: MarkdownBackendSelection,
+    },
+    FullParse {
+        selection: MarkdownBackendSelection,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -158,6 +191,37 @@ impl MarkdownParseTree {
     }
 }
 
+impl MarkdownParserState {
+    fn selection(&self) -> MarkdownBackendSelection {
+        match self {
+            Self::TreeSitter { selection, .. } | Self::FullParse { selection } => *selection,
+        }
+    }
+
+    fn parse_tree(&self) -> Option<&MarkdownParseTree> {
+        match self {
+            Self::TreeSitter { tree, .. } => Some(tree),
+            Self::FullParse { .. } => None,
+        }
+    }
+
+    fn block_tree(&self) -> Option<&Tree> {
+        self.parse_tree().map(MarkdownParseTree::block_tree)
+    }
+
+    fn inline_trees(&self) -> &[MarkdownInlineTree] {
+        self.parse_tree()
+            .map(MarkdownParseTree::inline_trees)
+            .unwrap_or_default()
+    }
+
+    fn edited_tree(&self, edit: &InputEdit) -> Option<MarkdownParseTree> {
+        let mut tree = self.parse_tree()?.clone();
+        tree.edit(edit);
+        Some(tree)
+    }
+}
+
 impl MarkdownInlineTree {
     pub fn tree(&self) -> &Tree {
         &self.tree
@@ -165,27 +229,6 @@ impl MarkdownInlineTree {
 }
 
 impl MarkdownSyntaxData {
-    #[cfg(any(test, perf_enabled))]
-    pub fn parse_with_pulldown_for_benchmarks(source: &str) -> Self {
-        backend::PulldownMarkdownBackend::parse_syntax_data(source)
-    }
-
-    #[cfg(any(test, perf_enabled))]
-    pub fn parse_with_tree_sitter_block_and_comrak_inline_for_benchmarks(source: &str) -> Self {
-        backend::TreeSitterMarkdownBackend::parse_syntax_data_with_inline_backend(
-            source,
-            parser::InlineBackendKind::Comrak,
-        )
-    }
-
-    #[cfg(any(test, perf_enabled))]
-    pub fn parse_with_pulldown_block_and_comrak_inline_for_benchmarks(source: &str) -> Self {
-        backend::PulldownMarkdownBackend::parse_syntax_data_with_inline_backend(
-            source,
-            parser::InlineBackendKind::Comrak,
-        )
-    }
-
     pub fn source_len(&self) -> usize {
         self.source_len
     }
@@ -440,7 +483,25 @@ pub struct MarkdownRangeSemantics {
 
 impl MarkdownSyntaxTree {
     pub fn parse(source: &str) -> Self {
-        Self::parse_with_previous_tree(source, None, None)
+        Self::parse_with_backends(source, MarkdownBackendSelection::default())
+    }
+
+    pub fn parse_with_backends(source: &str, selection: MarkdownBackendSelection) -> Self {
+        let MarkdownBackendOutput {
+            structure,
+            parser_state,
+            data,
+        } = match selection.block {
+            MarkdownBlockBackendKind::TreeSitter => {
+                TreeSitterMarkdownBackend::parse(source, None, None, selection.inline)
+            }
+            MarkdownBlockBackendKind::Pulldown => {
+                PulldownMarkdownBackend::parse(source, selection.inline)
+            }
+        };
+        let _ = structure;
+
+        Self { parser_state, data }
     }
 
     #[cfg(any(test, perf_enabled))]
@@ -482,28 +543,41 @@ impl MarkdownSyntaxTree {
             "new source must match the supplied edit ranges"
         );
 
-        let mut edited_tree = self.parser_state.clone();
-        edited_tree.edit(&InputEdit {
+        let selection = self.parser_state.selection();
+        let edit = InputEdit {
             start_byte: old_range.start,
             old_end_byte: old_range.end,
             new_end_byte: new_range.end,
             start_position: point_for_offset(&self.data.line_starts, old_range.start),
             old_end_position: point_for_offset(&self.data.line_starts, old_range.end),
             new_end_position: point_for_offset(&new_line_starts, new_range.end),
-        });
+        };
 
-        Self::parse_with_previous_syntax(new_source, self, &edited_tree, old_range, new_range)
+        if selection.block == MarkdownBlockBackendKind::TreeSitter
+            && let Some(edited_tree) = self.parser_state.edited_tree(&edit)
+        {
+            return Self::parse_with_previous_syntax(
+                new_source,
+                self,
+                &edited_tree,
+                old_range,
+                new_range,
+                selection.inline,
+            );
+        }
+
+        Self::parse_with_backends(new_source, selection)
     }
 
-    pub fn parse_tree(&self) -> &MarkdownParseTree {
-        &self.parser_state
+    pub fn parse_tree(&self) -> Option<&MarkdownParseTree> {
+        self.parser_state.parse_tree()
     }
 
     pub fn syntax_data(&self) -> &MarkdownSyntaxData {
         &self.data
     }
 
-    pub fn block_tree(&self) -> &Tree {
+    pub fn block_tree(&self) -> Option<&Tree> {
         self.parser_state.block_tree()
     }
 
@@ -515,27 +589,13 @@ impl MarkdownSyntaxTree {
         self.data.source_len
     }
 
-    fn parse_with_previous_tree(
-        source: &str,
-        old_tree: Option<&MarkdownParseTree>,
-        changed_range: Option<&Range<usize>>,
-    ) -> Self {
-        let MarkdownBackendOutput {
-            structure,
-            parser_state,
-            data,
-        } = TreeSitterMarkdownBackend::parse(source, old_tree, changed_range);
-        let _ = structure;
-
-        Self { parser_state, data }
-    }
-
     fn parse_with_previous_syntax(
         source: &str,
         previous: &MarkdownSyntaxTree,
         edited_tree: &MarkdownParseTree,
         old_range: Range<usize>,
         new_range: Range<usize>,
+        inline_backend: MarkdownInlineBackendKind,
     ) -> Self {
         let MarkdownBackendOutput {
             structure,
@@ -547,6 +607,7 @@ impl MarkdownSyntaxTree {
             edited_tree,
             old_range,
             new_range,
+            inline_backend,
         );
         let _ = structure;
 
@@ -792,6 +853,16 @@ mod tests {
     use super::source::{line_starts, trim_line_end};
     use super::*;
 
+    fn parse_tree_sitter_for_tests(source: &str) -> MarkdownSyntaxTree {
+        MarkdownSyntaxTree::parse_with_backends(
+            source,
+            MarkdownBackendSelection {
+                block: MarkdownBlockBackendKind::TreeSitter,
+                inline: InlineBackendKind::TreeSitter,
+            },
+        )
+    }
+
     fn block_semantics_without_id(
         block: &MarkdownBlock,
     ) -> (
@@ -970,7 +1041,7 @@ mod tests {
     }
 
     fn assert_query_semantics_match_tree_sitter(source: &str, candidate: &MarkdownSyntaxTree) {
-        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let tree_sitter = parse_tree_sitter_for_tests(source);
         let visible_source_range =
             source.find("Paragraph").unwrap()..source.find("- item").unwrap();
         let active_start = source
@@ -1133,8 +1204,8 @@ mod tests {
 
     #[test]
     fn parses_atx_headings_with_tree_sitter() {
-        let tree = MarkdownSyntaxTree::parse("# Title\n\nText\n");
-        assert_eq!(tree.block_tree().root_node().kind(), "document");
+        let tree = parse_tree_sitter_for_tests("# Title\n\nText\n");
+        assert_eq!(tree.block_tree().unwrap().root_node().kind(), "document");
         assert_eq!(tree.source_len(), 14);
         assert_eq!(tree.blocks().len(), 3);
         assert_eq!(
@@ -1379,7 +1450,7 @@ mod tests {
     }
 
     #[test]
-    fn production_parse_still_uses_tree_sitter_baseline() {
+    fn production_parse_uses_pulldown_comrak_default() {
         let source = "# Title\n\nParagraph **bold**\n\n| a | b |\n| - | - |\n| 1 | 2 |\n";
 
         MarkdownSyntaxTree::reset_stats_for_tests();
@@ -1387,15 +1458,49 @@ mod tests {
         let stats = MarkdownSyntaxTree::stats_for_tests();
 
         assert_eq!(tree.source_len(), source.len());
-        assert_eq!(stats.parse_calls, 1);
-        assert!(
-            stats.block_parse_ns > 0,
-            "production parse must keep using tree-sitter block parsing until pulldown is proven equivalent"
+        assert!(tree.parse_tree().is_none());
+        assert!(tree.block_tree().is_none());
+        assert!(tree.inline_trees().is_empty());
+        assert_eq!(stats.parse_calls, 0);
+        assert_eq!(
+            stats.inline_backend_kind,
+            MarkdownInlineBackendStatsKind::Comrak
         );
+        assert!(stats.inline_backend_parent_count > 0);
+        assert_eq!(stats.inline_backend_fallback_count, 0);
     }
 
     #[test]
-    fn production_incremental_reparse_still_uses_tree_sitter_baseline() {
+    fn production_pulldown_comrak_selection_has_no_tree_sitter_parser_state() {
+        let source = "Paragraph **bold** [link](https://example.com)\n";
+        let tree = MarkdownSyntaxTree::parse_with_backends(
+            source,
+            MarkdownBackendSelection {
+                block: MarkdownBlockBackendKind::Pulldown,
+                inline: InlineBackendKind::Comrak,
+            },
+        );
+
+        assert_eq!(tree.source_len(), source.len());
+        assert!(tree.parse_tree().is_none());
+        assert!(tree.block_tree().is_none());
+        assert!(tree.inline_trees().is_empty());
+        assert!(
+            tree.inline_spans()
+                .iter()
+                .any(|span| span.kind == MarkdownInlineKind::Strong)
+        );
+
+        let new_source = "Paragraph **bold!** [link](https://example.com)\n";
+        let reparsed = tree.reparse_after_edit_range(16..16, 16..17, new_source);
+        assert_eq!(reparsed.source_len(), new_source.len());
+        assert!(reparsed.parse_tree().is_none());
+        assert!(reparsed.block_tree().is_none());
+        assert!(reparsed.inline_trees().is_empty());
+    }
+
+    #[test]
+    fn production_reparse_keeps_pulldown_comrak_default_full_parse() {
         let old_source = "# Title\n\nParagraph **bold**\n\n| a | b |\n| - | - |\n| 1 | 2 |\n";
         let tree = MarkdownSyntaxTree::parse(old_source);
         let new_source = "# Title!\n\nParagraph **bold**\n\n| a | b |\n| - | - |\n| 1 | 2 |\n";
@@ -1405,11 +1510,16 @@ mod tests {
         let stats = MarkdownSyntaxTree::stats_for_tests();
 
         assert_eq!(tree.source_len(), new_source.len());
-        assert_eq!(stats.parse_calls, 1);
-        assert!(
-            stats.block_parse_ns > 0,
-            "production incremental reparse must keep using tree-sitter block parsing until pulldown is proven equivalent"
+        assert!(tree.parse_tree().is_none());
+        assert!(tree.block_tree().is_none());
+        assert!(tree.inline_trees().is_empty());
+        assert_eq!(stats.parse_calls, 0);
+        assert_eq!(
+            stats.inline_backend_kind,
+            MarkdownInlineBackendStatsKind::Comrak
         );
+        assert!(stats.inline_backend_parent_count > 0);
+        assert_eq!(stats.inline_backend_fallback_count, 0);
     }
 
     #[test]
@@ -1438,7 +1548,7 @@ mod tests {
             "\n",
             "---\n",
         );
-        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let tree_sitter = parse_tree_sitter_for_tests(source);
         let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
 
         assert_eq!(
@@ -1471,7 +1581,7 @@ mod tests {
             "<![CDATA[data]]>\n",
             "\n",
         );
-        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let tree_sitter = parse_tree_sitter_for_tests(source);
         let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
 
         assert_eq!(
@@ -1502,7 +1612,7 @@ mod tests {
             "[fenced]: https://example.com\n",
             "```\n",
         );
-        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let tree_sitter = parse_tree_sitter_for_tests(source);
         let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
 
         assert_eq!(
@@ -1537,7 +1647,7 @@ mod tests {
             "| --- | --- |\n",
             "| **a** | `b` |\n",
         );
-        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let tree_sitter = parse_tree_sitter_for_tests(source);
         let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
 
         assert_eq!(
@@ -1565,7 +1675,7 @@ mod tests {
             "> code\n",
             "> ~~~\n",
         );
-        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let tree_sitter = parse_tree_sitter_for_tests(source);
         let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
 
         assert_eq!(
@@ -1602,7 +1712,7 @@ mod tests {
             "| --- | --- |\n",
             "| **a** | `b` |\n",
         );
-        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let tree_sitter = parse_tree_sitter_for_tests(source);
         let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
 
         assert_eq!(
@@ -1627,7 +1737,7 @@ mod tests {
             "\n",
             "after paragraph with *emphasis*\n",
         );
-        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let tree_sitter = parse_tree_sitter_for_tests(source);
         let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
 
         assert_eq!(pulldown.inline_spans(), tree_sitter.inline_spans());
@@ -1649,7 +1759,7 @@ mod tests {
             "Paragraph \\* and [link](https://example.com) with *em* and `code`\n",
             "continued\n",
         );
-        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let tree_sitter = parse_tree_sitter_for_tests(source);
         let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
 
         assert_eq!(pulldown.inline_spans(), tree_sitter.inline_spans());
@@ -1672,7 +1782,7 @@ mod tests {
             "autolink <https://example.com> mail <me@example.com>\n",
             "CJK 中文 **粗体** and $数学 + x$ with ![图](image.png)\n",
         );
-        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let tree_sitter = parse_tree_sitter_for_tests(source);
         let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
         let tree_sitter_rendered_candidates = tree_sitter
             .inline_spans()
@@ -1712,7 +1822,7 @@ mod tests {
             "| --- | --- |\n",
             "| [link](https://example.com) &amp; | $x + y$ and \\* |\n",
         );
-        let tree_sitter = MarkdownSyntaxTree::parse(source);
+        let tree_sitter = parse_tree_sitter_for_tests(source);
         let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
         let table_source_range = tree_sitter.tables()[0].source_range.clone();
         let tree_sitter_table_semantics =
@@ -1752,7 +1862,7 @@ mod tests {
         ];
 
         for source in cases {
-            let tree_sitter = MarkdownSyntaxTree::parse(source);
+            let tree_sitter = parse_tree_sitter_for_tests(source);
             let pulldown = PulldownMarkdownBackend::parse_syntax_data(source);
 
             assert_eq!(
@@ -1828,7 +1938,7 @@ mod tests {
             "- item\n",
         )
         .replace('\n', "\r\n");
-        let tree_sitter = MarkdownSyntaxTree::parse(&source);
+        let tree_sitter = parse_tree_sitter_for_tests(&source);
         let pulldown = PulldownMarkdownBackend::parse_syntax_data(&source);
 
         assert_eq!(
@@ -3031,7 +3141,7 @@ mod tests {
 
     #[test]
     fn parses_inline_trees_with_tree_sitter() {
-        let tree = MarkdownSyntaxTree::parse("Text with **bold** and [link](https://zed.dev).\n");
+        let tree = parse_tree_sitter_for_tests("Text with **bold** and [link](https://zed.dev).\n");
 
         assert_eq!(tree.inline_trees().len(), 1);
         let inline_root = tree.inline_trees()[0].tree().root_node();

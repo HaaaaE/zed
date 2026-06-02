@@ -1,9 +1,13 @@
 use std::ops::Range;
 
-#[cfg(any(test, perf_enabled))]
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
 
-#[cfg(any(test, perf_enabled))]
+use super::{
+    MarkdownBackendSelection, MarkdownBlockBackendKind, MarkdownParseTree, MarkdownParserState,
+    MarkdownSyntaxData, MarkdownSyntaxTree, assembler::MarkdownSemanticsAssembler, blocks,
+    record_timed_backend_prepare, record_timed_parse, record_timed_structure_build,
+    record_timed_syntax_data_collect, structure::MarkdownStructure,
+};
 use super::{
     MarkdownBlockKind, MarkdownInlineParent, MarkdownNodeId,
     blocks::{
@@ -18,50 +22,20 @@ use super::{
     structure::MarkdownStructureBlock,
     tables::table_cell_content_ranges_for_blocks,
 };
-use super::{
-    MarkdownParseTree, MarkdownSyntaxData, MarkdownSyntaxTree,
-    assembler::MarkdownSemanticsAssembler, blocks, parser::parse_markdown,
-    record_timed_backend_prepare, record_timed_parse, record_timed_structure_build,
-    record_timed_syntax_data_collect, structure::MarkdownStructure,
-};
 
-#[cfg(any(test, perf_enabled))]
 use super::{
-    parser::{
-        InlineBackendKind, MarkdownInlineCache, parse_inline_for_parents,
-        parse_markdown_with_inline_backend,
-    },
+    parser::{InlineBackendKind, parse_inline_for_parents, parse_markdown_with_inline_backend},
     record_timed_block_parse, record_timed_inline_parent_scan,
 };
 
-#[cfg(test)]
-use super::parser::parse_markdown_block_tree;
-
 pub(super) struct MarkdownBackendOutput {
     pub(super) structure: MarkdownStructure,
-    pub(super) parser_state: MarkdownParseTree,
+    pub(super) parser_state: MarkdownParserState,
     pub(super) data: MarkdownSyntaxData,
-}
-
-trait MarkdownBackend {
-    fn parse(
-        source: &str,
-        old_tree: Option<&MarkdownParseTree>,
-        changed_range: Option<&Range<usize>>,
-    ) -> MarkdownBackendOutput;
-
-    fn parse_after_edit(
-        source: &str,
-        previous: &MarkdownSyntaxTree,
-        edited_tree: &MarkdownParseTree,
-        old_range: Range<usize>,
-        new_range: Range<usize>,
-    ) -> MarkdownBackendOutput;
 }
 
 pub(super) struct TreeSitterMarkdownBackend;
 
-#[cfg(any(test, perf_enabled))]
 pub(super) struct PulldownMarkdownBackend;
 
 impl TreeSitterMarkdownBackend {
@@ -69,8 +43,35 @@ impl TreeSitterMarkdownBackend {
         source: &str,
         old_tree: Option<&MarkdownParseTree>,
         changed_range: Option<&Range<usize>>,
+        inline_backend: InlineBackendKind,
     ) -> MarkdownBackendOutput {
-        <Self as MarkdownBackend>::parse(source, old_tree, changed_range)
+        let (parse_tree, structure) = record_timed_backend_prepare(|| {
+            let (parse_tree, inline_semantics) = record_timed_parse(|| {
+                parse_markdown_with_inline_backend(source, old_tree, changed_range, inline_backend)
+            });
+            let structure = record_timed_structure_build(|| {
+                MarkdownStructure::from_parts(
+                    blocks::collect_structure_blocks(source, parse_tree.block_tree().root_node()),
+                    inline_semantics,
+                )
+            });
+            (parse_tree, structure)
+        });
+        let data = record_timed_collect_syntax_data(|| {
+            MarkdownSemanticsAssembler::assemble(source, &structure)
+        });
+
+        MarkdownBackendOutput {
+            structure,
+            parser_state: MarkdownParserState::TreeSitter {
+                tree: parse_tree,
+                selection: MarkdownBackendSelection {
+                    block: MarkdownBlockBackendKind::TreeSitter,
+                    inline: inline_backend,
+                },
+            },
+            data,
+        }
     }
 
     pub(super) fn parse_after_edit(
@@ -79,17 +80,45 @@ impl TreeSitterMarkdownBackend {
         edited_tree: &MarkdownParseTree,
         old_range: Range<usize>,
         new_range: Range<usize>,
+        inline_backend: InlineBackendKind,
     ) -> MarkdownBackendOutput {
-        <Self as MarkdownBackend>::parse_after_edit(
-            source,
-            previous,
-            edited_tree,
-            old_range,
-            new_range,
-        )
+        let (parse_tree, structure) = record_timed_backend_prepare(|| {
+            let (parse_tree, inline_semantics) = record_timed_parse(|| {
+                parse_markdown_with_inline_backend(
+                    source,
+                    Some(edited_tree),
+                    Some(&new_range),
+                    inline_backend,
+                )
+            });
+            let structure = record_timed_structure_build(|| {
+                MarkdownStructure::from_parts(
+                    blocks::collect_structure_blocks(source, parse_tree.block_tree().root_node()),
+                    inline_semantics,
+                )
+            });
+            (parse_tree, structure)
+        });
+        let data = record_timed_collect_syntax_data(|| {
+            MarkdownSemanticsAssembler::assemble_incremental(
+                source, previous, &structure, &old_range, &new_range,
+            )
+        });
+
+        MarkdownBackendOutput {
+            structure,
+            parser_state: MarkdownParserState::TreeSitter {
+                tree: parse_tree,
+                selection: MarkdownBackendSelection {
+                    block: MarkdownBlockBackendKind::TreeSitter,
+                    inline: inline_backend,
+                },
+            },
+            data,
+        }
     }
 
-    #[cfg(any(test, perf_enabled))]
+    #[cfg(test)]
     pub(super) fn parse_syntax_data_with_inline_backend(
         source: &str,
         inline_backend: InlineBackendKind,
@@ -113,72 +142,31 @@ impl TreeSitterMarkdownBackend {
     }
 }
 
-impl MarkdownBackend for TreeSitterMarkdownBackend {
-    fn parse(
-        source: &str,
-        old_tree: Option<&MarkdownParseTree>,
-        changed_range: Option<&Range<usize>>,
-    ) -> MarkdownBackendOutput {
-        let (parser_state, structure) = record_timed_backend_prepare(|| {
-            let (parser_state, inline_semantics) =
-                record_timed_parse(|| parse_markdown(source, old_tree, changed_range));
-            let structure = record_timed_structure_build(|| {
-                MarkdownStructure::from_parts(
-                    blocks::collect_structure_blocks(source, parser_state.block_tree().root_node()),
-                    inline_semantics,
-                )
-            });
-            (parser_state, structure)
-        });
+impl PulldownMarkdownBackend {
+    pub(super) fn parse(source: &str, inline_backend: InlineBackendKind) -> MarkdownBackendOutput {
+        let structure = record_timed_backend_prepare(|| pulldown_structure(source, inline_backend));
         let data = record_timed_collect_syntax_data(|| {
             MarkdownSemanticsAssembler::assemble(source, &structure)
         });
 
         MarkdownBackendOutput {
             structure,
-            parser_state,
+            parser_state: MarkdownParserState::FullParse {
+                selection: MarkdownBackendSelection {
+                    block: MarkdownBlockBackendKind::Pulldown,
+                    inline: inline_backend,
+                },
+            },
             data,
         }
     }
 
-    fn parse_after_edit(
-        source: &str,
-        previous: &MarkdownSyntaxTree,
-        edited_tree: &MarkdownParseTree,
-        old_range: Range<usize>,
-        new_range: Range<usize>,
-    ) -> MarkdownBackendOutput {
-        let (parser_state, structure) = record_timed_backend_prepare(|| {
-            let (parser_state, inline_semantics) =
-                record_timed_parse(|| parse_markdown(source, Some(edited_tree), Some(&new_range)));
-            let structure = record_timed_structure_build(|| {
-                MarkdownStructure::from_parts(
-                    blocks::collect_structure_blocks(source, parser_state.block_tree().root_node()),
-                    inline_semantics,
-                )
-            });
-            (parser_state, structure)
-        });
-        let data = record_timed_collect_syntax_data(|| {
-            MarkdownSemanticsAssembler::assemble_incremental(
-                source, previous, &structure, &old_range, &new_range,
-            )
-        });
-
-        MarkdownBackendOutput {
-            structure,
-            parser_state,
-            data,
-        }
-    }
-}
-
-#[cfg(any(test, perf_enabled))]
-impl PulldownMarkdownBackend {
+    #[cfg(test)]
     pub(super) fn parse_syntax_data(source: &str) -> MarkdownSyntaxData {
         Self::parse_syntax_data_with_inline_backend(source, InlineBackendKind::TreeSitter)
     }
 
+    #[cfg(test)]
     pub(super) fn parse_syntax_data_with_inline_backend(
         source: &str,
         inline_backend: InlineBackendKind,
@@ -199,12 +187,12 @@ impl PulldownMarkdownBackend {
         source: &str,
         inline_backend: InlineBackendKind,
     ) -> MarkdownSyntaxTree {
-        let (structure, parser_state) = record_timed_backend_prepare(|| {
-            pulldown_structure_and_parser_state(source, inline_backend)
-        });
-        let data = record_timed_collect_syntax_data(|| {
-            MarkdownSemanticsAssembler::assemble(source, &structure)
-        });
+        let MarkdownBackendOutput {
+            structure,
+            parser_state,
+            data,
+        } = Self::parse(source, inline_backend);
+        let _ = structure;
 
         MarkdownSyntaxTree { parser_state, data }
     }
@@ -228,81 +216,36 @@ impl PulldownMarkdownBackend {
     #[cfg(test)]
     pub(super) fn parse_syntax_tree_after_edit_with_inline_backend(
         source: &str,
-        previous: &MarkdownSyntaxTree,
+        _previous: &MarkdownSyntaxTree,
         old_range: Range<usize>,
         new_range: Range<usize>,
         inline_backend: InlineBackendKind,
     ) -> MarkdownSyntaxTree {
-        let (structure, parser_state) = record_timed_backend_prepare(|| {
-            pulldown_structure_and_parser_state(source, inline_backend)
-        });
-        let data = record_timed_collect_syntax_data(|| {
-            MarkdownSemanticsAssembler::assemble_incremental(
-                source, previous, &structure, &old_range, &new_range,
-            )
-        });
-
-        MarkdownSyntaxTree { parser_state, data }
+        let _ = (old_range, new_range);
+        Self::parse_syntax_tree_with_inline_backend(source, inline_backend)
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn pulldown_structure(source: &str, inline_backend: InlineBackendKind) -> MarkdownStructure {
     let source_line_starts = line_starts(source);
     let blocks =
         record_timed_block_parse(|| collect_pulldown_structure_blocks(source, &source_line_starts));
     let inline_semantics =
-        pulldown_inline_semantics(source, &source_line_starts, &blocks, inline_backend).0;
+        pulldown_inline_semantics(source, &source_line_starts, &blocks, inline_backend);
     record_timed_structure_build(|| MarkdownStructure::from_parts(blocks, inline_semantics))
 }
 
-#[cfg(test)]
-fn pulldown_structure_and_parser_state(
-    source: &str,
-    inline_backend: InlineBackendKind,
-) -> (MarkdownStructure, MarkdownParseTree) {
-    let source_line_starts = line_starts(source);
-    let blocks =
-        record_timed_block_parse(|| collect_pulldown_structure_blocks(source, &source_line_starts));
-    let (inline_semantics, inline_trees) =
-        pulldown_inline_semantics(source, &source_line_starts, &blocks, inline_backend);
-    let inline_tree_by_parent_id = inline_trees
-        .iter()
-        .enumerate()
-        .map(|(index, inline_tree)| (inline_tree.parent_id, index))
-        .collect();
-    let parser_state = MarkdownParseTree {
-        block_tree: parse_markdown_block_tree(source, None),
-        inline_trees: inline_trees.clone(),
-        inline_tree_by_parent_id,
-    };
-
-    (
-        record_timed_structure_build(|| MarkdownStructure::from_parts(blocks, inline_semantics)),
-        parser_state,
-    )
-}
-
-#[cfg(any(test, perf_enabled))]
 fn pulldown_inline_semantics(
     source: &str,
     source_line_starts: &[usize],
     blocks: &[MarkdownStructureBlock],
     inline_backend: InlineBackendKind,
-) -> (
-    Vec<super::structure::MarkdownInlineSemantics>,
-    Vec<super::MarkdownInlineTree>,
-) {
+) -> Vec<super::structure::MarkdownInlineSemantics> {
     let inline_parents = pulldown_inline_parents(source, source_line_starts, blocks);
     let output = parse_inline_for_parents(source, &inline_parents, inline_backend);
-    let inline_trees = match output.cache {
-        MarkdownInlineCache::TreeSitter { inline_trees, .. } => inline_trees,
-        MarkdownInlineCache::None => Vec::new(),
-    };
-    (output.semantics, inline_trees)
+    output.semantics
 }
 
-#[cfg(any(test, perf_enabled))]
 fn pulldown_inline_parents(
     source: &str,
     source_line_starts: &[usize],
@@ -320,7 +263,6 @@ fn pulldown_inline_parents(
     })
 }
 
-#[cfg(any(test, perf_enabled))]
 fn collect_pulldown_structure_blocks(
     source: &str,
     line_starts: &[usize],
@@ -356,7 +298,6 @@ fn collect_pulldown_structure_blocks(
     blocks
 }
 
-#[cfg(any(test, perf_enabled))]
 fn add_pulldown_link_reference_definition_blocks(
     source: &str,
     line_starts: &[usize],
@@ -386,7 +327,6 @@ fn add_pulldown_link_reference_definition_blocks(
     );
 }
 
-#[cfg(any(test, perf_enabled))]
 fn pulldown_link_reference_definition_ranges(
     source: &str,
     line_starts: &[usize],
@@ -406,7 +346,6 @@ fn pulldown_link_reference_definition_ranges(
         .collect()
 }
 
-#[cfg(any(test, perf_enabled))]
 fn block_excludes_link_reference_scan(block: &MarkdownStructureBlock) -> bool {
     matches!(
         block.kind,
@@ -417,7 +356,6 @@ fn block_excludes_link_reference_scan(block: &MarkdownStructureBlock) -> bool {
     )
 }
 
-#[cfg(any(test, perf_enabled))]
 fn pulldown_link_reference_definition_range_for_line(
     source: &str,
     source_range: Range<usize>,
@@ -445,7 +383,6 @@ fn pulldown_link_reference_definition_range_for_line(
     Some(source_range)
 }
 
-#[cfg(any(test, perf_enabled))]
 fn pulldown_inline_parent_ranges(
     source: &str,
     line_starts: &[usize],
@@ -474,7 +411,6 @@ fn pulldown_inline_parent_ranges(
     ranges
 }
 
-#[cfg(any(test, perf_enabled))]
 fn pulldown_inline_parent_range(source: &str, mut range: Range<usize>) -> Range<usize> {
     loop {
         let trimmed =
@@ -492,7 +428,6 @@ fn pulldown_inline_parent_range(source: &str, mut range: Range<usize>) -> Range<
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn trim_trailing_continuation_whitespace(source: &str, mut range: Range<usize>) -> Range<usize> {
     loop {
         let Some(line_start) = source[range.start..range.end]
@@ -514,7 +449,6 @@ fn trim_trailing_continuation_whitespace(source: &str, mut range: Range<usize>) 
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn last_line_before_range_end(source: &str, range: Range<usize>) -> Option<Range<usize>> {
     if range.is_empty() {
         return None;
@@ -526,7 +460,6 @@ fn last_line_before_range_end(source: &str, range: Range<usize>) -> Option<Range
     Some(start..range.end)
 }
 
-#[cfg(any(test, perf_enabled))]
 fn line_is_blockquote_marker_only(source: &str, range: Range<usize>) -> bool {
     let bytes = source.as_bytes();
     let mut cursor = range.start;
@@ -552,7 +485,6 @@ fn line_is_blockquote_marker_only(source: &str, range: Range<usize>) -> bool {
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn pulldown_structure_block_from_start_tag(
     source: &str,
     line_starts: &[usize],
@@ -629,7 +561,6 @@ fn pulldown_structure_block_from_start_tag(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn pulldown_fenced_code_block_range(source: &str, mut range: Range<usize>) -> Range<usize> {
     if source.as_bytes().get(range.end).copied() == Some(b'\n') {
         range.end += 1;
@@ -637,7 +568,6 @@ fn pulldown_fenced_code_block_range(source: &str, mut range: Range<usize>) -> Ra
     range
 }
 
-#[cfg(any(test, perf_enabled))]
 fn pulldown_html_block_range(source: &str, mut range: Range<usize>) -> Range<usize> {
     if html_block_is_blank_line_terminated(source, range.clone())
         && source.as_bytes().get(range.end).copied() == Some(b'\n')
@@ -647,7 +577,6 @@ fn pulldown_html_block_range(source: &str, mut range: Range<usize>) -> Range<usi
     range
 }
 
-#[cfg(any(test, perf_enabled))]
 fn html_block_is_blank_line_terminated(source: &str, range: Range<usize>) -> bool {
     let first_line_end = source[range.clone()]
         .find('\n')
@@ -659,7 +588,6 @@ fn html_block_is_blank_line_terminated(source: &str, range: Range<usize>) -> boo
     !html_block_has_explicit_end_condition(&first_line)
 }
 
-#[cfg(any(test, perf_enabled))]
 fn html_block_has_explicit_end_condition(first_line: &str) -> bool {
     html_start_tag_name_is(first_line, "script")
         || html_start_tag_name_is(first_line, "pre")
@@ -673,7 +601,6 @@ fn html_block_has_explicit_end_condition(first_line: &str) -> bool {
             .is_some_and(|byte| first_line.starts_with("<!") && byte.is_ascii_uppercase())
 }
 
-#[cfg(any(test, perf_enabled))]
 fn html_start_tag_name_is(line: &str, tag_name: &str) -> bool {
     let Some(rest) = line.strip_prefix('<') else {
         return false;
@@ -688,7 +615,6 @@ fn html_start_tag_name_is(line: &str, tag_name: &str) -> bool {
     )
 }
 
-#[cfg(any(test, perf_enabled))]
 fn pulldown_indented_code_block_range(
     source: &str,
     line_starts: &[usize],
@@ -710,7 +636,6 @@ fn pulldown_indented_code_block_range(
     line_starts[row]..end
 }
 
-#[cfg(any(test, perf_enabled))]
 fn synthesize_pulldown_paragraph_blocks(
     source: &str,
     line_starts: &[usize],
@@ -750,7 +675,6 @@ fn synthesize_pulldown_paragraph_blocks(
     extend_blockquote_child_blocks_to_quoted_gaps(source, line_starts, blocks);
 }
 
-#[cfg(any(test, perf_enabled))]
 fn extend_blockquote_child_blocks_to_quoted_gaps(
     source: &str,
     line_starts: &[usize],
@@ -788,7 +712,6 @@ fn extend_blockquote_child_blocks_to_quoted_gaps(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn block_extends_quoted_child_marker(kind: MarkdownBlockKind) -> bool {
     matches!(
         kind,
@@ -799,7 +722,6 @@ fn block_extends_quoted_child_marker(kind: MarkdownBlockKind) -> bool {
     )
 }
 
-#[cfg(any(test, perf_enabled))]
 fn quoted_gap_extension_end(
     source: &str,
     line_starts: &[usize],
@@ -840,7 +762,6 @@ fn quoted_gap_extension_end(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn block_ends_after_quoted_blank_line(
     source: &str,
     line_starts: &[usize],
@@ -859,7 +780,6 @@ fn block_ends_after_quoted_blank_line(
     quoted_line_prefix(source, line).is_some_and(|prefix| prefix.content_is_blank)
 }
 
-#[cfg(any(test, perf_enabled))]
 fn line_range_for_offset(
     source: &str,
     line_starts: &[usize],
@@ -873,13 +793,11 @@ fn line_range_for_offset(
     Some(line_range(source, line_starts, row))
 }
 
-#[cfg(any(test, perf_enabled))]
 struct QuotedLinePrefix {
     end: usize,
     content_is_blank: bool,
 }
 
-#[cfg(any(test, perf_enabled))]
 fn quoted_line_prefix(source: &str, line_range: Range<usize>) -> Option<QuotedLinePrefix> {
     let bytes = source.as_bytes();
     let trimmed_line = trim_line_end(source, line_range);
@@ -906,14 +824,12 @@ fn quoted_line_prefix(source: &str, line_range: Range<usize>) -> Option<QuotedLi
     })
 }
 
-#[cfg(any(test, perf_enabled))]
 struct PulldownIndexedBlock {
     kind: MarkdownBlockKind,
     start: usize,
     marker_start: usize,
 }
 
-#[cfg(any(test, perf_enabled))]
 struct PulldownBlockIndex {
     blocks: Vec<PulldownIndexedBlock>,
     blockquotes: Vec<Range<usize>>,
@@ -921,7 +837,6 @@ struct PulldownBlockIndex {
     paragraph_end_limiters: Vec<usize>,
 }
 
-#[cfg(any(test, perf_enabled))]
 impl PulldownBlockIndex {
     fn new(source: &str, blocks: &[MarkdownStructureBlock]) -> Self {
         let mut indexed_blocks = Vec::with_capacity(blocks.len());
@@ -1013,7 +928,6 @@ impl PulldownBlockIndex {
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn extend_blockquote_paragraphs_to_next_child_marker(
     source: &str,
     line_starts: &[usize],
@@ -1044,7 +958,6 @@ fn extend_blockquote_paragraphs_to_next_child_marker(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn blockquote_child_marker_start(source: &str, block: &MarkdownStructureBlock) -> usize {
     if matches!(
         block.kind,
@@ -1059,7 +972,6 @@ fn blockquote_child_marker_start(source: &str, block: &MarkdownStructureBlock) -
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn list_marker_start(source: &str, range: Range<usize>) -> Option<usize> {
     let bytes = source.as_bytes();
     let mut cursor = range.start;
@@ -1081,7 +993,6 @@ fn list_marker_start(source: &str, range: Range<usize>) -> Option<usize> {
         .then_some(digit_start)
 }
 
-#[cfg(any(test, perf_enabled))]
 fn paragraph_end_before_blank_line(source: &str, mut cursor: usize, limit: usize) -> usize {
     while cursor < limit {
         let line_end = source[cursor..limit]
@@ -1104,7 +1015,6 @@ fn paragraph_end_before_blank_line(source: &str, mut cursor: usize, limit: usize
     limit
 }
 
-#[cfg(any(test, perf_enabled))]
 fn pulldown_node_id(index: usize) -> MarkdownNodeId {
     MarkdownNodeId(1 << 62 | index as u64)
 }

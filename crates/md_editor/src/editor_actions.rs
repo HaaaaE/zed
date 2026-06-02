@@ -552,9 +552,13 @@ impl MarkdownEditor {
                                     index
                                 } else {
                                     let snapshot = self.buffer.snapshot();
-                                    existing_index
-                                        .update_after_edit(&snapshot, edit_summary)
-                                        .unwrap_or_else(|| self.rendered_display_index(&snapshot))
+                                    if let Some(index) =
+                                        existing_index.update_after_edit(&snapshot, edit_summary)
+                                    {
+                                        index
+                                    } else {
+                                        self.rendered_display_index(&snapshot)
+                                    }
                                 }
                             } else {
                                 let snapshot = self.buffer.snapshot();
@@ -622,9 +626,14 @@ impl MarkdownEditor {
             local_row_count_after,
             local_edit_invalidation.is_some(),
         );
+        let display_item_count_changed = local_row_count_after
+            .is_some_and(|row_count_after| row_count_before != row_count_after);
         if let Some((rows, _)) = local_edit_invalidation {
             self.display_list_state.remeasure_items(rows);
-        } else if changed && self.mode == MarkdownEditorMode::Rendered {
+        } else if changed
+            && self.mode == MarkdownEditorMode::Rendered
+            && !display_item_count_changed
+        {
             self.remeasure_rendered_items_for_selection_change(previous_selection);
         }
         self.reveal_cursor_row_with_rendered_index(local_rendered_index.as_deref());

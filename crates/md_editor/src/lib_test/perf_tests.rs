@@ -538,9 +538,7 @@ fn run_editor_session(target_bytes: usize) {
                 "rendered_enter_apply_syntax_inlines",
                 "rendered_enter_apply_syntax_projection",
             ],
-            || {
-                rendered_enter(&editor, cx);
-            },
+            || rendered_enter(&editor, cx),
         );
         record_segment_with_markdown_syntax_stats(
             &mut segments,

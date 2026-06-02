@@ -7,7 +7,6 @@ use super::{
     structure::MarkdownStructure,
 };
 
-#[cfg(any(test, perf_enabled))]
 use super::structure::MarkdownStructureBlock;
 
 impl MarkdownSyntaxTree {
@@ -55,7 +54,6 @@ pub(super) fn collect_structure_tables(
         .collect()
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn table_cell_content_ranges_for_blocks(
     source: &str,
     line_starts: &[usize],

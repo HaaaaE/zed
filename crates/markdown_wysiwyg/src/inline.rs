@@ -1,6 +1,5 @@
 use std::{collections::HashMap, ops::Range, sync::OnceLock};
 
-#[cfg(any(test, perf_enabled))]
 use comrak::{
     Arena, Options,
     nodes::{Node as ComrakNode, NodeValue, Sourcepos},
@@ -8,7 +7,6 @@ use comrak::{
 };
 use tree_sitter::Node;
 
-#[cfg(any(test, perf_enabled))]
 use super::MarkdownInlineParent;
 use super::{
     MarkdownBlock, MarkdownBlockKind, MarkdownInlineKind, MarkdownInlineSpan, MarkdownInlineTree,
@@ -19,7 +17,6 @@ use super::{
     },
     structure::{MarkdownInlineSemantics, MarkdownStructure},
 };
-#[cfg(any(test, perf_enabled))]
 use super::{record_timed_comrak_marker_scan, record_timed_comrak_sourcepos_mapping};
 
 impl MarkdownSyntaxTree {
@@ -65,7 +62,6 @@ pub(super) fn collect_inline_semantics_for_inline_trees(
         .collect()
 }
 
-#[cfg(any(test, perf_enabled))]
 pub(super) fn collect_comrak_inline_semantics_for_inline_parents(
     source: &str,
     inline_parents: &[MarkdownInlineParent],
@@ -749,7 +745,6 @@ fn inline_content_ranges(
     content_ranges
 }
 
-#[cfg(any(test, perf_enabled))]
 fn collect_comrak_inline_spans(
     source: &str,
     parent_range: Range<usize>,
@@ -766,7 +761,6 @@ fn collect_comrak_inline_spans(
     spans
 }
 
-#[cfg(any(test, perf_enabled))]
 fn comrak_inline_options() -> Options<'static> {
     let mut options = Options::default();
     options.extension.strikethrough = true;
@@ -778,7 +772,6 @@ fn comrak_inline_options() -> Options<'static> {
     options
 }
 
-#[cfg(any(test, perf_enabled))]
 fn collect_comrak_inline_span_nodes<'a>(
     source: &str,
     parent_start: usize,
@@ -796,7 +789,6 @@ fn collect_comrak_inline_span_nodes<'a>(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn comrak_synthetic_nested_inline_spans(
     source: &str,
     span: &MarkdownInlineSpan,
@@ -824,7 +816,6 @@ fn comrak_synthetic_nested_inline_spans(
     }]
 }
 
-#[cfg(any(test, perf_enabled))]
 fn comrak_inline_span_from_node<'a>(
     source: &str,
     parent_start: usize,
@@ -875,7 +866,6 @@ fn comrak_inline_span_from_node<'a>(
     })
 }
 
-#[cfg(any(test, perf_enabled))]
 fn comrak_link_url(source: &str, source_range: Range<usize>, url: String) -> Option<String> {
     if source
         .get(source_range)
@@ -887,7 +877,6 @@ fn comrak_link_url(source: &str, source_range: Range<usize>, url: String) -> Opt
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn source_range_from_comrak_sourcepos(
     parent_start: usize,
     line_starts: &[usize],
@@ -905,7 +894,6 @@ fn source_range_from_comrak_sourcepos(
     (start <= end).then_some(start..end)
 }
 
-#[cfg(any(test, perf_enabled))]
 fn comrak_inline_marker_ranges(
     source: &str,
     kind: MarkdownInlineKind,
@@ -927,7 +915,6 @@ fn comrak_inline_marker_ranges(
     }
 }
 
-#[cfg(any(test, perf_enabled))]
 fn delimiter_marker_ranges(
     source: &str,
     source_range: Range<usize>,
@@ -955,7 +942,6 @@ fn delimiter_marker_ranges(
     Vec::new()
 }
 
-#[cfg(any(test, perf_enabled))]
 fn code_marker_ranges(source: &str, source_range: Range<usize>) -> Vec<Range<usize>> {
     let Some(text) = source.get(source_range.clone()) else {
         return Vec::new();
@@ -970,7 +956,6 @@ fn code_marker_ranges(source: &str, source_range: Range<usize>) -> Vec<Range<usi
     ]
 }
 
-#[cfg(any(test, perf_enabled))]
 fn math_marker_ranges(source: &str, source_range: Range<usize>) -> Vec<Range<usize>> {
     let Some(text) = source.get(source_range.clone()) else {
         return Vec::new();
@@ -988,7 +973,6 @@ fn math_marker_ranges(source: &str, source_range: Range<usize>) -> Vec<Range<usi
     ]
 }
 
-#[cfg(any(test, perf_enabled))]
 fn link_marker_ranges(source: &str, source_range: Range<usize>, image: bool) -> Vec<Range<usize>> {
     let Some(text) = source.get(source_range.clone()) else {
         return Vec::new();
@@ -1014,7 +998,6 @@ fn link_marker_ranges(source: &str, source_range: Range<usize>, image: bool) -> 
     marker_ranges
 }
 
-#[cfg(any(test, perf_enabled))]
 fn scan_reference_link_spans(
     source: &str,
     parent_range: Range<usize>,
@@ -1061,7 +1044,6 @@ fn scan_reference_link_spans(
     spans
 }
 
-#[cfg(any(test, perf_enabled))]
 fn reference_link_source_end_and_markers(
     source: &str,
     parent_start: usize,
@@ -1114,7 +1096,6 @@ fn reference_link_source_end_and_markers(
     Some((source_end, marker_ranges))
 }
 
-#[cfg(any(test, perf_enabled))]
 fn reference_link_scan_blocked(
     existing_spans: &[MarkdownInlineSpan],
     source_range: &Range<usize>,
@@ -1132,7 +1113,6 @@ fn reference_link_scan_blocked(
     })
 }
 
-#[cfg(any(test, perf_enabled))]
 fn scan_entity_spans(source: &str, parent_range: Range<usize>) -> Vec<MarkdownInlineSpan> {
     let mut spans = Vec::new();
     let mut cursor = parent_range.start;
@@ -1160,7 +1140,6 @@ fn scan_entity_spans(source: &str, parent_range: Range<usize>) -> Vec<MarkdownIn
     spans
 }
 
-#[cfg(any(test, perf_enabled))]
 fn collect_comrak_projection_replacements(
     source: &str,
     spans: &[MarkdownInlineSpan],
