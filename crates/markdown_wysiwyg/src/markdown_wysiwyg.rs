@@ -1287,6 +1287,7 @@ mod tests {
         );
         assert!(stats.inline_backend_parent_count > 0);
         assert_eq!(stats.inline_backend_fallback_count, 0);
+        assert_eq!(stats.inline_range_build_ns, 0);
         assert_eq!(stats.inline_parse_ns, 0);
 
         MarkdownSyntaxTree::reset_stats_for_tests();
@@ -1303,6 +1304,7 @@ mod tests {
         );
         assert!(stats.inline_backend_parent_count > 0);
         assert_eq!(stats.inline_backend_fallback_count, 0);
+        assert_eq!(stats.inline_range_build_ns, 0);
         assert_eq!(stats.inline_parse_ns, 0);
     }
 

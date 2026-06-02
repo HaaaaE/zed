@@ -321,3 +321,30 @@
           - cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
           - RUSTFLAGS='--cfg perf_enabled' cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
           - RUSTFLAGS='--cfg perf_enabled' MARKDOWN_SYNTAX_BENCH_BYTES=10240 MARKDOWN_SYNTAX_BENCH_ITERATIONS=1 cargo run --release --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+  - 2026-06-02:
+      - 收口 block/inline 边界：
+          - 删除 pulldown inline 的旧分叉：不再分别走 `parse_pulldown_inline_trees` 和 `collect_comrak_inline_semantics_for_inline_parents`。
+          - pulldown block 现在只生成一次 `MarkdownInlineParent` 列表，然后交给统一的 `parse_inline_for_parents` 选择 TreeSitter 或 Comrak inline。
+          - tree-sitter block 路径也先收集 inline parent descriptor，再进入 inline backend；TreeSitter inline 需要的 node 只保留在内部 descriptor 中用于 included ranges / 增量复用。
+          - Comrak inline 继续只消费 `MarkdownInlineParent` 的 id/range，不构造 tree-sitter included ranges，不触发 tree-sitter inline parser。
+          - 测试加严：两条 Comrak inline path 现在同时断言 `inline_range_build_ns == 0` 和 `inline_parse_ns == 0`。
+      - release smoke 小样本结果：
+          - tree_sitter_block_tree_sitter_inline_semantics_diff: mismatch_fields=0
+          - tree_sitter_block_comrak_inline_semantics_diff: mismatch_fields=0
+          - pulldown_block_tree_sitter_inline_semantics_diff: mismatch_fields=0
+          - pulldown_block_comrak_inline_semantics_diff: mismatch_fields=0
+          - tree_sitter_block_comrak_inline_syntax_data_backend_detail: inline_range_build_mean=0.000ms / inline_parse_mean=0.000ms
+          - pulldown_block_comrak_inline_syntax_data_backend_detail: inline_range_build_mean=0.000ms / inline_parse_mean=0.000ms
+          - tree-sitter block + comrak inline fallback_count_per_iteration=0.000 / fallback_ratio=0.000
+          - pulldown block + comrak inline fallback_count_per_iteration=0.000 / fallback_ratio=0.000
+      - 已验证：
+          - cargo fmt --check
+          - cargo test -p markdown_wysiwyg comrak_inline_backend_does_not_parse_tree_sitter_inline --locked
+          - cargo test -p markdown_wysiwyg comrak_inline_backend_matches_tree_sitter_reference_link_semantics --locked
+          - cargo test -p markdown_wysiwyg pulldown_backend_accepts_comrak_inline_backend_selection --locked
+          - cargo test -p markdown_wysiwyg --locked
+          - cargo check -p markdown_wysiwyg --locked
+          - cargo check -p updraft_editor --locked
+          - cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+          - RUSTFLAGS='--cfg perf_enabled' cargo check --manifest-path tooling/markdown_syntax_bench/Cargo.toml
+          - RUSTFLAGS='--cfg perf_enabled' MARKDOWN_SYNTAX_BENCH_BYTES=10240 MARKDOWN_SYNTAX_BENCH_ITERATIONS=1 cargo run --release --manifest-path tooling/markdown_syntax_bench/Cargo.toml

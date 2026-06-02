@@ -3,15 +3,14 @@ use std::{cell::RefCell, collections::HashMap, ops::Range};
 use tree_sitter::{Node, Parser, Range as TreeSitterRange, Tree};
 
 use super::{
-    MarkdownInlineTree, MarkdownParseTree, inline, record_timed_block_parse,
+    MarkdownInlineParent, MarkdownInlineTree, MarkdownParseTree, inline, record_timed_block_parse,
     record_timed_inline_parent_scan, record_timed_inline_parse, record_timed_inline_range_build,
     record_timed_inline_reuse_index, source::ranges_touch, structure::MarkdownInlineSemantics,
 };
 
 #[cfg(any(test, perf_enabled))]
 use super::{
-    MarkdownInlineBackendStatsKind, MarkdownInlineParent, record_inline_backend_stats,
-    source::point_for_offset,
+    MarkdownInlineBackendStatsKind, record_inline_backend_stats, source::point_for_offset,
 };
 
 thread_local! {
@@ -111,6 +110,12 @@ pub(super) enum MarkdownInlineCache {
     None,
 }
 
+#[derive(Clone)]
+struct TreeSitterInlineParent<'tree> {
+    node: Node<'tree>,
+    parent: MarkdownInlineParent,
+}
+
 fn parse_inline(
     source: &str,
     block_tree: &Tree,
@@ -120,26 +125,49 @@ fn parse_inline(
 ) -> InlineParseOutput {
     match inline_backend {
         InlineBackendKind::TreeSitter => {
-            parse_tree_sitter_inline(source, block_tree, old_tree, changed_range)
+            let dirty_ranges = inline_dirty_ranges(block_tree, old_tree, changed_range);
+            let inline_trees = clean_reusable_inline_trees(old_tree, dirty_ranges.as_deref());
+            let inline_parents = tree_sitter_inline_parents(block_tree, dirty_ranges.as_deref());
+            parse_tree_sitter_inline_for_tree_sitter_parents(
+                source,
+                inline_parents,
+                inline_trees,
+                old_tree,
+                dirty_ranges.as_deref(),
+            )
         }
         #[cfg(any(test, perf_enabled))]
-        InlineBackendKind::Comrak => parse_comrak_inline(source, block_tree),
+        InlineBackendKind::Comrak => {
+            let inline_parents = tree_sitter_inline_parents(block_tree, None)
+                .into_iter()
+                .map(|parent| parent.parent)
+                .collect::<Vec<_>>();
+            parse_inline_for_parents(source, &inline_parents, inline_backend)
+        }
     }
 }
 
 #[cfg(any(test, perf_enabled))]
-fn parse_comrak_inline(source: &str, block_tree: &Tree) -> InlineParseOutput {
-    let inline_parents = record_timed_inline_parent_scan(|| {
-        inline_parent_nodes(block_tree)
-            .into_iter()
-            .map(|parent_node| MarkdownInlineParent {
-                parent_id: parent_node.id(),
-                parent_range: parent_node.byte_range(),
-            })
-            .collect::<Vec<_>>()
-    });
+pub(super) fn parse_inline_for_parents(
+    source: &str,
+    inline_parents: &[MarkdownInlineParent],
+    inline_backend: InlineBackendKind,
+) -> InlineParseOutput {
+    match inline_backend {
+        InlineBackendKind::TreeSitter => {
+            parse_tree_sitter_inline_for_parents(source, inline_parents)
+        }
+        InlineBackendKind::Comrak => parse_comrak_inline_for_parents(source, inline_parents),
+    }
+}
+
+#[cfg(any(test, perf_enabled))]
+fn parse_comrak_inline_for_parents(
+    source: &str,
+    inline_parents: &[MarkdownInlineParent],
+) -> InlineParseOutput {
     let semantics =
-        inline::collect_comrak_inline_semantics_for_inline_parents(source, &inline_parents);
+        inline::collect_comrak_inline_semantics_for_inline_parents(source, inline_parents);
     record_inline_backend_stats(
         MarkdownInlineBackendStatsKind::Comrak,
         inline_parents.len(),
@@ -152,32 +180,101 @@ fn parse_comrak_inline(source: &str, block_tree: &Tree) -> InlineParseOutput {
     }
 }
 
-fn parse_tree_sitter_inline(
-    source: &str,
-    block_tree: &Tree,
-    old_tree: Option<&MarkdownParseTree>,
-    changed_range: Option<&Range<usize>>,
-) -> InlineParseOutput {
-    let dirty_ranges = inline_dirty_ranges(block_tree, old_tree, changed_range);
-    let mut inline_trees = Vec::new();
-
-    if let (Some(old_tree), Some(dirty_ranges)) = (old_tree, dirty_ranges.as_deref()) {
-        inline_trees.extend(
-            old_tree
-                .inline_trees()
-                .iter()
-                .filter(|inline_tree| !ranges_touch_any(&inline_tree.parent_range, dirty_ranges))
-                .cloned(),
-        );
+fn markdown_inline_parent_from_node(parent_node: Node<'_>) -> MarkdownInlineParent {
+    MarkdownInlineParent {
+        parent_id: parent_node.id(),
+        parent_range: parent_node.byte_range(),
     }
+}
 
-    let inline_parent_nodes = record_timed_inline_parent_scan(|| {
-        if let Some(dirty_ranges) = dirty_ranges.as_deref() {
+fn tree_sitter_inline_parent_from_node(parent_node: Node<'_>) -> TreeSitterInlineParent<'_> {
+    TreeSitterInlineParent {
+        parent: markdown_inline_parent_from_node(parent_node),
+        node: parent_node,
+    }
+}
+
+fn tree_sitter_inline_parents<'tree>(
+    block_tree: &'tree Tree,
+    dirty_ranges: Option<&[Range<usize>]>,
+) -> Vec<TreeSitterInlineParent<'tree>> {
+    record_timed_inline_parent_scan(|| {
+        if let Some(dirty_ranges) = dirty_ranges {
             inline_parent_nodes_touching_ranges(block_tree, dirty_ranges)
         } else {
             inline_parent_nodes(block_tree)
         }
+        .into_iter()
+        .map(tree_sitter_inline_parent_from_node)
+        .collect()
+    })
+}
+
+#[cfg(any(test, perf_enabled))]
+fn parse_tree_sitter_inline_for_parents(
+    source: &str,
+    inline_parents: &[MarkdownInlineParent],
+) -> InlineParseOutput {
+    let line_starts = super::source::line_starts(source);
+    let mut inline_trees = Vec::new();
+
+    INLINE_PARSER.with(|parser| {
+        let mut inline_parser = parser.borrow_mut();
+        for inline_parent in inline_parents {
+            if inline_parent.parent_range.is_empty() {
+                continue;
+            }
+
+            let ranges = record_timed_inline_range_build(|| {
+                [TreeSitterRange {
+                    start_byte: inline_parent.parent_range.start,
+                    start_point: point_for_offset(&line_starts, inline_parent.parent_range.start),
+                    end_byte: inline_parent.parent_range.end,
+                    end_point: point_for_offset(&line_starts, inline_parent.parent_range.end),
+                }]
+            });
+            let inline_tree = record_timed_inline_parse(|| {
+                inline_parser
+                    .set_included_ranges(&ranges)
+                    .expect("failed to set markdown inline parse ranges");
+                inline_parser
+                    .parse(source, None)
+                    .expect("tree-sitter markdown inline parser was cancelled")
+            });
+            inline_trees.push(MarkdownInlineTree {
+                parent_id: inline_parent.parent_id,
+                parent_range: inline_parent.parent_range.clone(),
+                tree: inline_tree,
+            });
+        }
     });
+
+    tree_sitter_inline_parse_output(source, inline_trees)
+}
+
+fn clean_reusable_inline_trees(
+    old_tree: Option<&MarkdownParseTree>,
+    dirty_ranges: Option<&[Range<usize>]>,
+) -> Vec<MarkdownInlineTree> {
+    let (Some(old_tree), Some(dirty_ranges)) = (old_tree, dirty_ranges) else {
+        return Vec::new();
+    };
+
+    old_tree
+        .inline_trees()
+        .iter()
+        .filter(|inline_tree| !ranges_touch_any(&inline_tree.parent_range, dirty_ranges))
+        .cloned()
+        .collect()
+}
+
+fn parse_tree_sitter_inline_for_tree_sitter_parents(
+    source: &str,
+    inline_parents: Vec<TreeSitterInlineParent<'_>>,
+    mut inline_trees: Vec<MarkdownInlineTree>,
+    old_tree: Option<&MarkdownParseTree>,
+    dirty_ranges: Option<&[Range<usize>]>,
+) -> InlineParseOutput {
     let old_inline_tree_by_parent_range = record_timed_inline_reuse_index(|| {
         old_tree.map(|tree| {
             tree.inline_trees()
@@ -195,18 +292,19 @@ fn parse_tree_sitter_inline(
 
     INLINE_PARSER.with(|parser| {
         let mut inline_parser = parser.borrow_mut();
-        for parent_node in inline_parent_nodes {
+        for inline_parent in inline_parents {
             if let Some(inline_tree) = reusable_inline_tree(
                 old_tree,
                 old_inline_tree_by_parent_range.as_ref(),
-                parent_node,
-                dirty_ranges.as_deref(),
+                &inline_parent,
+                dirty_ranges,
             ) {
                 inline_trees.push(inline_tree.clone());
                 continue;
             }
 
-            let ranges = record_timed_inline_range_build(|| inline_included_ranges(parent_node));
+            let ranges =
+                record_timed_inline_range_build(|| inline_included_ranges(inline_parent.node));
             if ranges
                 .iter()
                 .all(|range| range.start_byte == range.end_byte)
@@ -224,20 +322,27 @@ fn parse_tree_sitter_inline(
                         old_inline_tree_for_parent(
                             old_tree,
                             old_inline_tree_by_parent_range.as_ref(),
-                            parent_node,
+                            &inline_parent,
                         )
                         .map(|tree| &tree.tree),
                     )
                     .expect("tree-sitter markdown inline parser was cancelled")
             });
             inline_trees.push(MarkdownInlineTree {
-                parent_id: parent_node.id(),
-                parent_range: parent_node.byte_range(),
+                parent_id: inline_parent.parent.parent_id,
+                parent_range: inline_parent.parent.parent_range.clone(),
                 tree: inline_tree,
             });
         }
     });
 
+    tree_sitter_inline_parse_output(source, inline_trees)
+}
+
+fn tree_sitter_inline_parse_output(
+    source: &str,
+    mut inline_trees: Vec<MarkdownInlineTree>,
+) -> InlineParseOutput {
     inline_trees.sort_by_key(|inline_tree| {
         (
             inline_tree.parent_range.start,
@@ -252,6 +357,14 @@ fn parse_tree_sitter_inline(
             inline_tree.parent_id,
         )
     });
+
+    #[cfg(any(test, perf_enabled))]
+    record_inline_backend_stats(
+        MarkdownInlineBackendStatsKind::TreeSitter,
+        inline_trees.len(),
+        0,
+    );
+
     let inline_tree_by_parent_id = inline_trees
         .iter()
         .enumerate()
@@ -266,55 +379,6 @@ fn parse_tree_sitter_inline(
             inline_tree_by_parent_id,
         },
     }
-}
-
-#[cfg(any(test, perf_enabled))]
-pub(super) fn parse_inline_trees_for_ranges(
-    source: &str,
-    parent_ranges: impl IntoIterator<Item = Range<usize>>,
-) -> Vec<MarkdownInlineTree> {
-    let line_starts = super::source::line_starts(source);
-    let mut inline_trees = Vec::new();
-
-    INLINE_PARSER.with(|parser| {
-        let mut inline_parser = parser.borrow_mut();
-        for (index, parent_range) in parent_ranges.into_iter().enumerate() {
-            if parent_range.is_empty() {
-                continue;
-            }
-
-            let ranges = record_timed_inline_range_build(|| {
-                [TreeSitterRange {
-                    start_byte: parent_range.start,
-                    start_point: point_for_offset(&line_starts, parent_range.start),
-                    end_byte: parent_range.end,
-                    end_point: point_for_offset(&line_starts, parent_range.end),
-                }]
-            });
-            let inline_tree = record_timed_inline_parse(|| {
-                inline_parser
-                    .set_included_ranges(&ranges)
-                    .expect("failed to set markdown inline parse ranges");
-                inline_parser
-                    .parse(source, None)
-                    .expect("tree-sitter markdown inline parser was cancelled")
-            });
-            inline_trees.push(MarkdownInlineTree {
-                parent_id: 1 << 61 | index,
-                parent_range,
-                tree: inline_tree,
-            });
-        }
-    });
-
-    inline_trees.sort_by_key(|inline_tree| {
-        (
-            inline_tree.parent_range.start,
-            inline_tree.parent_range.end,
-            inline_tree.parent_id,
-        )
-    });
-    inline_trees
 }
 
 fn inline_dirty_ranges(
@@ -354,12 +418,12 @@ fn merge_ranges(mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
 fn reusable_inline_tree<'a>(
     old_tree: Option<&'a MarkdownParseTree>,
     old_inline_tree_by_parent_range: Option<&HashMap<(usize, usize), usize>>,
-    parent_node: Node<'_>,
+    inline_parent: &TreeSitterInlineParent<'_>,
     dirty_ranges: Option<&[Range<usize>]>,
 ) -> Option<&'a MarkdownInlineTree> {
     let inline_tree =
-        old_inline_tree_for_parent(old_tree, old_inline_tree_by_parent_range, parent_node)?;
-    if inline_tree.parent_range != parent_node.byte_range() {
+        old_inline_tree_for_parent(old_tree, old_inline_tree_by_parent_range, inline_parent)?;
+    if inline_tree.parent_range != inline_parent.parent.parent_range {
         return None;
     }
     if dirty_ranges.is_some_and(|ranges| ranges_touch_any(&inline_tree.parent_range, ranges)) {
@@ -371,12 +435,12 @@ fn reusable_inline_tree<'a>(
 fn old_inline_tree_for_parent<'a>(
     old_tree: Option<&'a MarkdownParseTree>,
     old_inline_tree_by_parent_range: Option<&HashMap<(usize, usize), usize>>,
-    parent_node: Node<'_>,
+    inline_parent: &TreeSitterInlineParent<'_>,
 ) -> Option<&'a MarkdownInlineTree> {
     let old_tree = old_tree?;
     if let Some(inline_tree) = old_tree
         .inline_tree_by_parent_id
-        .get(&parent_node.id())
+        .get(&inline_parent.parent.parent_id)
         .and_then(|index| old_tree.inline_trees.get(*index))
     {
         return Some(inline_tree);
@@ -384,7 +448,10 @@ fn old_inline_tree_for_parent<'a>(
 
     old_inline_tree_by_parent_range
         .and_then(|index_by_range| {
-            index_by_range.get(&(parent_node.start_byte(), parent_node.end_byte()))
+            index_by_range.get(&(
+                inline_parent.parent.parent_range.start,
+                inline_parent.parent.parent_range.end,
+            ))
         })
         .and_then(|index| old_tree.inline_trees.get(*index))
 }

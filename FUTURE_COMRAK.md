@@ -144,6 +144,22 @@
 - 只为了 UI/projection 需求保留 marker 扫描。
 - 一旦 comrak 成为 canonical parser，就停止把扫描结果塑造成 tree-sitter 的历史怪癖。
 
+## Block / Inline 边界
+
+当前架构：
+
+- block parser 负责生成 inline parent 列表。
+- inline backend 只消费 inline parents，不再为 pulldown block 和 tree-sitter block 分别写一套 inline 入口。
+- `MarkdownInlineParent` 是通用边界：包含 parent id 和 parent source range。
+- tree-sitter inline 需要 node 来构造 included ranges / 做增量复用，这只保留在 tree-sitter block 路径内部的 parent descriptor 里。
+- Comrak inline 只读取 `MarkdownInlineParent`，不读取 tree-sitter inline tree，不构造 tree-sitter included ranges。
+
+长期方向：
+
+- 新 block parser 只要能产出稳定的 inline parents，就应该能自由搭配现有 inline backend。
+- 不再为了某个 block parser 写专门的 inline backend glue。
+- 保持 Comrak inline 的 `inline_range_build_ns == 0` 和 `inline_parse_ns == 0`，避免边界收口时把 tree-sitter inline 成本带回来。
+
 ## Comparator / 诊断层
 
 当前兼容行为：

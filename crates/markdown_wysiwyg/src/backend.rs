@@ -27,22 +27,15 @@ use super::{
 
 #[cfg(any(test, perf_enabled))]
 use super::{
-    MarkdownInlineBackendStatsKind,
-    parser::{InlineBackendKind, parse_markdown_with_inline_backend},
-    record_inline_backend_stats, record_timed_block_parse, record_timed_inline_parent_scan,
+    parser::{
+        InlineBackendKind, MarkdownInlineCache, parse_inline_for_parents,
+        parse_markdown_with_inline_backend,
+    },
+    record_timed_block_parse, record_timed_inline_parent_scan,
 };
 
 #[cfg(test)]
 use super::parser::parse_markdown_block_tree;
-
-#[cfg(any(test, perf_enabled))]
-use super::{
-    inline::{
-        collect_comrak_inline_semantics_for_inline_parents,
-        collect_inline_semantics_for_inline_trees,
-    },
-    parser::parse_inline_trees_for_ranges,
-};
 
 pub(super) struct MarkdownBackendOutput {
     pub(super) structure: MarkdownStructure,
@@ -300,43 +293,13 @@ fn pulldown_inline_semantics(
     Vec<super::structure::MarkdownInlineSemantics>,
     Vec<super::MarkdownInlineTree>,
 ) {
-    match inline_backend {
-        InlineBackendKind::TreeSitter => {
-            let inline_trees = parse_pulldown_inline_trees(source, source_line_starts, blocks);
-            record_inline_backend_stats(
-                MarkdownInlineBackendStatsKind::TreeSitter,
-                inline_trees.len(),
-                0,
-            );
-            (
-                collect_inline_semantics_for_inline_trees(source, &inline_trees),
-                inline_trees,
-            )
-        }
-        InlineBackendKind::Comrak => {
-            let inline_parents = pulldown_inline_parents(source, source_line_starts, blocks);
-            let semantics =
-                collect_comrak_inline_semantics_for_inline_parents(source, &inline_parents);
-            record_inline_backend_stats(
-                MarkdownInlineBackendStatsKind::Comrak,
-                inline_parents.len(),
-                0,
-            );
-            (semantics, Vec::new())
-        }
-    }
-}
-
-#[cfg(any(test, perf_enabled))]
-fn parse_pulldown_inline_trees(
-    source: &str,
-    source_line_starts: &[usize],
-    blocks: &[MarkdownStructureBlock],
-) -> Vec<super::MarkdownInlineTree> {
-    let parent_ranges = record_timed_inline_parent_scan(|| {
-        pulldown_inline_parent_ranges(source, source_line_starts, blocks)
-    });
-    parse_inline_trees_for_ranges(source, parent_ranges)
+    let inline_parents = pulldown_inline_parents(source, source_line_starts, blocks);
+    let output = parse_inline_for_parents(source, &inline_parents, inline_backend);
+    let inline_trees = match output.cache {
+        MarkdownInlineCache::TreeSitter { inline_trees, .. } => inline_trees,
+        MarkdownInlineCache::None => Vec::new(),
+    };
+    (output.semantics, inline_trees)
 }
 
 #[cfg(any(test, perf_enabled))]
