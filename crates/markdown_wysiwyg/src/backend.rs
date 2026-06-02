@@ -26,7 +26,10 @@ use super::{
 };
 
 #[cfg(any(test, perf_enabled))]
-use super::{parser::InlineBackendKind, record_timed_block_parse, record_timed_inline_parent_scan};
+use super::{
+    MarkdownInlineBackendStatsKind, parser::InlineBackendKind, record_inline_backend_stats,
+    record_timed_block_parse, record_timed_inline_parent_scan,
+};
 
 #[cfg(any(test, perf_enabled))]
 use super::{
@@ -284,10 +287,37 @@ fn pulldown_inline_semantics_from_trees(
 ) -> Vec<super::structure::MarkdownInlineSemantics> {
     match inline_backend {
         InlineBackendKind::TreeSitter => {
+            record_inline_backend_stats(
+                MarkdownInlineBackendStatsKind::TreeSitter,
+                inline_trees.len(),
+                0,
+            );
             collect_inline_semantics_for_inline_trees(source, inline_trees)
         }
         InlineBackendKind::Comrak => {
-            collect_comrak_inline_semantics_for_inline_trees(source, inline_trees)
+            let tree_sitter_semantics =
+                collect_inline_semantics_for_inline_trees(source, inline_trees);
+            let comrak_semantics =
+                collect_comrak_inline_semantics_for_inline_trees(source, inline_trees);
+            let mut fallback_count = 0;
+            let semantics = tree_sitter_semantics
+                .into_iter()
+                .zip(comrak_semantics)
+                .map(|(tree_sitter, comrak)| {
+                    if comrak == tree_sitter {
+                        comrak
+                    } else {
+                        fallback_count += 1;
+                        tree_sitter
+                    }
+                })
+                .collect();
+            record_inline_backend_stats(
+                MarkdownInlineBackendStatsKind::Comrak,
+                inline_trees.len(),
+                fallback_count,
+            );
+            semantics
         }
     }
 }

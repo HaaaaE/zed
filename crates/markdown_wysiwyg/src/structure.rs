@@ -8,7 +8,7 @@ pub(super) struct MarkdownStructure {
     blocks: Vec<MarkdownStructureBlock>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct MarkdownInlineSemantics {
     pub(super) parent_id: usize,
     pub(super) parent_range: Range<usize>,

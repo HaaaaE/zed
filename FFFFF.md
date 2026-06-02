@@ -182,3 +182,13 @@
       - 已验证：
           - cargo check -p markdown_wysiwyg --locked
           - cargo test -p markdown_wysiwyg --locked
+  - 2026-06-02:
+      - 已推进第四步 fallback/stats 框架：
+          - MarkdownSyntaxStats 新增 inline_backend_kind、inline_backend_parent_count、inline_backend_fallback_count。
+          - Comrak inline backend 会逐 parent 与 tree-sitter semantics baseline 比较。
+          - Comrak semantics 与 tree-sitter 不等价时，该 parent 回退 tree-sitter semantics。
+          - fallback count 会记录到 stats，不再静默掩盖差异。
+          - 新增测试覆盖 reference link 触发 fallback，并断言输出保持 tree-sitter 等价且 fallback count > 0。
+      - 已验证：
+          - cargo check -p markdown_wysiwyg --locked
+          - cargo test -p markdown_wysiwyg --locked

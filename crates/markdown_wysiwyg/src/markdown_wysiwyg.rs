@@ -37,6 +37,9 @@ thread_local! {
             table_collect_ns: 0,
             inline_collect_ns: 0,
             projection_collect_ns: 0,
+            inline_backend_kind: MarkdownInlineBackendStatsKind::TreeSitter,
+            inline_backend_parent_count: 0,
+            inline_backend_fallback_count: 0,
         }) };
 }
 
@@ -58,6 +61,17 @@ pub struct MarkdownSyntaxStats {
     pub table_collect_ns: u128,
     pub inline_collect_ns: u128,
     pub projection_collect_ns: u128,
+    pub inline_backend_kind: MarkdownInlineBackendStatsKind,
+    pub inline_backend_parent_count: usize,
+    pub inline_backend_fallback_count: usize,
+}
+
+#[cfg(any(test, perf_enabled))]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MarkdownInlineBackendStatsKind {
+    #[default]
+    TreeSitter,
+    Comrak,
 }
 
 #[derive(Clone)]
@@ -618,6 +632,19 @@ pub(crate) fn record_timed_inline_parse<T>(run: impl FnOnce() -> T) -> T {
 #[cfg(not(any(test, perf_enabled)))]
 pub(crate) fn record_timed_inline_parse<T>(run: impl FnOnce() -> T) -> T {
     run()
+}
+
+#[cfg(any(test, perf_enabled))]
+pub(crate) fn record_inline_backend_stats(
+    kind: MarkdownInlineBackendStatsKind,
+    parent_count: usize,
+    fallback_count: usize,
+) {
+    update_markdown_syntax_stats(|stats| {
+        stats.inline_backend_kind = kind;
+        stats.inline_backend_parent_count += parent_count;
+        stats.inline_backend_fallback_count += fallback_count;
+    });
 }
 
 #[cfg(any(test, perf_enabled))]
@@ -1186,6 +1213,30 @@ mod tests {
             comrak.projection_replacements(),
             tree_sitter.projection_replacements()
         );
+    }
+
+    #[test]
+    fn comrak_inline_backend_records_fallbacks_for_mismatched_semantics() {
+        let source = "Reference [link][ref]\n\n[ref]: https://example.com\n";
+        let tree_sitter = PulldownMarkdownBackend::parse_syntax_data_with_inline_backend(
+            source,
+            InlineBackendKind::TreeSitter,
+        );
+
+        MarkdownSyntaxTree::reset_stats_for_tests();
+        let comrak = PulldownMarkdownBackend::parse_syntax_data_with_inline_backend(
+            source,
+            InlineBackendKind::Comrak,
+        );
+        let stats = MarkdownSyntaxTree::stats_for_tests();
+
+        assert_eq!(comrak.inline_spans(), tree_sitter.inline_spans());
+        assert_eq!(
+            stats.inline_backend_kind,
+            MarkdownInlineBackendStatsKind::Comrak
+        );
+        assert!(stats.inline_backend_parent_count > 0);
+        assert!(stats.inline_backend_fallback_count > 0);
     }
 
     #[test]
